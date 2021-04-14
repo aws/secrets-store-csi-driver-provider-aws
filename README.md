@@ -1,4 +1,4 @@
-## My Project
+## AWS Secrets & Configuration Provider for Secrets Store CSI Driver
 
 TODO: Fill this README out!
 
