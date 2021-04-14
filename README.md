@@ -1,11 +1,6 @@
 ## AWS Secrets & Configuration Provider for Secrets Store CSI Driver
 
-TODO: Fill this README out!
-
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
+AWS Secrets & Configuration Provider for Secrets Store CSI Driver allow you to retrieve and mount secrets stored in AWS Secrets Manager and configuration values stored in AWS Parameter Store into Kubernetes pods
 
 ## Security
 
