@@ -53,7 +53,7 @@ eksctl utils associate-iam-oidc-provider --region="$REGION" --cluster="$CLUSTERN
 ```
 Next create the service account to be used by the pod and associate the above IAM policy with that service account. For this example we use *nginx-deployment-sa* for the service account name:
 ```shell
-eksctl create iamserviceaccount --name nginx-deployment-sa --cluster "$CLUSTERNAME" --attach-policy-arn "$POLICY_ARN" --approve --override-existing-serviceaccounts
+eksctl create iamserviceaccount --name nginx-deployment-sa --region="$REGION" --cluster "$CLUSTERNAME" --attach-policy-arn "$POLICY_ARN" --approve --override-existing-serviceaccounts
 ```
 Now create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. The ExampleSecretProviderClass.yaml in the [examples](./examples) directory will mount "MySecret" created above:
 ```shell
