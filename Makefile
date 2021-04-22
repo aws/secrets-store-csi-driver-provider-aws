@@ -2,7 +2,7 @@ $(eval AWS_REGION=$(shell echo $${REGION:-us-east-1}))
 $(eval REGISTRY_NAME=$(shell echo $${PRIVREPO:-public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws}))
 $(eval REPOBASE=$(shell echo $(REGISTRY_NAME) | cut -f1 -d/))
 
-ifeq ($(REPOBASE), "public.ecr.aws")
+ifeq ($(REPOBASE), public.ecr.aws)
 ECRCMD=ecr-public
 else
 ECRCMD=ecr
