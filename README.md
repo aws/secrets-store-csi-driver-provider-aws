@@ -63,6 +63,12 @@ Finally we can deploy our pod. The ExampleDeployment.yaml in the examples direct
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment.yaml
 ```
+
+To verify the secret has been mounted properly, See example below
+
+```shell
+kubectl exec -it $(kubectl get pods | awk '/nginx-deployment/{print $1}' | head -1) cat /mnt/secrets-store/MySecret; echo
+```
 ### Troubleshooting
 Most errors can be viewed by describing the pod deployment. For the deployment, find the pod names using get pods (use -n **&lt;NAMESPACE&gt;** if you are not using the default namespace):
 ```shell
