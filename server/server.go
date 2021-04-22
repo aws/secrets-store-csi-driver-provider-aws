@@ -26,8 +26,10 @@ import (
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 )
 
+// Version filled in by Makefile durring build.
+var Version string
+
 const (
-	version         = "1.0.0"
 	namespaceAttrib = "csi.storage.k8s.io/pod.namespace"
 	acctAttrib      = "csi.storage.k8s.io/serviceAccount.name"
 	podnameAttrib   = "csi.storage.k8s.io/pod.name"
@@ -184,7 +186,7 @@ func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.Ver
 	return &v1alpha1.VersionResponse{
 		Version:        "v1alpha1",
 		RuntimeName:    auth.ProviderName,
-		RuntimeVersion: version,
+		RuntimeVersion: Version,
 	}, nil
 
 }

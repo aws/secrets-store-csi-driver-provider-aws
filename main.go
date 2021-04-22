@@ -12,6 +12,7 @@ import (
 	"k8s.io/klog/v2"
 	csidriver "sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
+	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/server"
 )
@@ -20,6 +21,8 @@ import (
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
 func main() {
+
+	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
 
 	//socket on which to listen to for driver calls
 	endpoint := "/etc/kubernetes/secrets-store-csi-providers/aws.sock"
