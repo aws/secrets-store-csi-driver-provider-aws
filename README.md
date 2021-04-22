@@ -98,7 +98,7 @@ The parameters section contains the details of the mount request and contain one
             - objectName: "MySecret"
               objectType: "secretsmanager"
     ```
-* region: An optional feild to specify the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the region from the annotation on the node. This lookup adds overhead to mount requests so clusters using large numbers of pods will benefit from providing the region here.
+* region: An optional field to specify the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the region from the annotation on the node. This lookup adds overhead to mount requests so clusters using large numbers of pods will benefit from providing the region here.
 * pathTranslation: An optional field to specify a substitution character to use when the path separator character (slash on Linux) is used in the file name. If a Secret or parameter name contains the path separator failures will occur when the provider tries to create a mounted file using the name. When not specified the underscore character is used, thus My/Path/Secret will be mounted as My_Path_Secret. This pathTranslation value can either be the string "False" or a single character string. When set to "False", no character substitution is performed.
 
 The objects field of the SecretProviderClass can contain the following sub-fields:
@@ -119,12 +119,12 @@ helm upgrade -n kube-system csi-secrets-store secrets-store-csi-driver/secrets-s
 ```
 
 ### Private Builds
-You can pull down this git repository and build and install this plugin into your accounts [AWS ECR](https://aws.amazon.com/ecr/) registry using the following stpes. First clone the repository:
+You can pull down this git repository and build and install this plugin into your account's [AWS ECR](https://aws.amazon.com/ecr/) registry using the following steps. First clone the repository:
 ```shell
 git clone https://github.com/aws/secrets-store-csi-driver-provider-aws
 cd secrets-store-csi-driver-provider-aws
 ```
-Set you region and repository name in bash shell variables to be used later:
+Next, set your region and repository name in bash shell variables to be used later:
 ```bash
 export REGION=<REGION>
 export PRIVREPO=<ACCOUNT>.dkr.ecr.$REGION.amazonaws.com/secrets-store-csi-driver-provider-aws
