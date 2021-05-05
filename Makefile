@@ -28,7 +28,7 @@ build: clean
 
 clean:
 	-rm -rf _output
-	-docker system prune --all --force
+	#-docker system prune --all --force
 
 docker-login:
 	aws --region $(AWS_REGION) $(ECRCMD) get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
