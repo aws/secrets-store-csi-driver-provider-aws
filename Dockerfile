@@ -6,9 +6,10 @@ FROM golang:1.16.3 AS build
 WORKDIR /go/src/app
 COPY . .
 RUN make build
+RUN ls -al
 
 FROM scratch
-COPY --from=base /go/src/app/_output/secrets-store-csi-driver-provider-aws /bin/
+COPY --from=build /go/src/app/_output/secrets-store-csi-driver-provider-aws /bin/
 COPY --from=base /etc/ssl/certscopy/ /etc/ssl/certs/
 
 ENTRYPOINT ["/bin/secrets-store-csi-driver-provider-aws"]
