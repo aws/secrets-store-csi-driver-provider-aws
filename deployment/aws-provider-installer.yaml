@@ -58,7 +58,7 @@ spec:
       hostNetwork: true
       containers:
         - name: provider-aws-installer
-          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:latest
+          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:1.0.r1-2021.04.22.19.04-linux-amd64
           imagePullPolicy: Always
           resources:
             requests:
