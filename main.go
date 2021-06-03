@@ -1,6 +1,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -17,6 +19,10 @@ import (
 	"github.com/aws/secrets-store-csi-driver-provider-aws/server"
 )
 
+var (
+	endpointDir = flag.String("provider-volume", "/etc/kubernetes/secrets-store-csi-providers", "Rendezvous directory for provider socket")
+)
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
@@ -24,8 +30,10 @@ func main() {
 
 	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
 
+	flag.Parse() // Parse command line flags
+
 	//socket on which to listen to for driver calls
-	endpoint := "/etc/kubernetes/secrets-store-csi-providers/aws.sock"
+	endpoint := fmt.Sprintf("%s/aws.sock", *endpointDir)
 	os.Remove(endpoint) // Make sure to start clean.
 	grpcSrv := grpc.NewServer()
 
