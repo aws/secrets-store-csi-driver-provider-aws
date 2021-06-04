@@ -60,6 +60,8 @@ spec:
         - name: provider-aws-installer
           image: ${PRIVREPO}:latest
           imagePullPolicy: Always
+          args:
+              - --provider-volume=/etc/kubernetes/secrets-store-csi-providers
           resources:
             requests:
               cpu: 50m
