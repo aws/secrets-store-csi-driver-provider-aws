@@ -536,6 +536,32 @@ var mountTests []testCase = []testCase{
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
+	{ // Verify failure when we try to use a path name in a parameter (prevent traversal)
+		testName: "Fail Write Param",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole",
+			"pathTranslation": "False",
+		},
+		mountObjs: []map[string]string{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "../TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					&ssm.Parameter{Name: aws.String("../TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "contains path separator",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
 	{ // Verify success when slashes are translated in the path name
 		testName:   "Success With Slash",
 		attributes: stdAttributes,
