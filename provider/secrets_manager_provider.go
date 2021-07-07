@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -47,20 +48,47 @@ func (p *SecretsManagerProvider) GetSecretValues(
 	for _, descriptor := range descriptors {
 
 		// Don't re-fetch if we already have the current version.
-		isCurrent, err := p.isCurrent(ctx, descriptor, curMap)
+		isCurrent, version, err := p.isCurrent(ctx, descriptor, curMap)
 		if err != nil {
 			return nil, err
-		}
-		if isCurrent {
-			continue
 		}
 
-		// Fetch the latest version.
-		version, secret, err := p.fetchSecret(ctx, descriptor)
+		// If version is current, read it back in, otherwise pull it down
+		var secret *SecretValue
+		if isCurrent {
+
+			secret, err = p.reloadSecret(descriptor)
+			if err != nil {
+				return nil, err
+			}
+
+		} else { // Fetch the latest version.
+
+			version, secret, err = p.fetchSecret(ctx, descriptor)
+			if err != nil {
+				return nil, err
+			}
+
+		}
+		values = append(values, secret) // Build up the slice of values
+
+		//Fetch individual json key value pairs based on jmesPath
+		jsonSecrets, err := secret.getJsonSecrets()
 		if err != nil {
 			return nil, err
 		}
-		values = append(values, secret) // Build up the slice of values
+
+		values = append(values, jsonSecrets...)
+
+		// Update the version in the current version map.
+		for _, jsonSecret := range jsonSecrets {
+			jsonDescriptor := jsonSecret.Descriptor
+			curMap[jsonDescriptor.GetFileName()] = &v1alpha1.ObjectVersion{
+				Id:      jsonDescriptor.GetFileName(),
+				Version: version,
+			}
+
+		}
 
 		// Update the version in the current version map.
 		curMap[descriptor.GetFileName()] = &v1alpha1.ObjectVersion{
@@ -88,23 +116,23 @@ func (p *SecretsManagerProvider) isCurrent(
 	ctx context.Context,
 	descriptor *SecretDescriptor,
 	curMap map[string]*v1alpha1.ObjectVersion,
-) (cur bool, e error) {
+) (cur bool, ver string, e error) {
 
 	// If we don't have this version, it is not current.
 	curVer := curMap[descriptor.GetFileName()]
 	if curVer == nil {
-		return false, nil
+		return false, "", nil
 	}
 
 	// If the secret is pinned to a version see if that is what we have.
 	if len(descriptor.ObjectVersion) > 0 {
-		return curVer.Version == descriptor.ObjectVersion, nil
+		return curVer.Version == descriptor.ObjectVersion, curVer.Version, nil
 	}
 
 	// Lookup the current version information.
 	rsp, err := p.client.DescribeSecretWithContext(ctx, &secretsmanager.DescribeSecretInput{SecretId: aws.String(descriptor.ObjectName)})
 	if err != nil {
-		return false, fmt.Errorf("Failed to describe secret %s: %s", descriptor.ObjectName, err.Error())
+		return false, curVer.Version, fmt.Errorf("Failed to describe secret %s: %s", descriptor.ObjectName, err.Error())
 	}
 
 	// If no label is specified use current, otherwise use the specified label.
@@ -120,7 +148,7 @@ func (p *SecretsManagerProvider) isCurrent(
 		hasLabel = *(stages[i]) == label
 	}
 
-	return hasLabel, nil // If the current version has the desired label, it is current.
+	return hasLabel, curVer.Version, nil // If the current version has the desired label, it is current.
 }
 
 // Private helper to fetch a given secret.
@@ -156,6 +184,20 @@ func (p *SecretsManagerProvider) fetchSecret(ctx context.Context, descriptor *Se
 	}
 
 	return *rsp.VersionId, &SecretValue{Value: sValue, Descriptor: *descriptor}, nil
+}
+
+// Private helper to refesh a secret from its previously stored value.
+//
+// Reads a secret back in from the file system.
+//
+func (p *SecretsManagerProvider) reloadSecret(descriptor *SecretDescriptor) (val *SecretValue, e error) {
+
+	sValue, err := ioutil.ReadFile(descriptor.GetMountPath())
+	if err != nil {
+		return nil, err
+	}
+
+	return &SecretValue{Value: sValue, Descriptor: *descriptor}, nil
 }
 
 // Factory methods to build a new SecretsManagerProvider

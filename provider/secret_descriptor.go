@@ -2,11 +2,17 @@ package provider
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws/arn"
 	"sigs.k8s.io/yaml"
 )
+
+// An RE pattern to check for bad paths
+var badPathRE = regexp.MustCompile("(/\\.\\./)|(^\\.\\./)|(/\\.\\.$)")
 
 // An individual record from the mount request indicating the secret to be
 // fetched and mounted.
@@ -26,6 +32,25 @@ type SecretDescriptor struct {
 
 	// One of secretsmanager or ssmparameter (not required when using full secrets manager ARN).
 	ObjectType string `json:"objectType"`
+
+	//Optional array to specify what json key value pairs to extract from a secret and mount as individual secrets
+	JMESPath []JMESPathEntry `json:"jmesPath"`
+
+	// Path translation character (not part of YAML spec).
+	translate string `json:"-"`
+
+	// Mount point directory (not part of YAML spec).
+	mountDir string `json:"-"`
+
+}
+
+//An individual json key value pair to mount
+type JMESPathEntry struct {
+	//JMES path to use for retrieval
+	Path string `json:"path"`
+
+	//File name in which to store the secret in.
+	ObjectAlias string `json:"objectAlias"`
 }
 
 // Enum of supported secret types
@@ -54,10 +79,45 @@ var typeMap = map[string]SecretType{
 // Uses either the ObjectName or ObjectAlias to construct the file name.
 //
 func (p *SecretDescriptor) GetFileName() (path string) {
+	fileName := p.ObjectName
 	if len(p.ObjectAlias) != 0 {
-		return p.ObjectAlias
+		fileName = p.ObjectAlias
 	}
-	return p.ObjectName
+
+	// Translate slashes to underscore if required.
+	if len(p.translate) != 0 {
+		fileName = strings.ReplaceAll(fileName, string(os.PathSeparator), p.translate)
+	} else {
+		fileName = strings.TrimLeft(fileName, string(os.PathSeparator)) // Strip leading slash
+	}
+
+	return fileName
+}
+
+// Return the mount point directory
+//
+// Return the mount point directory pass in by the driver in the mount request.
+//
+func (p *SecretDescriptor) GetMountDir() string {
+	return p.mountDir
+}
+
+// Get the full path name (mount point + file) of the file where the seret is stored.
+//
+// Returns a path name composed of the mount point and the file name.
+//
+func (p *SecretDescriptor) GetMountPath() string {
+	return filepath.Join(p.GetMountDir(), p.GetFileName())
+}
+
+
+//Return the object type (ssmparameter, secretsmanager, or ssm)
+func (p *SecretDescriptor) getObjectType() (otype string) {
+	oType := p.ObjectType
+	if len(oType) == 0 {
+		oType = strings.Split(p.ObjectName, ":")[2] // Other checks guarantee ARN
+	}
+	return oType
 }
 
 // Returns the secret type (ssmparameter or secretsmanager).
@@ -70,12 +130,19 @@ func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 
 	// If no objectType, use ARN (but convert ssm to ssmparameter). Note that
 	// SSM does not actually allow ARNs but we convert anyway for other checks.
-	sType := p.ObjectType
-	if len(sType) == 0 {
-		sType = strings.Split(p.ObjectName, ":")[2] // Other checks garuntee ARN
-	}
+	sType := p.getObjectType()
 
 	return typeMap[sType]
+}
+
+//Return a descriptor for a jmes object entry within the secret
+func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
+	return SecretDescriptor{
+		ObjectAlias: j.ObjectAlias,
+		ObjectType:  p.getObjectType(),
+		translate: p.translate,
+		mountDir: p.mountDir,
+	}
 }
 
 // Private helper to validate the contents of SecretDescriptor.
@@ -126,6 +193,26 @@ func (p *SecretDescriptor) validateSecretDescriptor() error {
 		return fmt.Errorf("ssm parameters can not specify both objectVersion and objectVersionLabel: %s", p.ObjectName)
 	}
 
+	// Do not allow ../ in a path when translation is turned off
+	if badPathRE.MatchString(p.GetFileName()) {
+		return fmt.Errorf("path can not contain ../: %s", p.ObjectName)
+	}
+
+	if len(p.JMESPath) == 0 { //jmesPath not specified no more checks
+		return nil
+	}
+
+	//ensure each jmesPath entry has a path and an objectalias
+	for _, jmesPathEntry := range p.JMESPath {
+		if len(jmesPathEntry.Path) == 0 {
+			return fmt.Errorf("Path must be specified for JMES object")
+		}
+
+		if len(jmesPathEntry.ObjectAlias) == 0 {
+			return fmt.Errorf("Object alias must be specified for JMES object")
+		}
+	}
+
 	return nil
 }
 
@@ -137,7 +224,16 @@ func (p *SecretDescriptor) validateSecretDescriptor() error {
 // and returned in a map keyed by secret type. This is to allow batching of
 // requests.
 //
-func NewSecretDescriptorList(objectSpec string) (desc map[SecretType][]*SecretDescriptor, e error) {
+func NewSecretDescriptorList(mountDir, translate, objectSpec string) (desc map[SecretType][]*SecretDescriptor, e error) {
+
+	// See if we should substitite underscore for slash
+	if len(translate) == 0 {
+		translate = "_" // Use default
+	} else if strings.ToLower(translate) == "false" {
+		translate = "" // Turn it off.
+	} else if len(translate) != 1 {
+		return nil, fmt.Errorf("pathTranslation must be either 'False' or a single character string")
+	}
 
 	// Unpack the SecretProviderClass mount specification
 	descriptors := make([]*SecretDescriptor, 0)
@@ -151,6 +247,8 @@ func NewSecretDescriptorList(objectSpec string) (desc map[SecretType][]*SecretDe
 	names := make(map[string]bool)
 	for _, descriptor := range descriptors {
 
+		descriptor.translate = translate
+		descriptor.mountDir = mountDir
 		err = descriptor.validateSecretDescriptor()
 		if err != nil {
 			return nil, err
@@ -166,15 +264,24 @@ func NewSecretDescriptorList(objectSpec string) (desc map[SecretType][]*SecretDe
 		}
 		names[descriptor.ObjectName] = true
 
-		if len(descriptor.ObjectAlias) == 0 { // Alias not used, no more checks.
+		if len(descriptor.ObjectAlias) > 0 {
+			if names[descriptor.ObjectAlias] {
+				return nil, fmt.Errorf("Name already in use for objectAlias: %s", descriptor.ObjectAlias)
+			}
+			names[descriptor.ObjectAlias] = true
+		}
+
+		if len(descriptor.JMESPath) == 0 { //jmesPath not used. No more checks
 			continue
 		}
 
-		// Check if the alias conflicts with an existing name
-		if names[descriptor.ObjectAlias] {
-			return nil, fmt.Errorf("Name already in use for objectAlias: %s", descriptor.ObjectAlias)
+		for _, jmesPathEntry := range descriptor.JMESPath {
+			if names[jmesPathEntry.ObjectAlias] {
+				return nil, fmt.Errorf("Name already in use for objectAlias: %s", jmesPathEntry.ObjectAlias)
+			}
+
+			names[jmesPathEntry.ObjectAlias] = true
 		}
-		names[descriptor.ObjectAlias] = true
 
 	}
 
