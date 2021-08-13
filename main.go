@@ -20,7 +20,8 @@ import (
 )
 
 var (
-	endpointDir = flag.String("provider-volume", "/etc/kubernetes/secrets-store-csi-providers", "Rendezvous directory for provider socket")
+	endpointDir        = flag.String("provider-volume", "/etc/kubernetes/secrets-store-csi-providers", "Rendezvous directory for provider socket")
+	driverWriteSecrets = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
 )
 
 // Main entry point for the Secret Store CSI driver AWS provider. This main
@@ -62,8 +63,12 @@ func main() {
 		klog.Fatalf("Can not initialize kubernetes client. error: %v", err)
 	}
 
-	defer listener.Close()
-	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1())
+	defer func() { // Cleanup on shutdown
+		listener.Close()
+		os.Remove(endpoint)
+	}()
+
+	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets)
 	if err != nil {
 		klog.Fatalf("Could not create server. error: %v", err)
 	}

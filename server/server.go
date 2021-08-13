@@ -13,8 +13,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"google.golang.org/grpc"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,6 +49,7 @@ type CSIDriverProviderServer struct {
 	*grpc.Server
 	secretProviderFactory provider.ProviderFactoryFactory
 	k8sClient             k8sv1.CoreV1Interface
+	driverWriteSecrets    bool
 }
 
 // Factory function to create the server to handle incoming mount requests.
@@ -58,11 +57,13 @@ type CSIDriverProviderServer struct {
 func NewServer(
 	secretProviderFact provider.ProviderFactoryFactory,
 	k8client k8sv1.CoreV1Interface,
+	driverWriteSecrets bool,
 ) (srv *CSIDriverProviderServer, e error) {
 
 	return &CSIDriverProviderServer{
 		secretProviderFactory: secretProviderFact,
 		k8sClient:             k8client,
+		driverWriteSecrets:    driverWriteSecrets,
 	}, nil
 
 }
@@ -93,16 +94,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	svcAcct := attrib[acctAttrib]
 	podName := attrib[podnameAttrib]
 	region := attrib[regionAttrib]
-
-	// See if we should substitite underscore for slash
 	translate := attrib[transAttrib]
-	if len(translate) == 0 {
-		translate = "_" // Use default
-	} else if strings.ToLower(translate) == "false" {
-		translate = "" // Turn it off.
-	} else if len(translate) != 1 {
-		return nil, fmt.Errorf("%s must be either 'False' or a single character string", transAttrib)
-	}
 
 	// Lookup the region if one was not specified.
 	if len(region) <= 0 {
@@ -142,7 +134,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	// Get the list of secrets to mount. These will be grouped together by type
 	// in a map of slices (map[string][]*SecretDescriptor) keyed by secret type
 	// so that requests can be batched if the implementation allows it.
-	descriptors, err := provider.NewSecretDescriptorList(attrib[secProvAttrib])
+	descriptors, err := provider.NewSecretDescriptorList(mountDir, translate, attrib[secProvAttrib])
 	if err != nil {
 		return nil, err
 	}
@@ -163,11 +155,17 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	}
 
 	// Write out the secrets to the mount point after everything is fetched.
+	var files []*v1alpha1.File
 	for _, secret := range fetchedSecrets {
-		err := writeFile(mountDir, secret.Descriptor.GetFileName(), secret.Value, filePermission, translate)
+
+		file, err := s.writeFile(secret, filePermission)
 		if err != nil {
 			return nil, err
 		}
+		if file != nil {
+			files = append(files, file)
+		}
+
 	}
 
 	// Build the version response from the current version map and return it.
@@ -175,7 +173,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	for id := range curVerMap {
 		ov = append(ov, curVerMap[id])
 	}
-	return &v1alpha1.MountResponse{ObjectVersion: ov}, nil
+	return &v1alpha1.MountResponse{Files: files, ObjectVersion: ov}, nil
 
 }
 
@@ -226,46 +224,53 @@ func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespa
 
 // Private helper to write a new secret or perform an update on a previously mounted secret.
 //
-// We write the secret to a temp file and then rename in order to get as close
+// If the driver writes the secrets just return the dirver data. Otherwise,
+// we write the secret to a temp file and then rename in order to get as close
 // to an atomic update as the file system supports. This is to avoid having
 // pod applications inadvertantly reading an empty or partial files as it is
 // being updated.
 //
-func writeFile(dir, fileName string, value []byte, mode os.FileMode, translate string) error {
+func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode os.FileMode) (*v1alpha1.File, error) {
 
-	// Translate slashes to underscore if required.
-	if len(translate) != 0 {
-		fileName = strings.ReplaceAll(fileName, string(os.PathSeparator), translate)
+	// Don't write if the driver is supposed to do it.
+	if s.driverWriteSecrets {
+
+		return &v1alpha1.File{
+			Path:     secret.Descriptor.GetFileName(),
+			Mode:     int32(mode),
+			Contents: secret.Value,
+		}, nil
+
 	}
 
 	// Write to a tempfile first
-	tmpFile, err := ioutil.TempFile(dir, fileName)
+	tmpFile, err := ioutil.TempFile(secret.Descriptor.GetMountDir(), secret.Descriptor.GetFileName())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer os.Remove(tmpFile.Name()) // Cleanup on fail
 	defer tmpFile.Close()           // Don't leak file descriptors
 
 	err = tmpFile.Chmod(mode) // Set correct permissions
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	_, err = tmpFile.Write(value) // Write the secret
+	_, err = tmpFile.Write(secret.Value) // Write the secret
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	err = tmpFile.Sync() // Make sure to flush to disk
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Swap out the old secret for the new
-	err = os.Rename(tmpFile.Name(), filepath.Join(dir, fileName))
+	err = os.Rename(tmpFile.Name(), secret.Descriptor.GetMountPath())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return nil, nil
 }

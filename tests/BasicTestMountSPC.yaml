@@ -10,6 +10,21 @@ spec:
     data:
     - objectName: SecretsManagerSync
       key: username
+  - secretName: json-ssm
+    type: Opaque
+    data:
+    - objectName: ssmUsername
+      key: username
+    - objectName: ssmPassword
+      key: password
+  - secretName: secrets-manager-json
+    type: Opaque
+    data:
+    - objectName: secretsManagerUsername
+      key: username
+    - objectName: secretsManagerPassword
+      key: password  
+
   parameters:
     objects: | 
         - objectName: "ParameterStoreTest1"
@@ -27,3 +42,17 @@ spec:
           objectAlias: "SecretsManagerTest2"
         - objectName: "SecretsManagerSync"
           objectType: "secretsmanager"
+        - objectName: "jsonSsm"
+          objectType: "ssmparameter"
+          jmesPath:
+              - Path: "username"
+                ObjectAlias: "ssmUsername"
+              - Path: "password"
+                ObjectAlias: "ssmPassword"      
+        - objectName: "secretsManagerJson"
+          objectType: "secretsmanager"
+          jmesPath:
+              - Path: "username"
+                ObjectAlias: "secretsManagerUsername"
+              - Path: "password"
+                ObjectAlias: "secretsManagerPassword"

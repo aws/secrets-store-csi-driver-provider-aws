@@ -64,7 +64,7 @@ Finally we can deploy our pod. The ExampleDeployment.yaml in the examples direct
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment.yaml
 ```
 
-To verify the secret has been mounted properly, See example below
+To verify the secret has been mounted properly, See the example below:
 
 ```shell
 kubectl exec -it $(kubectl get pods | awk '/nginx-deployment/{print $1}' | head -1) cat /mnt/secrets-store/MySecret; echo
@@ -97,7 +97,7 @@ spec:
   parameters:
 ```
 The parameters section contains the details of the mount request and contain one of the three fields:
-* objects: This is a string containing a YAML declaration (described below) of the secrets to be mounted. This is most easily written using a YAML multi-line string or pipe character. E.g.:
+* objects: This is a string containing a YAML declaration (described below) of the secrets to be mounted. This is most easily written using a YAML multi-line string or pipe character. For example:
     ```yaml
       parameters:
         objects: |
@@ -113,6 +113,29 @@ The objects field of the SecretProviderClass can contain the following sub-field
 * objectAlias: This optional field specifies the file name under which the secret will be mounted. When not specified the file name defaults to objectName.
 * objectVersion: This field is optional, and generally not recommended since updates to the secret require updating this field. For Secrets Manager this is the [VersionId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store, this is the optional [version number](https://docs.aws.amazon.com/systems-manager/latest/userguide/sysman-paramstore-versions.html#reference-parameter-version).
 * objectVersionLabel: This optional fields specifies the alias used for the version. Most applications should not use this field since the most recent version of the secret is used by default. For Secrets Manager this is the [VersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store this is the optional [Parameter Label](https://docs.amazonaws.cn/en_us/systems-manager/latest/userguide/sysman-paramstore-labels.html).
+* jmesPath: This optional field specifies the specific key-value pairs to extract from a JSON-formatted secret. You can use this field to mount key-value pairs from a properly formatted secret value as individual secrets. For example: Consider a secret "MySecret" with JSON content as follows:
+
+    ```shell
+        {
+            "username": "testuser"
+            "password": "testpassword"
+        }
+     ```
+  To mount the username and password key pairs of this secret as individual secrets, use the jmesPath field as follows:
+
+  ```yaml:
+        objects: |
+            - objectName: "MySecret"
+              objectType: "secretsmanager"
+              jmesPath:
+                  - path: "username"
+                    objectAlias: "MySecretUsername"
+                  - path: "password"
+                    objectAlias: "MySecretPassword"
+  ```
+  If you use the jmesPath field,  you must provide the following two sub-fields:
+  * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
+  * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
 
 ## Additional Considerations
 

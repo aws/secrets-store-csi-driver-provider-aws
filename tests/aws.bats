@@ -10,6 +10,11 @@ CLUSTER_NAME=integ-cluster
 POD_NAME=basic-test-mount
 export REGION=us-west-2
 export ACCOUNT_NUMBER=$(aws --region $REGION  sts get-caller-identity --query Account --output text)
+
+if [[ -z "${PRIVREPO}" ]]; then
+    echo "Error: PRIVREPO is not specified" >&2
+    return 1
+fi
   
 setup_file() {
     #Create and initialize cluster 
@@ -30,9 +35,10 @@ setup_file() {
        --override-existing-serviceaccounts \
        --approve \
        --region $REGION    
-    #Install csi secret driver
-    helm repo add secrets-store-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/secrets-store-csi-driver/master/charts
-    helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s 
+   
+   #Install csi secret driver
+   helm repo add secrets-store-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/secrets-store-csi-driver/master/charts
+   helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
  
    #Create test secrets
    aws secretsmanager create-secret --name SecretsManagerTest1 --secret-string SecretsManagerTest1Value --region $REGION
@@ -44,9 +50,13 @@ setup_file() {
  
    aws ssm put-parameter --name ParameterStoreRotationTest --value BeforeRotation --type SecureString --region $REGION
    aws secretsmanager create-secret --name SecretsManagerRotationTest --secret-string BeforeRotation --region $REGION
+
+   aws secretsmanager create-secret --name secretsManagerJson  --secret-string '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}' --region $REGION
+   aws ssm put-parameter --name jsonSsm --value '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}' --type SecureString --region $REGION
 }
  
 teardown_file() { 
+
     eksctl delete cluster \
         --name $CLUSTER_NAME \
         --region $REGION
@@ -60,6 +70,29 @@ teardown_file() {
  
     aws ssm delete-parameter --name ParameterStoreRotationTest --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerRotationTest --force-delete-without-recovery --region $REGION
+
+    aws ssm delete-parameter --name jsonSsm --region $REGION
+    aws secretsmanager delete-secret --secret-id secretsManagerJson --force-delete-without-recovery --region $REGION
+}
+
+validate_jsme_mount() {
+    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/$USERNAME_ALIAS)
+    [[ "${result//$'\r'}" == $USERNAME ]]
+
+    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/$PASSWORD_ALIAS)
+    [[ "${result//$'\r'}" == $PASSWORD ]]
+
+    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/$SECRET_FILE_NAME)
+    [[ "${result//$'\r'}" == $SECRET_FILE_CONTENT ]]
+
+    run kubectl get secret --namespace $NAMESPACE $K8_SECRET_NAME
+    [ "$status" -eq 0 ]
+
+    result=$(kubectl --namespace=$NAMESPACE get secret $K8_SECRET_NAME -o jsonpath="{.data.username}" | base64 -d)
+    [[ "$result" == $USERNAME ]]
+    
+    result=$(kubectl --namespace=$NAMESPACE get secret $K8_SECRET_NAME -o jsonpath="{.data.password}" | base64 -d)
+    [[ "$result" == $PASSWORD ]]
 }
  
 @test "Install aws provider" {
@@ -132,7 +165,38 @@ teardown_file() {
     result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerTest2)
     [[ "${result//$'\r'}" == "SecretsManagerTest2Value" ]]        
 }
- 
+
+@test "CSI inline volume test with pod portability - specify jsmePath for parameter store parameter with rotation" {
+    JSON_CONTENT='{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}'
+   
+    USERNAME_ALIAS=ssmUsername USERNAME=ParameterStoreUser PASSWORD_ALIAS=ssmPassword PASSWORD=PasswordForParameterStore\
+    SECRET_FILE_NAME=jsonSsm SECRET_FILE_CONTENT=$JSON_CONTENT K8_SECRET_NAME=json-ssm  validate_jsme_mount
+
+    UPDATED_JSON_CONTENT='{"username": "ParameterStoreUserUpdated", "password": "PasswordForParameterStoreUpdated"}'
+    aws ssm put-parameter --name jsonSsm --value "$UPDATED_JSON_CONTENT" --type SecureString --overwrite --region $REGION
+    
+    sleep 20
+    USERNAME_ALIAS=ssmUsername USERNAME=ParameterStoreUserUpdated PASSWORD_ALIAS=ssmPassword PASSWORD=PasswordForParameterStoreUpdated\
+    SECRET_FILE_NAME=jsonSsm SECRET_FILE_CONTENT=$UPDATED_JSON_CONTENT K8_SECRET_NAME=json-ssm  validate_jsme_mount
+}
+
+@test "CSI inline volume test with pod portability - specify jsmePath for Secrets Manager secret with rotation" {
+
+    JSON_CONTENT='{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}'
+
+    USERNAME_ALIAS=secretsManagerUsername USERNAME=SecretsManagerUser PASSWORD_ALIAS=secretsManagerPassword \
+    PASSWORD=PasswordForSecretsManager SECRET_FILE_NAME=secretsManagerJson SECRET_FILE_CONTENT=$JSON_CONTENT 
+    K8_SECRET_NAME=secrets-manager-json validate_jsme_mount     
+
+    UPDATED_JSON_CONTENT='{"username": "SecretsManagerUserUpdated", "password": "PasswordForSecretsManagerUpdated"}'
+    aws secretsmanager put-secret-value --secret-id secretsManagerJson --secret-string "$UPDATED_JSON_CONTENT" --region $REGION
+
+    sleep 20
+    USERNAME_ALIAS=secretsManagerUsername USERNAME=SecretsManagerUserUpdated PASSWORD_ALIAS=secretsManagerPassword \
+    PASSWORD=PasswordForSecretsManagerUpdated SECRET_FILE_NAME=secretsManagerJson SECRET_FILE_CONTENT=$UPDATED_JSON_CONTENT
+    K8_SECRET_NAME=secrets-manager-json validate_jsme_mount
+}
+
 @test "Sync with Kubernetes Secret" {
     run kubectl get secret --namespace $NAMESPACE  secret
     [ "$status" -eq 0 ]
