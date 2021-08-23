@@ -1,8 +1,11 @@
 package provider
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"text/template"
+
 	"github.com/jmespath/go-jmespath"
 )
 
@@ -59,4 +62,30 @@ func (p *SecretValue) getJsonSecrets() (s []*SecretValue, e error) {
 
 	}
 	return jsonValues, nil
+}
+
+func (p *SecretValue) getTemplatedSecrets() (*SecretValue, error) {
+
+	var data interface{}
+	err := json.Unmarshal(p.Value, &data)
+	if err != nil {
+		return nil, fmt.Errorf("Invalid JSON used with template in secret: %s", p.Descriptor.ObjectName)
+	}
+
+	objectTemplate := p.Descriptor.ObjectTemplate
+	t, err := template.New("secretTemplate").Parse(objectTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("Invalid template %s", objectTemplate)
+	}
+
+	var result bytes.Buffer
+	err = t.Execute(&result, data)
+	if err != nil {
+		return nil, err
+	}
+	secretValue := SecretValue{
+		Value:      result.Bytes(),
+		Descriptor: p.Descriptor,
+	}
+	return &secretValue, nil
 }

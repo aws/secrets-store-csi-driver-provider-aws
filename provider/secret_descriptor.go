@@ -36,6 +36,9 @@ type SecretDescriptor struct {
 	//Optional array to specify what json key value pairs to extract from a secret and mount as individual secrets
 	JMESPath []JMESPathEntry `json:"jmesPath"`
 
+	// Optional Go template to use for transforming the secret value
+	ObjectTemplate string `json:objectTemplate`
+
 	// Path translation character (not part of YAML spec).
 	translate string `json:"-"`
 
