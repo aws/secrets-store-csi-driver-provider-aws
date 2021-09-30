@@ -127,8 +127,8 @@ func NewParameterStoreProviderWithClient(client ssmiface.SSMAPI) *ParameterStore
 		client: client,
 	}
 }
-func NewParameterStoreProvider(region string, awsSession *session.Session) *ParameterStoreProvider {
-	parameterStoreClient := ssm.New(awsSession, aws.NewConfig().WithRegion(region))
+func NewParameterStoreProvider(region string, endpoint string,awsSession *session.Session) *ParameterStoreProvider {
+	parameterStoreClient := ssm.New(awsSession, &aws.Config{Endpoint: aws.String(endpoint), Region: aws.String(region)})
 	return NewParameterStoreProviderWithClient(parameterStoreClient)
 }
 

@@ -28,13 +28,17 @@ import (
 var Version string
 
 const (
-	namespaceAttrib = "csi.storage.k8s.io/pod.namespace"
-	acctAttrib      = "csi.storage.k8s.io/serviceAccount.name"
-	podnameAttrib   = "csi.storage.k8s.io/pod.name"
-	regionAttrib    = "region"                        // The attribute name for the region in the SecretProviderClass
-	transAttrib     = "pathTranslation"               // Path translation char
-	regionLabel     = "topology.kubernetes.io/region" // The node label giving the region
-	secProvAttrib   = "objects"                       // The attributed used to pass the SecretProviderClass definition (with what to mount)
+	namespaceAttrib        = "csi.storage.k8s.io/pod.namespace"
+	acctAttrib             = "csi.storage.k8s.io/serviceAccount.name"
+	podnameAttrib          = "csi.storage.k8s.io/pod.name"
+	regionAttrib           = "region" 						 // The attribute name for the region in the SecretProviderClass
+	baseEndpointAttrib     = "baseEndpoint"
+	ssmEndpointAttrib      = "ssmEndpoint"
+	secretsEndpointAttrib  = "secretsManagerEndpoint"
+	stsEndpointAttrib 	   = "stsEndpoint"
+	transAttrib            = "pathTranslation"               // Path translation char
+	regionLabel            = "topology.kubernetes.io/region" // The node label giving the region
+	secProvAttrib          = "objects"                       // The attributed used to pass the SecretProviderClass definition (with what to mount)
 )
 
 // A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
@@ -94,7 +98,25 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	svcAcct := attrib[acctAttrib]
 	podName := attrib[podnameAttrib]
 	region := attrib[regionAttrib]
+	baseEndpoint := attrib[baseEndpointAttrib]
+	secretsEndpoint := attrib[secretsEndpointAttrib]
+	ssmEndpoint := attrib[ssmEndpointAttrib]
+	stsEndpoint := attrib[stsEndpointAttrib]
 	translate := attrib[transAttrib]
+
+	if len(secretsEndpoint) <= 0 && len(baseEndpoint) > 0 {
+		secretsEndpoint = baseEndpoint
+	}
+
+	if len(ssmEndpoint) <= 0 && len(baseEndpoint) > 0 {
+		ssmEndpoint = baseEndpoint
+	}
+
+	if len(stsEndpoint) <= 0 && len(baseEndpoint) > 0 {
+		stsEndpoint = baseEndpoint
+	}
+
+	endpoints := map[string]string{ "SSMParameter": ssmEndpoint, "SecretsManager": secretsEndpoint }
 
 	// Lookup the region if one was not specified.
 	if len(region) <= 0 {
@@ -121,7 +143,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	}
 
 	// Get the pod's AWS creds.
-	oidcAuth, err := auth.NewAuth(ctx, region, nameSpace, svcAcct, s.k8sClient)
+	oidcAuth, err := auth.NewAuth(ctx, region, stsEndpoint, nameSpace, svcAcct, s.k8sClient)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +162,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	}
 
 	// Fetch all secrets before saving so we write nothing on failure.
-	providerFactory := s.secretProviderFactory(region, awsSession)
+	providerFactory := s.secretProviderFactory(region, endpoints, awsSession)
 	var fetchedSecrets []*provider.SecretValue
 	for sType := range descriptors { // Iterate over each secret type.
 

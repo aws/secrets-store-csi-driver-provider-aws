@@ -207,7 +207,7 @@ func NewSecretsManagerProviderWithClient(client secretsmanageriface.SecretsManag
 		client: client,
 	}
 }
-func NewSecretsManagerProvider(region string, awsSession *session.Session) *SecretsManagerProvider {
-	secretsManagerClient := secretsmanager.New(awsSession, aws.NewConfig().WithRegion(region))
+func NewSecretsManagerProvider(region string, endpoint string, awsSession *session.Session) *SecretsManagerProvider {
+	secretsManagerClient := secretsmanager.New(awsSession, &aws.Config{Endpoint: aws.String(endpoint), Region: aws.String(region)})
 	return NewSecretsManagerProviderWithClient(secretsManagerClient)
 }

@@ -29,19 +29,19 @@ type SecretProviderFactory struct {
 
 // The prototype for the provider factory fatory
 //
-type ProviderFactoryFactory func(region string, session *session.Session) (factory *SecretProviderFactory)
+type ProviderFactoryFactory func(region string, endpoints map[string]string, session *session.Session) (factory *SecretProviderFactory)
 
 // Creates the provider factory.
 //
 // This factory catagorizes the request and returns the correct concrete
 // provider implementation using the secret type.
 //
-func NewSecretProviderFactory(region string, session *session.Session) (factory *SecretProviderFactory) {
+func NewSecretProviderFactory(region string, endpoints map[string]string, session *session.Session) (factory *SecretProviderFactory) {
 
 	return &SecretProviderFactory{
 		Providers: map[SecretType]SecretProvider{
-			SSMParameter:   NewParameterStoreProvider(region, session),
-			SecretsManager: NewSecretsManagerProvider(region, session),
+			SSMParameter:   NewParameterStoreProvider(region, endpoints["SSMParameter"], session),
+			SecretsManager: NewSecretsManagerProvider(region, endpoints["SecretsManager"], session),
 		},
 	}
 

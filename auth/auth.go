@@ -67,7 +67,7 @@ func (p authTokenFetcher) FetchToken(ctx credentials.Context) ([]byte, error) {
 // sessions by calling GetAWSSession.
 //
 type Auth struct {
-	region, nameSpace, svcAcc string
+	region, endpoint, nameSpace, svcAcc string
 	k8sClient                 k8sv1.CoreV1Interface
 	stsClient                 stsiface.STSAPI
 	ctx                       context.Context
@@ -77,21 +77,23 @@ type Auth struct {
 //
 func NewAuth(
 	ctx context.Context,
-	region, nameSpace, svcAcc string,
+	region, endpoint, nameSpace, svcAcc string,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
 
 	// Get an initial session to use for STS calls.
-	sess, err := session.NewSession(aws.NewConfig().
-		WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint).
-		WithRegion(region),
-	)
+	sess, err := session.NewSession(&aws.Config{
+		Endpoint: aws.String(endpoint),
+		Region: aws.String(region),
+		STSRegionalEndpoint: endpoints.RegionalSTSEndpoint,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &Auth{
 		region:    region,
+		endpoint:  endpoint,
 		nameSpace: nameSpace,
 		svcAcc:    svcAcc,
 		k8sClient: k8sClient,
@@ -140,6 +142,7 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 	fetcher := &authTokenFetcher{p.nameSpace, p.svcAcc, p.k8sClient}
 	ar := stscreds.NewWebIdentityRoleProviderWithToken(p.stsClient, *roleArn, ProviderName, fetcher)
 	config := aws.NewConfig().
+		WithEndpoint(p.endpoint).
 		WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint). // Use regional STS endpoint
 		WithRegion(p.region).
 		WithCredentials(credentials.NewCredentials(ar))
