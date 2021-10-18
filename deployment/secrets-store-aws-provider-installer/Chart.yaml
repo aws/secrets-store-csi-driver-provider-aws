@@ -1,0 +1,9 @@
+apiVersion: v2
+name: secrets-store-aws-provider-installer
+description: AWS Secrets Manager and Config Provider
+
+type: application
+
+version: 0.1.0
+
+appVersion: 1.16.0

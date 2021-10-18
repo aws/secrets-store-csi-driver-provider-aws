@@ -1,0 +1,1 @@
+AWS Secrets Manager and Config Provider has been installed
