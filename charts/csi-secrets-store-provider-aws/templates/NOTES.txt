@@ -1,0 +1,4 @@
+{{ $.Chart.Name }} has been installed. Check its status by running:
+  kubectl --namespace {{ .Release.Namespace . }} get ds
+
+Visit https://github.com/aws/secrets-store-csi-driver-provider-aws/tree/main/charts/csi-secrets-store-provider-aws
