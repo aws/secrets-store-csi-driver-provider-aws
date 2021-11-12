@@ -23,3 +23,6 @@
 
 ### IntelliJ IDE
 .idea
+
+# helm chart dependencies
+charts/csi-secrets-store-provider-aws/charts/
