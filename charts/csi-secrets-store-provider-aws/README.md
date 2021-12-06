@@ -11,8 +11,8 @@ AWS Key Management Service provider for Secrets Store CSI driver allows you to g
 - This chart installs the [secrets-store-csi-driver](https://github.com/kubernetes-sigs/secrets-store-csi-driver) and the AWS Key Management Service provider for the driver
 
 ```shell
-helm repo add csi-secrets-store-provider-aws https://to-be-defined
-helm install csi-secrets-store-provider-aws/csi-secrets-store-provider-aws --generate-name
+helm repo add eks https://aws.github.io/eks-charts
+helm install eks/csi-secrets-store-provider-aws --generate-name
 ```
 
 ### Create the access policy
