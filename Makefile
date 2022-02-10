@@ -10,9 +10,6 @@ endif
 
 IMAGE_NAME=secrets-store-csi-driver-provider-aws
 
-GOOS=linux
-GOARCH=amd64
-
 BASE_REV=1.0
 $(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
 $(eval MINOR_REV=$(shell git describe --always))
@@ -20,34 +17,35 @@ REV=$(BASE_REV).$(MINOR_REV)-$(BUILD_DATE)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(REV) -extldflags "-static""
 
+DEPS := go.mod go.sum main.go $(wildcard auth/*.go) $(wildcard provider/*.go) $(wildcard server/*.go)
+
 # Build docker image and push to AWS registry
-all: build docker-login docker-build docker-tag docker-push
+all: clean build docker-login docker-buildx-push
 
-build: clean
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags ${LDFLAGS} -o _output/$(IMAGE_NAME)
+_output/$(IMAGE_NAME): $(DEPS)
+	CGO_ENABLED=0 go build -a -ldflags ${LDFLAGS} -o $@
 
+.PHONY: build
+build: _output/$(IMAGE_NAME)
+
+.PHONY: clean
 clean:
 	-rm -rf _output
 	-docker system prune --all --force
 
+.PHONY: docker-login
 docker-login:
-	aws --region $(AWS_REGION) $(ECRCMD) get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
+	[ -z "$$SKIP_DOCKER_LOGIN" ] && aws --region $(AWS_REGION) $(ECRCMD) get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
 
-# Build docker target
-docker-build:
-	docker build -f Dockerfile --no-cache -t $(IMAGE_NAME) .
-
-# Tag docker image
-docker-tag:
-	docker tag $(IMAGE_NAME):latest $(REGISTRY_NAME):latest
-	docker tag $(IMAGE_NAME):latest $(REGISTRY_NAME):latest-$(GOARCH)
-	docker tag $(IMAGE_NAME):latest $(REGISTRY_NAME):latest-$(GOOS)-$(GOARCH)
-	docker tag $(IMAGE_NAME):latest $(REGISTRY_NAME):$(REV)-$(GOOS)-$(GOARCH)
-
-# Push to registry
-docker-push:
-	docker push $(REGISTRY_NAME):latest
-	docker push $(REGISTRY_NAME):latest-$(GOARCH)
-	docker push $(REGISTRY_NAME):latest-$(GOOS)-$(GOARCH)
-	docker push $(REGISTRY_NAME):$(REV)-$(GOOS)-$(GOARCH)
-
+# Build Docker image and push it. Foreign architecture images can't be loaded into
+# the local Docker engine, so we must perform the build and push together in a
+# single step (unless we want to manage tarballs ourselves, which we do not).
+.PHONY: docker-buildx-push
+docker-buildx-push:
+	docker buildx build \
+		--build-arg LDFLAGS=$(LDFLAGS) \
+		--platform linux/amd64,linux/arm64 \
+		--push \
+		-t $(REGISTRY_NAME):$(REV) \
+		-t $(REGISTRY_NAME):latest \
+		.
