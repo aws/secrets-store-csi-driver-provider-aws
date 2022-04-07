@@ -15,12 +15,16 @@ if [[ -z "${PRIVREPO}" ]]; then
     echo "Error: PRIVREPO is not specified" >&2
     return 1
 fi
+
+if [[ -z "${NODE_TYPE}" ]]; then
+    NODE_TYPE=m5.large
+fi
   
 setup_file() {
     #Create and initialize cluster 
     eksctl create cluster \
        --name $CLUSTER_NAME \
-       --node-type m5.large \
+       --node-type $NODE_TYPE \
        --nodes 3 \
        --region $REGION
  
