@@ -21,6 +21,12 @@ To install the Secrets Manger and Config Provider use the YAML file in the deplo
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 ```
 
+#### Helm
+```
+helm repo add eks https://aws.github.io/eks-charts
+helm install eks/csi-secrets-store-provider-aws --generate-name --namespace kube-system
+```
+
 ## Usage
 
 Set the region name and name of your cluster to use in the bash commands that follow:
