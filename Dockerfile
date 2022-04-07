@@ -1,9 +1,11 @@
-# Copy current certificates from AL2
 FROM public.ecr.aws/amazonlinux/amazonlinux:2 as base
-RUN cp -Lr /etc/ssl/certs/ /etc/ssl/certscopy
 
 FROM scratch
-COPY ./_output/secrets-store-csi-driver-provider-aws /bin/
-COPY --from=base /etc/ssl/certscopy/ /etc/ssl/certs/
+ARG TARGETARCH
+COPY ./_output/secrets-store-csi-driver-provider-aws-${TARGETARCH} /bin/secrets-store-csi-driver-provider-aws
+
+# Copy current certificates from AL2 (/etc/pki/ symlinked in /etc/ssl/certs/)
+COPY --from=base /etc/pki/ /etc/pki/
+COPY --from=base /etc/ssl/certs/ /etc/ssl/certs
 
 ENTRYPOINT ["/bin/secrets-store-csi-driver-provider-aws"]
