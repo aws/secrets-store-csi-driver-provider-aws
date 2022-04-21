@@ -14,8 +14,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
   **Note** that older versions of the driver may require the ```--set grpcSupportedProviders="aws"``` flag on the install step.
 * IAM Roles for Service Accounts ([IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)) as described in the usage section below.
 
-[^1]: The CSI Secret Store driver runs as a DeamonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DeamonSet is not supported on Fargate. There are alternative options such as this [POC](https://aws.amazon.com/blogs/containers/aws-secrets-controller-poc/) or [external-secrets](https://github.com/external-secrets/external-secrets).
-
+[^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate. 
 
 ### Installing the AWS Provider
 To install the Secrets Manager and Config Provider use the YAML file in the deployment directory:
