@@ -8,7 +8,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 * Amazon Elastic Kubernetes Service (EKS) 1.17+
 * [Secrets Store CSI driver installed](https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation.html):
     ```shell
-    helm repo add secrets-store-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/secrets-store-csi-driver/master/charts
+    helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
     helm install -n kube-system csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver
     ```
   **Note** that older versions of the driver may require the ```--set grpcSupportedProviders="aws"``` flag on the install step.
@@ -172,7 +172,8 @@ envsubst < deployment/private-installer.yaml | kubectl apply -f -
 ```
 
 ### Security Considerations
-The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious appliations should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.
+
+The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.
 
 ## Security
 

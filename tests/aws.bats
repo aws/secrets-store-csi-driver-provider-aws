@@ -15,12 +15,16 @@ if [[ -z "${PRIVREPO}" ]]; then
     echo "Error: PRIVREPO is not specified" >&2
     return 1
 fi
+
+if [[ -z "${NODE_TYPE}" ]]; then
+    NODE_TYPE=m5.large
+fi
   
 setup_file() {
     #Create and initialize cluster 
     eksctl create cluster \
        --name $CLUSTER_NAME \
-       --node-type m5.large \
+       --node-type $NODE_TYPE \
        --nodes 3 \
        --region $REGION
  
@@ -37,7 +41,7 @@ setup_file() {
        --region $REGION    
    
    #Install csi secret driver
-   helm repo add secrets-store-csi-driver https://raw.githubusercontent.com/kubernetes-sigs/secrets-store-csi-driver/master/charts
+   helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
    helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
  
    #Create test secrets
