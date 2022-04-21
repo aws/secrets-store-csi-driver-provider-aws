@@ -5,7 +5,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 ## Installation
 
 ### Requirements
-* Amazon Elastic Kubernetes Service (EKS) 1.17+
+* Amazon Elastic Kubernetes Service (EKS) 1.17+ using ECS (Fargate is not supported **[^1]**)
 * [Secrets Store CSI driver installed](https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation.html):
     ```shell
     helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -14,9 +14,10 @@ AWS offers two services to manage secrets and parameters conveniently in your co
   **Note** that older versions of the driver may require the ```--set grpcSupportedProviders="aws"``` flag on the install step.
 * IAM Roles for Service Accounts ([IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)) as described in the usage section below.
 
+[^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate. 
 
 ### Installing the AWS Provider
-To install the Secrets Manger and Config Provider use the YAML file in the deployment directory:
+To install the Secrets Manager and Config Provider use the YAML file in the deployment directory:
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 ```
