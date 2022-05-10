@@ -6,7 +6,6 @@ require (
 	github.com/aws/aws-sdk-go v1.37.0
 	github.com/jmespath/go-jmespath v0.4.0
 	google.golang.org/grpc v1.35.0
-	gopkg.in/yaml.v2 v2.3.0
 	k8s.io/api v0.20.2
 	k8s.io/apimachinery v0.20.2
 	k8s.io/client-go v0.20.2
