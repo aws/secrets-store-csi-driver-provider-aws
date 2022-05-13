@@ -8,8 +8,6 @@ else
 ECRCMD=ecr
 endif
 
-IMAGE_NAME=secrets-store-csi-driver-provider-aws
-
 # Build for AMD64 and ARM64
 ARCHITECTURES=arm64 amd64
 GOOS=linux
@@ -20,15 +18,10 @@ $(eval PATCH_REV=$(shell git describe --always))
 $(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
 
-LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) -extldflags "-static""
-
-.PHONY: all build clean docker-login docker-buildx docker-manifest
+.PHONY: all clean docker-login docker-buildx docker-manifest
 
 # Build docker image and push to AWS registry
-all: build docker-login docker-buildx docker-manifest
-
-build: clean
-	$(foreach ARCH,$(ARCHITECTURES),CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(ARCH) go build -a -ldflags $(LDFLAGS) -o _output/$(IMAGE_NAME)-$(ARCH) ;)
+all: clean docker-login docker-buildx docker-manifest
 
 clean:
 	-rm -rf _output
@@ -39,9 +32,8 @@ docker-login:
 
 # Build, tag, and push image for architecture
 docker-buildx:
-	$(foreach ARCH,$(ARCHITECTURES),docker buildx build \
+	$(foreach ARCH,$(ARCHITECTURES),docker buildx build --build-arg ARCH=$(ARCH)\
                 --platform $(GOOS)/$(ARCH) \
-                --no-cache \
                 --push \
                 -t $(REGISTRY_NAME):latest-$(ARCH) \
                 -t $(REGISTRY_NAME):latest-$(GOOS)-$(ARCH) \
