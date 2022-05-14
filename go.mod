@@ -11,5 +11,5 @@ require (
 	k8s.io/client-go v0.20.2
 	k8s.io/klog/v2 v2.8.0
 	sigs.k8s.io/secrets-store-csi-driver v0.0.22
-	sigs.k8s.io/yaml v1.2.0
+	sigs.k8s.io/yaml v1.3.0
 )
