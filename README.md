@@ -139,7 +139,18 @@ The objects field of the SecretProviderClass can contain the following sub-field
   ```
   If you use the jmesPath field,  you must provide the following two sub-fields:
   * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
-  * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
+  * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted.
+
+* objectTemplate: Tgus optional field specifies a Go template for transforming the JSON object containing all key-value secrets to a desired format. For example, to transform secrets into a format that can be sourced in bash:
+```
+    objects:  |
+      - objectName: "MySecret"
+        objectType: "secretsmanager"
+        objectTemplate: |
+          {{ range $k, $v := . }}export {{ $k }}={{ $v }}
+          {{ end }}
+
+```
 
 ## Additional Considerations
 

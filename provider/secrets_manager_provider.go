@@ -80,6 +80,15 @@ func (p *SecretsManagerProvider) GetSecretValues(
 
 		values = append(values, jsonSecrets...)
 
+		//Transform secrets using provided template
+		if secret.Descriptor.ObjectTemplate != "" {
+			templatedSecrets, err := secret.getTemplatedSecrets()
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, templatedSecrets)
+		}
+
 		// Update the version in the current version map.
 		for _, jsonSecret := range jsonSecrets {
 			jsonDescriptor := jsonSecret.Descriptor
