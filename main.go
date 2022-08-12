@@ -28,7 +28,9 @@ var (
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
 func main() {
-
+	klog.InitFlags(nil)
+	defer klog.Flush()
+	
 	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
 
 	flag.Parse() // Parse command line flags
