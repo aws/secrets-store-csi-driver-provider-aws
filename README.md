@@ -178,7 +178,8 @@ envsubst < deployment/private-installer.yaml | kubectl apply -f -
 
 ### Fully Private Cluster Considerations
 
-When using fully private cluster ensure the VPC the EKS cluster sits in have a service endpoint to AWS Secrets Manager 
+When using fully private cluster ensure the VPC the EKS cluster sits in have a service endpoint to AWS Secrets Manager.
+
 Here's some [documentation](https://docs.aws.amazon.com/eks/latest/userguide/private-clusters.html) on private cluster setup requirements.
 
 
