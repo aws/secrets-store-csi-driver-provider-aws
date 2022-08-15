@@ -175,6 +175,13 @@ Once the image is in your repo you can install it into your cluster from your re
 envsubst < deployment/private-installer.yaml | kubectl apply -f -
 ```
 
+
+### Fully Private Cluster Considerations
+
+When using fully private cluster ensure the VPC the EKS cluster sits in have a service endpoint to AWS Secrets Manager 
+Here's some [documentation](https://docs.aws.amazon.com/eks/latest/userguide/private-clusters.html) on private cluster setup requirements.
+
+
 ### Security Considerations
 
 The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.
