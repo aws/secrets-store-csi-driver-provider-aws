@@ -32,7 +32,7 @@ docker-login:
 
 # Build, tag, and push image for architecture
 docker-buildx:
-	$(foreach ARCH,$(ARCHITECTURES),docker buildx build --build-arg ARCH=$(ARCH)\
+	$(foreach ARCH,$(ARCHITECTURES),docker buildx build \
                 --platform $(GOOS)/$(ARCH) \
                 --push \
                 -t $(REGISTRY_NAME):latest-$(ARCH) \
