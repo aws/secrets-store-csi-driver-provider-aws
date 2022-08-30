@@ -1,4 +1,4 @@
-FROM --platform=$TARGETPLATFORM golang:1.18-alpine as go
+FROM --platform=$TARGETPLATFORM golang:1.19-alpine as go
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
 
