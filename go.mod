@@ -10,7 +10,7 @@ require (
 	k8s.io/apimachinery v0.25.0
 	k8s.io/client-go v0.25.0
 	k8s.io/klog/v2 v2.70.1
-	sigs.k8s.io/secrets-store-csi-driver v1.2.3
+	sigs.k8s.io/secrets-store-csi-driver v1.2.4
 	sigs.k8s.io/yaml v1.3.0
 )
 
