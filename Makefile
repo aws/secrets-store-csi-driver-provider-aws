@@ -18,10 +18,10 @@ $(eval PATCH_REV=$(shell git describe --always))
 $(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
 
-.PHONY: all clean docker-login docker-buildx docker-manifest
+.PHONY: all clean docker-login docker-buildx
 
 # Build docker image and push to AWS registry
-all: clean docker-login docker-buildx docker-manifest
+all: clean docker-login docker-buildx
 
 clean:
 	-rm -rf _output
@@ -30,18 +30,15 @@ clean:
 docker-login:
 	aws --region $(AWS_REGION) $(ECRCMD) get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
 
-# Build, tag, and push image for architecture
+# Build, tag, and push multi-architecture image.
 docker-buildx:
-	$(foreach ARCH,$(ARCHITECTURES),docker buildx build \
-                --platform $(GOOS)/$(ARCH) \
-                --push \
-                -t $(REGISTRY_NAME):latest-$(ARCH) \
-                -t $(REGISTRY_NAME):latest-$(GOOS)-$(ARCH) \
-                -t $(REGISTRY_NAME):$(FULL_REV)-$(GOOS)-$(ARCH) \
-                . ;)
-
-# Create and push manifest list for images
-docker-manifest:
-	docker buildx imagetools create --tag $(REGISTRY_NAME):latest $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
-	docker buildx imagetools create --tag $(REGISTRY_NAME):$(FULL_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
-	docker buildx imagetools create --tag $(REGISTRY_NAME):$(MAJOR_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
+	docker buildx build --platform linux/arm64,linux/amd64 --push \
+				-t $(REGISTRY_NAME):latest \
+				-t $(REGISTRY_NAME):$(FULL_REV) \
+				-t $(REGISTRY_NAME):$(MAJOR_REV) \
+				-t $(REGISTRY_NAME):latest-linux \
+				-t $(REGISTRY_NAME):latest-linux-amd64 \
+				-t $(REGISTRY_NAME):latest-linux-arm64 \
+				-t $(REGISTRY_NAME):$(FULL_REV)-linux-amd64 \
+				-t $(REGISTRY_NAME):$(FULL_REV)-linux-arm64 \
+				. ;)
