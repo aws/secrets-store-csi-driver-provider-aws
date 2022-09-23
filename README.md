@@ -23,8 +23,8 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 
 Using Helm:
 ```shell
-helm repo add aws-provider https://aws.github.io/secrets-store-csi-driver-provider-aws
-helm install -n kube-system secrets-provider-aws aws-provider/secrets-store-csi-driver-provider-aws
+helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver-provider-aws
+helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws
 ```
 
 Using YAML:
