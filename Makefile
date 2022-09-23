@@ -58,4 +58,4 @@ docker-manifest:
 upload-helm:
 	chart-releaser package
 	chart-releaser upload -o aws-r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
-	chart-releaser index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --pr --index-path .
+	chart-releaser index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
