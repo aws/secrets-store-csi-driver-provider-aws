@@ -57,5 +57,5 @@ docker-manifest:
 # Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
 upload-helm:
 	chart-releaser package
-	chart-releaser upload -o aws-r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
+	chart-releaser upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
 	chart-releaser index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
