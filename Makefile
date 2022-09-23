@@ -13,10 +13,9 @@ ARCHITECTURES=arm64 amd64
 GOOS=linux
 
 MAJOR_REV=1
-MINOR_REV=0
-$(eval PATCH_REV=$(shell git describe --always))
-$(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
-FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
+MINOR_REV=1
+PATCH_REV=0
+# FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 .PHONY: all clean docker-login docker-buildx
 
@@ -32,6 +31,8 @@ docker-login:
 
 # Build, tag, and push multi-architecture image.
 docker-buildx:
+	@!(docker manifest inspect $(REGISTRY_NAME):$(FULL_REV) > /dev/null) || (echo "Version already exists"; exit 1)
+
 	docker buildx build --platform linux/arm64,linux/amd64 --push \
 				-t $(REGISTRY_NAME):latest \
 				-t $(REGISTRY_NAME):$(FULL_REV) \
@@ -41,4 +42,4 @@ docker-buildx:
 				-t $(REGISTRY_NAME):latest-linux-arm64 \
 				-t $(REGISTRY_NAME):$(FULL_REV)-linux-amd64 \
 				-t $(REGISTRY_NAME):$(FULL_REV)-linux-arm64 \
-				. ;)
+				. ;
