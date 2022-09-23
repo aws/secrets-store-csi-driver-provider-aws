@@ -20,9 +20,16 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 [^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate. 
 
 ### Installing the AWS Provider
-To install the Secrets Manager and Config Provider use the YAML file in the deployment directory:
+
+Using Helm:
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
+helm repo add aws-provider https://aws.github.io/secrets-store-csi-driver-provider-aws
+helm install -n kube-system secrets-provider-aws aws-provider/secrets-store-csi-driver-provider-aws
+```
+
+Using YAML:
+```shell
+kubectl apply -n kube-system -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 ```
 
 ## Usage
