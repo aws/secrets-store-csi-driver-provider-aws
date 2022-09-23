@@ -15,7 +15,7 @@ GOOS=linux
 MAJOR_REV=1
 MINOR_REV=1
 PATCH_REV=0
-# FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
+FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 .PHONY: all clean docker-login docker-buildx
 
