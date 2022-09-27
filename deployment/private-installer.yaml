@@ -55,7 +55,7 @@ spec:
         app: csi-secrets-store-provider-aws
     spec:
       serviceAccountName: csi-secrets-store-provider-aws
-      hostNetwork: true
+      hostNetwork: false
       containers:
         - name: provider-aws-installer
           image: ${PRIVREPO}:latest
@@ -70,6 +70,9 @@ spec:
             limits:
               cpu: 50m
               memory: 100Mi
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
           volumeMounts:
             - mountPath: "/etc/kubernetes/secrets-store-csi-providers"
               name: providervol
