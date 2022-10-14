@@ -11,7 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	json "k8s.io/component-base/logs/json"
+	"k8s.io/component-base/config"
+	jlogs "k8s.io/component-base/logs/json"
 	"k8s.io/klog/v2"
 	csidriver "sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
@@ -33,13 +34,15 @@ func main() {
 	klog.InitFlags(nil)
 	defer klog.Flush()
 
-	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
-
 	flag.Parse() // Parse command line flags
 
 	if *logFormatJSON {
-		klog.SetLogger(json.JSONLogger)
+		jsonFactory := jlogs.Factory{}
+		logger, _ := jsonFactory.Create(config.FormatOptions{})
+		klog.SetLogger(logger)
 	}
+
+	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
 
 	//socket on which to listen to for driver calls
 	endpoint := fmt.Sprintf("%s/aws.sock", *endpointDir)
