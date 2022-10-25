@@ -53,3 +53,9 @@ docker-manifest:
 	docker buildx imagetools create --tag $(REGISTRY_NAME):latest $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
 	docker buildx imagetools create --tag $(REGISTRY_NAME):$(FULL_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
 	docker buildx imagetools create --tag $(REGISTRY_NAME):$(MAJOR_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
+
+# Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
+upload-helm:
+	chart-releaser package
+	chart-releaser upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
+	chart-releaser index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
