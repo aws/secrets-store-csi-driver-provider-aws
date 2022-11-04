@@ -9,6 +9,7 @@ providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
 
 podLabels: {}
 podAnnotations: {}
+priorityClassName: ""
 
 resources:
   requests:
