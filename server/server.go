@@ -13,28 +13,32 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
+
+	"k8s.io/klog/v2"
 
 	"google.golang.org/grpc"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 )
 
-// Version filled in by Makefile durring build.
+// Version filled in by Makefile during build.
 var Version string
 
 const (
-	namespaceAttrib = "csi.storage.k8s.io/pod.namespace"
-	acctAttrib      = "csi.storage.k8s.io/serviceAccount.name"
-	podnameAttrib   = "csi.storage.k8s.io/pod.name"
-	regionAttrib    = "region"                        // The attribute name for the region in the SecretProviderClass
-	transAttrib     = "pathTranslation"               // Path translation char
-	regionLabel     = "topology.kubernetes.io/region" // The node label giving the region
-	secProvAttrib   = "objects"                       // The attributed used to pass the SecretProviderClass definition (with what to mount)
+	namespaceAttrib      = "csi.storage.k8s.io/pod.namespace"
+	acctAttrib           = "csi.storage.k8s.io/serviceAccount.name"
+	podnameAttrib        = "csi.storage.k8s.io/pod.name"
+	regionAttrib         = "region"                        // The attribute name for the region in the SecretProviderClass
+	transAttrib          = "pathTranslation"               // Path translation char
+	regionLabel          = "topology.kubernetes.io/region" // The node label giving the region
+	secProvAttrib        = "objects"                       // The attribute used to pass the SecretProviderClass definition (with what to mount)
+	failoverRegionAttrib = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
 )
 
 // A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
@@ -43,7 +47,7 @@ const (
 // from that request. The details of what secrets are required and where to
 // store them are in the request. The secrets will be retrieved using the AWS
 // credentials of the IAM role associated with the pod. If there is a failure
-// durring the mount of any one secret no secrets are written to the mount point.
+// during the mount of any one secret no secrets are written to the mount point.
 //
 type CSIDriverProviderServer struct {
 	*grpc.Server
@@ -95,16 +99,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	podName := attrib[podnameAttrib]
 	region := attrib[regionAttrib]
 	translate := attrib[transAttrib]
-
-	// Lookup the region if one was not specified.
-	if len(region) <= 0 {
-		region, err = s.getRegionFromNode(ctx, nameSpace, podName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve region from node. error %+v", err)
-		}
-	}
-
-	klog.Infof("Servicing mount request for pod %s in namespace %s using service account %s with region %s", podName, nameSpace, svcAcct, region)
+	failoverRegion := attrib[failoverRegionAttrib]
 
 	// Make a map of the currently mounted versions (if any)
 	curVersions := req.GetCurrentObjectVersion()
@@ -120,37 +115,42 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		return nil, fmt.Errorf("failed to unmarshal file permission, error: %+v", err)
 	}
 
-	// Get the pod's AWS creds.
-	oidcAuth, err := auth.NewAuth(ctx, region, nameSpace, svcAcct, s.k8sClient)
+	regions, err := s.getAwsRegions(region, failoverRegion, nameSpace, podName, ctx)
+	if err != nil {
+		klog.ErrorS(err, "Failed to initialize AWS session")
+		return nil, err
+	}
+
+	klog.Infof("Servicing mount request for pod %s in namespace %s using service account %s with region(s) %s", podName, nameSpace, svcAcct, strings.Join(regions, ", "))
+
+	awsSessions, err := s.getAwsSessions(nameSpace, svcAcct, ctx, regions)
 	if err != nil {
 		return nil, err
 	}
-	awsSession, err := oidcAuth.GetAWSSession()
-	if err != nil {
-		klog.ErrorS(err, "Failed to initialize AWS session")
+	if len(awsSessions) > 2 {
+		klog.Errorf("Max number of region(s) exceeded: %s", strings.Join(regions, ", "))
 		return nil, err
 	}
 
 	// Get the list of secrets to mount. These will be grouped together by type
 	// in a map of slices (map[string][]*SecretDescriptor) keyed by secret type
 	// so that requests can be batched if the implementation allows it.
-	descriptors, err := provider.NewSecretDescriptorList(mountDir, translate, attrib[secProvAttrib])
+	descriptors, err := provider.NewSecretDescriptorList(mountDir, translate, attrib[secProvAttrib], regions)
 	if err != nil {
+		klog.Errorf("Failure reading descriptor list: %s", err)
 		return nil, err
 	}
 
-	// Fetch all secrets before saving so we write nothing on failure.
-	providerFactory := s.secretProviderFactory(region, awsSession)
+	providerFactory := s.secretProviderFactory(awsSessions, regions)
 	var fetchedSecrets []*provider.SecretValue
 	for sType := range descriptors { // Iterate over each secret type.
-
-		// Fetch all the the secrets and update the curVerMap
+		// Fetch all the secrets and update the curVerMap
 		provider := providerFactory.GetSecretProvider(sType)
 		secrets, err := provider.GetSecretValues(ctx, descriptors[sType], curVerMap)
 		if err != nil {
+			klog.Errorf("Failure getting secret values from provider type %s: %s", sType, err)
 			return nil, err
 		}
-
 		fetchedSecrets = append(fetchedSecrets, secrets...) // Build up the list of all secrets
 	}
 
@@ -165,7 +165,6 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		if file != nil {
 			files = append(files, file)
 		}
-
 	}
 
 	// Build the version response from the current version map and return it.
@@ -174,7 +173,60 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		ov = append(ov, curVerMap[id])
 	}
 	return &v1alpha1.MountResponse{Files: files, ObjectVersion: ov}, nil
+}
 
+// Private helper to get the aws lookup regions for a given pod.
+//
+// When a region in the mount request is available, the region is added as primary region to the lookup region list
+// If a region is not specified in the mount request, we must lookup the region from node label and add as primary region to the lookup region list
+// If both the region and node label region are not available, error will be thrown
+// If backupRegion is provided and is equal to region/node region, error will be thrown else backupRegion is added to the lookup region list
+//
+func (s *CSIDriverProviderServer) getAwsRegions(region, backupRegion, nameSpace, podName string, ctx context.Context) (response []string, err error) {
+	var lookupRegionList []string
+
+	// Find primary region.  Fall back to region node if unavailable.
+	if len(region) == 0 {
+		region, err = s.getRegionFromNode(ctx, nameSpace, podName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to retrieve region from node. error %+v", err)
+		}
+	}
+	lookupRegionList = []string{region}
+
+	// Find backup region
+	if len(backupRegion) > 0 {
+		if region == backupRegion {
+			return nil, fmt.Errorf("%v: failover region cannot be the same as the primary region", region)
+		}
+		lookupRegionList = append(lookupRegionList, backupRegion)
+	}
+	return lookupRegionList, nil
+}
+
+// Private helper to get the aws sessions for all the lookup regions for a given pod.
+//
+// Gets the pod's AWS creds for each lookup region
+// Establishes the connection using Aws cred for each lookup region
+// If atleast one session is not created, error will be thrown
+//
+func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx context.Context, lookupRegionList []string) (response []*session.Session, err error) {
+	// Get the pod's AWS creds for each lookup region.
+	var awsSessionsList []*session.Session
+
+	for _, region := range lookupRegionList {
+		oidcAuth, err := auth.NewAuth(ctx, region, nameSpace, svcAcct, s.k8sClient)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s", region, err)
+		}
+		awsSession, err := oidcAuth.GetAWSSession()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s", region, err)
+		}
+		awsSessionsList = append(awsSessionsList, awsSession)
+	}
+
+	return awsSessionsList, nil
 }
 
 // Return the provider plugin version information to the driver.

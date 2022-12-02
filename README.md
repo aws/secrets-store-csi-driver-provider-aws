@@ -20,16 +20,9 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 [^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate. 
 
 ### Installing the AWS Provider
-
-Using Helm:
+To install the Secrets Manager and Config Provider use the YAML file in the deployment directory:
 ```shell
-helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver-provider-aws
-helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws
-```
-
-Using YAML:
-```shell
-kubectl apply -n kube-system -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 ```
 
 ## Usage
@@ -116,14 +109,21 @@ The parameters section contains the details of the mount request and contain one
               objectType: "secretsmanager"
     ```
 * region: An optional field to specify the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the region from the annotation on the node. This lookup adds overhead to mount requests so clusters using large numbers of pods will benefit from providing the region here.
+* failoverRegion: An optional field to specify a secondary AWS region to use when retrieving secrets. See the Automated Failover Regions section in this readme for more information.
 * pathTranslation: An optional field to specify a substitution character to use when the path separator character (slash on Linux) is used in the file name. If a Secret or parameter name contains the path separator failures will occur when the provider tries to create a mounted file using the name. When not specified the underscore character is used, thus My/Path/Secret will be mounted as My_Path_Secret. This pathTranslation value can either be the string "False" or a single character string. When set to "False", no character substitution is performed.
 
-The objects field of the SecretProviderClass can contain the following sub-fields:
+The primary objects field of the SecretProviderClass can contain the following sub-fields:
 * objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this must be the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can not be a full ARN.
 * objectType: This field is optional when using a Secrets Manager ARN for objectName, otherwise it is required. This field can be either "secretsmanager" or "ssmparameter".
 * objectAlias: This optional field specifies the file name under which the secret will be mounted. When not specified the file name defaults to objectName.
 * objectVersion: This field is optional, and generally not recommended since updates to the secret require updating this field. For Secrets Manager this is the [VersionId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store, this is the optional [version number](https://docs.aws.amazon.com/systems-manager/latest/userguide/sysman-paramstore-versions.html#reference-parameter-version).
-* objectVersionLabel: This optional fields specifies the alias used for the version. Most applications should not use this field since the most recent version of the secret is used by default. For Secrets Manager this is the [VersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store this is the optional [Parameter Label](https://docs.amazonaws.cn/en_us/systems-manager/latest/userguide/sysman-paramstore-labels.html).
+* objectVersionLabel: This optional field specifies the alias used for the version. Most applications should not use this field since the most recent version of the secret is used by default. For Secrets Manager this is the [VersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store this is the optional [Parameter Label](https://docs.amazonaws.cn/en_us/systems-manager/latest/userguide/sysman-paramstore-labels.html).
+
+* failoverObject: An optional field when using the failoverRegion feature. See the Automated Failover Regions section in this readme for more information. The failover object can contain the following sub-fields:
+  * objectName: This field is required if failoverObject is present. Specifies the name of the secret or parameter to be fetched from the failover region. See the primary objectName field for more information.
+  * objectVersion: This field is optional and defines the objectVersion for the failover region.  If specified, it must match the primary region's objectVersion. See the primary objectVersion field for more information.
+  * objectVersionLabel: This optional field specifies the alias used for the version of the failoverObject. See the primary objectVersionLabel field for more information. 
+
 * jmesPath: This optional field specifies the specific key-value pairs to extract from a JSON-formatted secret. You can use this field to mount key-value pairs from a properly formatted secret value as individual secrets. For example: Consider a secret "MySecret" with JSON content as follows:
 
     ```shell
@@ -157,6 +157,31 @@ Anyone wishing to test out the rotation reconciler feature can enable it using h
 ```bash
 helm upgrade -n kube-system csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=3600s
 ```
+
+### Automated Failover Regions
+In order to provide availability during connectivity outages or for disaster recovery configurations, this provider supports an automated failover feature to fetch secrets or parameters from a secondary region. To define an automated failover region, define the failoverRegion in the SecretProviderClass.yaml file:
+```yaml
+spec:
+  provider: aws
+  parameters:
+    region: us-east-1
+    failoverRegion: us-east-2
+```
+
+When the failoverRegion is defined, the driver will attempt to get the secret value from both regions.
+* If both regions successfully retrieve the secret value, then the mount will contain the secret value of the secret in the primary region.
+* If one region returns a non-client error (code 5XX), and the other region succeeds, then the mount will contain the secret value of the non-failing region.
+* If either region returns a client error (code 4XX), then the mount will fail, and the cause of the error must be resolved before the mount will succeed.
+
+ It is possible to use different secrets or parameters between the primary and failover regions.  This example will use different ARNs depending on which region it is pulling from:
+ ```yaml
+- objectName: "arn:aws:secretsmanager:us-east-1:123456789012:secret:PrimarySecret-12345"
+  failoverObject: 
+    objectName: "arn:aws:secretsmanager:us-east-2:123456789012:secret:FailoverSecret-12345" 
+  objectAlias: testArn
+```
+If 'failoverObject' is defined, then objectAlias is required.
+
 
 ### Private Builds
 You can pull down this git repository and build and install this plugin into your account's [AWS ECR](https://aws.amazon.com/ecr/) registry using the following steps. First clone the repository:
