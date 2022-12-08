@@ -81,7 +81,7 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 			return nil, err
 		}
 
-		if len(secretVal) > 0 {
+		if len(secretVal) > 0 && len(value) == 0 {
 			value = secretVal
 		}
 	}
