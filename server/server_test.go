@@ -1016,7 +1016,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			},
 		},
 		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
-			{SecretString: aws.String("secret1"), VersionId: aws.String("wrongSecret")},
+			{SecretString: aws.String("wrongSecret"), VersionId: aws.String("1")},
 		},
 		brDescRsp: []*secretsmanager.DescribeSecretOutput{
 			{VersionIdsToStages: map[string][]*string{"TestSecret1": {aws.String("wrongSecret")}}},
