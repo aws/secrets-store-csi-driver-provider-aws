@@ -29,6 +29,8 @@ updateStrategy:
 
 rbac:
   install: true
+  serviceAccount:
+    annotations: {}
 
 securityContext:
   privileged: false
