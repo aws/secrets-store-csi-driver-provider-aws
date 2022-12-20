@@ -55,10 +55,10 @@ spec:
         app: csi-secrets-store-provider-aws
     spec:
       serviceAccountName: csi-secrets-store-provider-aws
-      hostNetwork: true
+      hostNetwork: false
       containers:
         - name: provider-aws-installer
-          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:1.0.r2-2021.08.13.20.34-linux-amd64
+          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:1.0.r2-6-gee95299-2022.04.14.21.07
           imagePullPolicy: Always
           args:
               - --provider-volume=/etc/kubernetes/secrets-store-csi-providers
@@ -69,6 +69,9 @@ spec:
             limits:
               cpu: 50m
               memory: 100Mi
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
           volumeMounts:
             - mountPath: "/etc/kubernetes/secrets-store-csi-providers"
               name: providervol

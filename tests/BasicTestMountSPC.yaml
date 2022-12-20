@@ -26,6 +26,7 @@ spec:
       key: password  
 
   parameters:
+    failoverRegion: us-east-2
     objects: | 
         - objectName: "ParameterStoreTest1"
           objectType: "ssmparameter"
@@ -34,12 +35,20 @@ spec:
           objectType: "ssmparameter"
         - objectName: "ParameterStoreRotationTest"
           objectType: "ssmparameter"
+        - objectName: "ParameterStoreFailOverRegionTest"
+          objectType: "ssmparameter"
+        - objectName: "ParamFailOverRegionRotationTest"
+          objectType: "ssmparameter"
         - objectName: "SecretsManagerRotationTest"
+          objectType: "secretsmanager"
+        - objectName: "SMFailOverRegionRotationTest"
           objectType: "secretsmanager"
         - objectName: "SecretsManagerTest1"
           objectType: "secretsmanager"
         - objectName: arn:aws:secretsmanager:${REGION}:${ACCOUNT_NUMBER}:secret:SecretsManagerTest2
           objectAlias: "SecretsManagerTest2"
+        - objectName: "SecretsManagerFailOverRegionTest"
+          objectType: "secretsmanager"
         - objectName: "SecretsManagerSync"
           objectType: "secretsmanager"
         - objectName: "jsonSsm"
@@ -56,3 +65,7 @@ spec:
                 ObjectAlias: "secretsManagerUsername"
               - Path: "password"
                 ObjectAlias: "secretsManagerPassword"
+        - objectName: "arn:aws:secretsmanager:${REGION}:${ACCOUNT_NUMBER}:secret:SMSecret"
+          failoverObject:
+            objectName: "arn:aws:secretsmanager:${FAILOVER_REGION}:${ACCOUNT_NUMBER}:secret:SMBackupSecret"
+          ObjectAlias: "smFailOverSecret"

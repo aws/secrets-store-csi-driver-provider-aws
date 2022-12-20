@@ -10,6 +10,7 @@ package provider
 
 import (
 	"context"
+
 	"github.com/aws/aws-sdk-go/aws/session"
 
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
@@ -29,19 +30,19 @@ type SecretProviderFactory struct {
 
 // The prototype for the provider factory fatory
 //
-type ProviderFactoryFactory func(region string, session *session.Session) (factory *SecretProviderFactory)
+type ProviderFactoryFactory func(session []*session.Session, reigons []string) (factory *SecretProviderFactory)
 
 // Creates the provider factory.
 //
 // This factory catagorizes the request and returns the correct concrete
 // provider implementation using the secret type.
 //
-func NewSecretProviderFactory(region string, session *session.Session) (factory *SecretProviderFactory) {
+func NewSecretProviderFactory(sessions []*session.Session, regions []string) (factory *SecretProviderFactory) {
 
 	return &SecretProviderFactory{
 		Providers: map[SecretType]SecretProvider{
-			SSMParameter:   NewParameterStoreProvider(region, session),
-			SecretsManager: NewSecretsManagerProvider(region, session),
+			SSMParameter:   NewParameterStoreProvider(sessions, regions),
+			SecretsManager: NewSecretsManagerProvider(sessions, regions),
 		},
 	}
 

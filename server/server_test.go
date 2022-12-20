@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
@@ -33,6 +34,7 @@ type MockParameterStoreClient struct {
 	ssmiface.SSMAPI
 	rspCnt int
 	rsp    []*ssm.GetParametersOutput
+	reqErr error
 }
 
 func (m *MockParameterStoreClient) GetParametersWithContext(
@@ -43,20 +45,20 @@ func (m *MockParameterStoreClient) GetParametersWithContext(
 	}
 	rsp := m.rsp[m.rspCnt]
 	m.rspCnt += 1
+	if m.reqErr != nil {
+		return nil, m.reqErr
+	}
 	if rsp == nil {
 		return nil, fmt.Errorf("Error in GetParameters")
 	}
 
-	if len(rsp.Parameters) != len(input.Names) {
-		panic("Batch request size not equal to resposne size")
-	}
 	failed := make([]*string, 0)
 	for _, name := range input.Names {
 		if strings.Contains(*name, "Fail") {
 			failed = append(failed, name)
 		}
 	}
-	rsp.InvalidParameters = failed
+	rsp.InvalidParameters = append(rsp.InvalidParameters, failed...)
 
 	return rsp, nil
 }
@@ -67,6 +69,7 @@ type MockSecretsManagerClient struct {
 	getRsp  []*secretsmanager.GetSecretValueOutput
 	descCnt int
 	descRsp []*secretsmanager.DescribeSecretOutput
+	reqErr  error
 }
 
 func (m *MockSecretsManagerClient) GetSecretValueWithContext(
@@ -77,11 +80,16 @@ func (m *MockSecretsManagerClient) GetSecretValueWithContext(
 	}
 	rsp := m.getRsp[m.getCnt]
 	m.getCnt += 1
+
+	if m.reqErr != nil {
+		return nil, m.reqErr
+	}
 	if rsp == nil {
 		return nil, fmt.Errorf("Error in GetSecretValue")
 	}
 	return rsp, nil
 }
+
 func (m *MockSecretsManagerClient) DescribeSecretWithContext(
 	ctx context.Context, input *secretsmanager.DescribeSecretInput, options ...request.Option,
 ) (*secretsmanager.DescribeSecretOutput, error) {
@@ -90,6 +98,9 @@ func (m *MockSecretsManagerClient) DescribeSecretWithContext(
 	}
 	rsp := m.descRsp[m.descCnt]
 	m.descCnt += 1
+	if m.reqErr != nil {
+		return nil, m.reqErr
+	}
 	if rsp == nil {
 		return nil, fmt.Errorf("Error in DescribeSecret")
 	}
@@ -98,13 +109,22 @@ func (m *MockSecretsManagerClient) DescribeSecretWithContext(
 
 func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProviderServer {
 
-	var ssmRsp []*ssm.GetParametersOutput
-	var gsvRsp []*secretsmanager.GetSecretValueOutput
-	var descRsp []*secretsmanager.DescribeSecretOutput
+	var ssmRsp, backupRegionSsmRsp []*ssm.GetParametersOutput
+	var gsvRsp, backupRegionGsvRsp []*secretsmanager.GetSecretValueOutput
+	var descRsp, backupRegionDescRsp []*secretsmanager.DescribeSecretOutput
+	var reqErr, brReqErr, ssmReqErr, ssmBrReqErr error
+
 	if tstData != nil {
 		ssmRsp = tstData.ssmRsp
 		gsvRsp = tstData.gsvRsp
 		descRsp = tstData.descRsp
+		backupRegionGsvRsp = tstData.brGsvRsp
+		backupRegionDescRsp = tstData.brDescRsp
+		backupRegionSsmRsp = tstData.brSsmRsp
+		reqErr = tstData.reqErr
+		brReqErr = tstData.brReqErr
+		ssmReqErr = tstData.ssmReqErr
+		ssmBrReqErr = tstData.ssmBrReqErr
 	}
 
 	// Get the test attributes.
@@ -118,12 +138,51 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 	namespace := attributes["namespace"]
 	accName := attributes["accName"]
 	podName := attributes["podName"]
+	failoverRegion := attributes["failoverRegion"]
 
-	factory := func(region string, session *session.Session) (factory *provider.SecretProviderFactory) {
+	nodeRegion := region
+	if len(nodeRegion) == 0 {
+		nodeRegion = "fakeRegion"
+	}
+
+	factory := func(session []*session.Session, regions []string) (factory *provider.SecretProviderFactory) {
+		if len(region) == 0 {
+			region = nodeRegion
+		}
+		ssmClients := []provider.SecretsManagerClient{}
+		if gsvRsp != nil || descRsp != nil || reqErr != nil {
+			ssmClients = append(ssmClients, provider.SecretsManagerClient{
+				Region: region,
+				Client: &MockSecretsManagerClient{getRsp: gsvRsp, descRsp: descRsp, reqErr: reqErr},
+			})
+
+		}
+		if backupRegionGsvRsp != nil || backupRegionDescRsp != nil || brReqErr != nil {
+			ssmClients = append(ssmClients, provider.SecretsManagerClient{
+				Region: failoverRegion,
+				Client: &MockSecretsManagerClient{getRsp: backupRegionGsvRsp, descRsp: backupRegionDescRsp, reqErr: brReqErr},
+			})
+		}
+
+		paramClients := []provider.ParameterStoreClient{}
+		if ssmRsp != nil || ssmReqErr != nil {
+			paramClients = append(paramClients, provider.ParameterStoreClient{
+				Region: region,
+				Client: &MockParameterStoreClient{rsp: ssmRsp, reqErr: ssmReqErr},
+			})
+		}
+		if backupRegionSsmRsp != nil || ssmBrReqErr != nil {
+			paramClients = append(paramClients, provider.ParameterStoreClient{
+				Region:     failoverRegion,
+				Client:     &MockParameterStoreClient{rsp: backupRegionSsmRsp, reqErr: ssmBrReqErr},
+				IsFailover: true,
+			})
+		}
+
 		return &provider.SecretProviderFactory{
 			Providers: map[provider.SecretType]provider.SecretProvider{
-				provider.SSMParameter:   provider.NewParameterStoreProviderWithClient(&MockParameterStoreClient{rsp: ssmRsp}),
-				provider.SecretsManager: provider.NewSecretsManagerProviderWithClient(&MockSecretsManagerClient{getRsp: gsvRsp, descRsp: descRsp}),
+				provider.SSMParameter:   provider.NewParameterStoreProviderWithClients(paramClients...),
+				provider.SecretsManager: provider.NewSecretsManagerProviderWithClients(ssmClients...),
 			},
 		}
 	}
@@ -147,10 +206,6 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 		node.Name = nodeName
 	}
 
-	nodeRegion := region
-	if len(nodeRegion) == 0 {
-		nodeRegion = "fakeRegion"
-	}
 	if !strings.Contains(region, "Fail") {
 		node.ObjectMeta.Labels = map[string]string{"topology.kubernetes.io/region": nodeRegion}
 	}
@@ -166,15 +221,23 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 }
 
 type testCase struct {
-	testName   string
-	attributes map[string]string
-	mountObjs  []map[string]interface{}
-	ssmRsp     []*ssm.GetParametersOutput
-	gsvRsp     []*secretsmanager.GetSecretValueOutput
-	descRsp    []*secretsmanager.DescribeSecretOutput
-	expErr     string
-	expSecrets map[string]string
-	perms      string
+	testName    string
+	attributes  map[string]string
+	mountObjs   []map[string]interface{}
+	ssmRsp      []*ssm.GetParametersOutput
+	brSsmRsp    []*ssm.GetParametersOutput
+	gsvRsp      []*secretsmanager.GetSecretValueOutput
+	brGsvRsp    []*secretsmanager.GetSecretValueOutput
+	descRsp     []*secretsmanager.DescribeSecretOutput
+	brDescRsp   []*secretsmanager.DescribeSecretOutput
+	ssmReqErr   error
+	ssmBrReqErr error
+	reqErr      error
+	brReqErr    error
+	expErr      string
+	brExpErr    string
+	expSecrets  map[string]string
+	perms       string
 }
 
 func buildMountReq(dir string, tst testCase, curState []*v1alpha1.ObjectVersion) *v1alpha1.MountRequest {
@@ -187,6 +250,11 @@ func buildMountReq(dir string, tst testCase, curState []*v1alpha1.ObjectVersion)
 	region := tst.attributes["region"]
 	if len(region) > 0 && !strings.Contains(region, "Fail") {
 		attrMap["region"] = region
+	}
+
+	failoverRegion := tst.attributes["failoverRegion"]
+	if len(failoverRegion) > 0 {
+		attrMap["failoverRegion"] = failoverRegion
 	}
 
 	translate := tst.attributes["pathTranslation"]
@@ -316,6 +384,38 @@ var mountTests []testCase = []testCase{
 		},
 		perms: "420",
 	},
+	{ // Multi-region success case.
+		testName: "Multi Region Success",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "failoverRegion": "fakeBackupRegion",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			nil,
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{},
+		expErr:    "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+			"TestParm1":   "parm1",
+		},
+		perms: "420",
+	},
 	{ // Mount a json secret
 		testName:   "Mount Json Success",
 		attributes: stdAttributes,
@@ -376,7 +476,7 @@ var mountTests []testCase = []testCase{
 		attributes: stdAttributes,
 		mountObjs: []map[string]interface{}{
 			{
-				"objectName":  "arn:aws:secretsmanager:us-west-2:123456789012:secret:geheimnis-ABc123",
+				"objectName":  "arn:aws:secretsmanager:fakeRegion:123456789012:secret:geheimnis-ABc123",
 				"objectAlias": "TestSecret1",
 				"jmesPath": []map[string]string{
 					{
@@ -598,7 +698,7 @@ var mountTests []testCase = []testCase{
 			nil,
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "Failed fetching secret",
+		expErr:     "Failed to fetch secret",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -616,7 +716,7 @@ var mountTests []testCase = []testCase{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "Failed fetching parameter",
+		expErr:     "Failed to fetch parameters from all regions",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -634,17 +734,16 @@ var mountTests []testCase = []testCase{
 			{
 				Parameters: []*ssm.Parameter{
 					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
-					{Name: aws.String("FailParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
 					{Name: aws.String("TestParm3"), Value: aws.String("parm3"), Version: aws.Int64(1)},
-					{Name: aws.String("FailParm4"), Value: aws.String("parm2"), Version: aws.Int64(1)},
 				},
+				InvalidParameters: []*string{aws.String("FailParm2"), aws.String("FailParm4")},
 			},
 		},
 		gsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "Invalid parameters: FailParm2, FailParm4",
+		expErr:     "Invalid parameters",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -803,6 +902,942 @@ var mountTests []testCase = []testCase{
 	},
 }
 
+var stdAttributesWithBackupRegion map[string]string = map[string]string{
+	"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+	"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "failoverRegion": "fakeBackupRegion",
+}
+
+var mountTestsForMultiRegion []testCase = []testCase{
+	{ // Mount secret manager secrets from the fallback region Success.
+		testName:   "Multi Region Secrets Manager Fallback Success",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		reqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		expErr: "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
+	{ // Mount parameter secrets from the fallback region Success.
+		testName:   "Multi Region Parameter Store Fallback Success",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters:        []*ssm.Parameter{},
+				InvalidParameters: []*string{aws.String("TestParm1")},
+			},
+		},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		expErr: "",
+		expSecrets: map[string]string{
+			"TestParm1": "parm1",
+		},
+		perms: "420",
+	},
+	{ // Mount secrets from the fallback region Success.
+		testName:   "Multi Region Fallback Success",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{nil},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{nil},
+		reqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{},
+		expErr:    "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+			"TestParm1":   "parm1",
+		},
+		perms: "420",
+	},
+	{ // Mount secrets from the primary region Success.
+		testName:   "Multi Region Prefers Primary",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("wrongSecret"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("wrongSecret"), VersionId: aws.String("1")},
+		},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{
+			{VersionIdsToStages: map[string][]*string{"TestSecret1": {aws.String("wrongSecret")}}},
+		},
+		expErr: "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+			"TestParm1":   "parm1",
+		},
+		perms: "420",
+	},
+	{ // Verify failure when the API call (GetSecretValue) fails for all the regions
+		testName:   "Multi Region Secret Manager Api Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret2", "objectType": "secretsmanager"},
+		},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		reqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+
+		brGsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		brReqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		expErr:     "Failed to fetch secret from all regions",
+		brExpErr:   "Failed to fetch secret from all regions:",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Verify failure when API call (GetParameters) fails for all the regions
+		testName:   "Multi Region Parameter Store Api Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm2", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{nil},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		brSsmRsp: []*ssm.GetParametersOutput{nil},
+		ssmBrReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		expErr:     "Failed to fetch parameters from all regions.",
+		brExpErr:   "Failed to fetch parameters from all regions.",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Verify failure to get region if region and node label is not available but failover region is available
+		testName: "Multi Region Fallback Region Fail",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "FailNode", "region": "FailRegion", "roleARN": "fakeRole", "failoverRegion": "fakeBackupRegion",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		brDescRsp:  []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "failed to retrieve region from node",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Verify failure when region label is equal to backup region
+		testName: "Region Equals FallbackRegion Fail",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "fakeRegion", "roleARN": "fakeRole", "failoverRegion": "fakeRegion",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		expErr:     "failover region cannot be the same as the primary region",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Verify failure when we can not initialize the auth session (no role) in region and failoverRegion.
+		testName: "Multi Region Session Fail",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "fakeRegion", "roleARN": "", "failoverRegion": "fakeBackupRegion",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		expErr:     "fakeRegion: An IAM role must be associated",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Verify failure when params partially exists in primary and secondary region.
+		testName:   "Multi Region Param Partial Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+			{"objectName": "TestParm2", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+				},
+				InvalidParameters: []*string{aws.String("TestParm1")},
+			},
+		},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+				InvalidParameters: []*string{aws.String("TestParm2")},
+			},
+		},
+		expErr:     "Invalid parameters",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // SecretsManager Primary Region 4XX Fail.
+		testName:   "SecretsManager Primary Region 4XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		reqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeResourceNotFoundException, "Secrets Manager can't find the specified secret", fmt.Errorf("")),
+			400, ""),
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		brDescRsp:  []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "Failed fetching secret TestSecret1",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // SecretsManager Primary Region 5XX Fail.
+		testName:   "SecretsManager Primary Region 5XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		reqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side", fmt.Errorf("")),
+			500, ""),
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		expErr:    "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
+	{ // SecretsManager Primary Region 5XX and Secondary 4XX Fail.
+		testName:   "SecretsManager Primary Region 5XX And Secondary Region 4XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		reqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side", fmt.Errorf("")),
+			500, ""),
+		brGsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		brReqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeResourceNotFoundException, "Secrets Manager can't find the specified secret", fmt.Errorf("")),
+			400, ""),
+		expErr:     "fakeBackupRegion: Failed fetching secret TestSecret1: ResourceNotFoundException: Secrets Manager can't find the specified secret",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // ParameterStore Primary Region 4XX Fail.
+		testName:   "ParameterStore Primary Region 4XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInvalidKeyId, "The query key ID isn't valid.", fmt.Errorf("")),
+			400, ""),
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		expErr:     "InvalidKeyId: The query key ID isn't valid.",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // ParameterStore Primary Region 5XX Fail.
+		testName:   "ParameterStore Primary Region 5XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{nil},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side", fmt.Errorf("")),
+			500, ""),
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		expErr: "",
+		expSecrets: map[string]string{
+			"TestParm1": "parm1",
+		},
+		perms: "420",
+	},
+	{ // ParameterStore Primary Region 5XX and Secondary region 4XX Fail.
+		testName:   "ParameterStore Primary Region 5XX And Secondary Region 4XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{nil},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side", fmt.Errorf("")),
+			500, ""),
+		brSsmRsp: []*ssm.GetParametersOutput{nil},
+		ssmBrReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInvalidKeyId, "The query key ID isn't valid.", fmt.Errorf("")),
+			400, ""),
+		expErr:     "InvalidKeyId: The query key ID isn't valid.",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Multi Region params Fail due to invalid params in fallback region.
+		testName:   "Multi Region Param Fallback Invalid Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+			{"objectName": "TestParm2", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				InvalidParameters: []*string{aws.String("TestParm1"), aws.String("TestParm2")},
+			},
+		},
+		expErr:     "Invalid parameters: TestParm1, TestParm2",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Multi Region params Fail due to 4XX error in fallback region.
+		testName:   "Multi Region Param Fallback 4XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+			{"objectName": "TestParm2", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		brSsmRsp: []*ssm.GetParametersOutput{nil},
+		ssmBrReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInvalidKeyId, "Failed due to Invalid KeyId", fmt.Errorf("")),
+			400, ""),
+		expErr:     "InvalidKeyId: Failed due to Invalid KeyId",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Multi Region Secrets fail due to 4XX in Fallback.
+		testName:   "Multi Region Secrets Fallback 4XX Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestSecret2", "objectType": "secretsmanager"},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+			{SecretString: aws.String("secret2"), VersionId: aws.String("1")},
+		},
+		descRsp:   []*secretsmanager.DescribeSecretOutput{nil},
+		brGsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		brReqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeResourceNotFoundException, "Secrets Manager can't find the specified secret", fmt.Errorf("")),
+			400, ""),
+		expErr:     "Failed to describe secret",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Mount secret manager secrets from the fallback region Success.
+		testName:   "Multi Region Secrets Manager Backup Arn Success",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{
+				"objectName":  "arn:aws:secretsmanager:fakeRegion:123456789012:secret:geheimnis-ABc123",
+				"backupArn":   "arn:aws:secretsmanager:fakeBackupRegion:123456789012:secret:backupArn-12345",
+				"objectType":  "secretsmanager",
+				"objectAlias": "TestSecret1",
+			},
+		},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
+		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		reqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side", fmt.Errorf("")),
+			500, ""),
+		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		expErr:    "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
+	{ // Test multiple SSM batches for Multi Region Fail
+		testName:   "Multi Region Big Batch Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "BinarySecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+			{"objectName": "TestParm2", "objectType": "ssmparameter"},
+			{"objectName": "TestParm3", "objectType": "ssmparameter"},
+			{"objectName": "TestParm4", "objectType": "ssmparameter"},
+			{"objectName": "TestParm5", "objectType": "ssmparameter"},
+			{"objectName": "TestParm6", "objectType": "ssmparameter"},
+			{"objectName": "TestParm7", "objectType": "ssmparameter"},
+			{"objectName": "TestParm8", "objectType": "ssmparameter"},
+			{"objectName": "TestParm9", "objectType": "ssmparameter"},
+			{"objectName": "TestParm10", "objectType": "ssmparameter"},
+			{"objectName": "TestParm11", "objectType": "ssmparameter"},
+			{"objectName": "TestParm12", "objectType": "ssmparameter"},
+			{"objectName": "TestParm13", "objectType": "ssmparameter"},
+			{"objectName": "TestParm14", "objectType": "ssmparameter"},
+			{"objectName": "TestParm15", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm3"), Value: aws.String("parm3"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm4"), Value: aws.String("parm4"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm5"), Value: aws.String("parm5"), Version: aws.Int64(1)},
+				},
+				InvalidParameters: []*string{aws.String("TestParm6"), aws.String("TestParm7"), aws.String("TestParm8"),
+					aws.String("TestParm9"), aws.String("TestParm10")},
+			},
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm11"), Value: aws.String("parm11"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")), 500, ""),
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+			{SecretBinary: []byte("BinarySecret"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm3"), Value: aws.String("parm3"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm4"), Value: aws.String("parm4"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm5"), Value: aws.String("parm5"), Version: aws.Int64(1)},
+				},
+				InvalidParameters: []*string{aws.String("TestParm6"), aws.String("TestParm7"), aws.String("TestParm8"),
+					aws.String("TestParm9"), aws.String("TestParm10")},
+			},
+		},
+		expErr:     "Invalid parameters: TestParm6, TestParm7, TestParm8, TestParm9, TestParm10",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Test multiple SSM batches for Multi Region success
+		testName:   "Multi Region Big Batch Success",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "BinarySecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+			{"objectName": "TestParm2", "objectType": "ssmparameter"},
+			{"objectName": "TestParm3", "objectType": "ssmparameter"},
+			{"objectName": "TestParm4", "objectType": "ssmparameter"},
+			{"objectName": "TestParm5", "objectType": "ssmparameter"},
+			{"objectName": "TestParm6", "objectType": "ssmparameter"},
+			{"objectName": "TestParm7", "objectType": "ssmparameter"},
+			{"objectName": "TestParm8", "objectType": "ssmparameter"},
+			{"objectName": "TestParm9", "objectType": "ssmparameter"},
+			{"objectName": "TestParm10", "objectType": "ssmparameter"},
+			{"objectName": "TestParm11", "objectType": "ssmparameter"},
+			{"objectName": "TestParm12", "objectType": "ssmparameter"},
+			{"objectName": "TestParm13", "objectType": "ssmparameter"},
+			{"objectName": "TestParm14", "objectType": "ssmparameter"},
+			{"objectName": "TestParm15", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters:        []*ssm.Parameter{},
+				InvalidParameters: []*string{},
+			},
+			{
+				Parameters:        []*ssm.Parameter{},
+				InvalidParameters: []*string{},
+			},
+		},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")),
+			500, ""),
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+			{SecretBinary: []byte("BinarySecret"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm3"), Value: aws.String("parm3"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm4"), Value: aws.String("parm4"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm5"), Value: aws.String("parm5"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm6"), Value: aws.String("parm6"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm7"), Value: aws.String("parm7"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm8"), Value: aws.String("parm8"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm9"), Value: aws.String("parm9"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm10"), Value: aws.String("parm10"), Version: aws.Int64(1)},
+				}},
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm11"), Value: aws.String("parm11"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm12"), Value: aws.String("parm12"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm13"), Value: aws.String("parm13"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm14"), Value: aws.String("parm14"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm15"), Value: aws.String("parm15"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		expErr:   "",
+		brExpErr: "",
+		expSecrets: map[string]string{
+			"TestSecret1":   "secret1",
+			"BinarySecret1": "BinarySecret",
+			"TestParm1":     "parm1",
+			"TestParm2":     "parm2",
+			"TestParm3":     "parm3",
+			"TestParm4":     "parm4",
+			"TestParm5":     "parm5",
+			"TestParm6":     "parm6",
+			"TestParm7":     "parm7",
+			"TestParm8":     "parm8",
+			"TestParm9":     "parm9",
+			"TestParm10":    "parm10",
+			"TestParm11":    "parm11",
+			"TestParm12":    "parm12",
+			"TestParm13":    "parm13",
+			"TestParm14":    "parm14",
+			"TestParm15":    "parm15",
+		},
+		perms: "420",
+	},
+	{ // Test partial SSM batches for Multi Region Fail
+		testName:   "Multi Region Partial Big Batch Fail",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "BinarySecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+			{"objectName": "TestParm2", "objectType": "ssmparameter"},
+			{"objectName": "TestParm3", "objectType": "ssmparameter"},
+			{"objectName": "TestParm4", "objectType": "ssmparameter"},
+			{"objectName": "TestParm5", "objectType": "ssmparameter"},
+			{"objectName": "TestParm6", "objectType": "ssmparameter"},
+			{"objectName": "TestParm7", "objectType": "ssmparameter"},
+			{"objectName": "TestParm8", "objectType": "ssmparameter"},
+			{"objectName": "TestParm9", "objectType": "ssmparameter"},
+			{"objectName": "TestParm10", "objectType": "ssmparameter"},
+			{"objectName": "TestParm11", "objectType": "ssmparameter"},
+			{"objectName": "TestParm12", "objectType": "ssmparameter"},
+			{"objectName": "TestParm13", "objectType": "ssmparameter"},
+			{"objectName": "TestParm14", "objectType": "ssmparameter"},
+			{"objectName": "TestParm15", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm3"), Value: aws.String("parm3"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm4"), Value: aws.String("parm4"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm5"), Value: aws.String("parm5"), Version: aws.Int64(1)},
+				},
+				InvalidParameters: []*string{aws.String("TestParm6"), aws.String("TestParm7"), aws.String("TestParm8"),
+					aws.String("TestParm9"), aws.String("TestParm10")},
+			},
+			{
+				InvalidParameters: []*string{aws.String("TestParm11"), aws.String("TestParm12"), aws.String("TestParm13"),
+					aws.String("TestParm14"), aws.String("TestParm15")},
+			},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+			{SecretBinary: []byte("BinarySecret"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1-sec"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm3"), Value: aws.String("parm3-sec"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm2"), Value: aws.String("parm2-sec"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm8"), Value: aws.String("parm8"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm9"), Value: aws.String("parm9"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm10"), Value: aws.String("parm10"), Version: aws.Int64(1)},
+				},
+
+				InvalidParameters: []*string{aws.String("TestParm4"), aws.String("TestParm5"), aws.String("TestParm6"),
+					aws.String("TestParm7")},
+			},
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm11"), Value: aws.String("parm11"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm12"), Value: aws.String("parm12"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm13"), Value: aws.String("parm13"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm14"), Value: aws.String("parm14"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm15"), Value: aws.String("parm15"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		expErr:     "Invalid parameters: TestParm6, TestParm7, TestParm8, TestParm9, TestParm10",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Test partial SSM batches for Multi Region with Failover Descriptor success
+		testName:   "Multi Region Failover Descriptor Batch Success",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "BinarySecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm13", "objectType": "ssmparameter"},
+			{"objectName": "TestParm14", "objectType": "ssmparameter"},
+			{
+				"objectName":    "TestParm15",
+				"objectType":    "ssmparameter",
+				"objectVersion": "VersionId",
+				"failoverObject": map[string]string{
+					"objectName":    "TestParm15AnotherRegion",
+					"objectVersion": "VersionId",
+				},
+				"inFallback":  "true",
+				"objectAlias": "TestParm15Alias",
+			},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{nil},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side.", fmt.Errorf("")), 500, ""),
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+			{SecretBinary: []byte("BinarySecret"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm13"), Value: aws.String("parm13"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm14"), Value: aws.String("parm14"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm15AnotherRegion"), Value: aws.String("parm15"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		expErr:   "",
+		brExpErr: "",
+		expSecrets: map[string]string{
+			"TestSecret1":     "secret1",
+			"BinarySecret1":   "BinarySecret",
+			"TestParm13":      "parm13",
+			"TestParm14":      "parm14",
+			"TestParm15Alias": "parm15",
+		},
+		perms: "420",
+	},
+	{ // Test Json SSM batches for Multi Region success
+		testName:   "Multi Region Json SSM batches success",
+		attributes: stdAttributesWithBackupRegion,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "BinarySecret1", "objectType": "secretsmanager"},
+			{
+				"objectName": "TestParm1",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm1Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm2",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm2Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm3",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm3Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm4",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm4Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm5",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm5Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm6",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm6Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm7",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm7Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm8",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm8Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm9",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm9Username",
+					},
+				},
+			},
+			{
+				"objectName": "TestParm10",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "dbUser.username",
+						"objectAlias": "ssm10Username",
+					},
+				},
+			},
+			{"objectName": "TestParm11", "objectType": "ssmparameter"},
+			{"objectName": "TestParm12", "objectType": "ssmparameter"},
+			{"objectName": "TestParm13", "objectType": "ssmparameter"},
+			{"objectName": "TestParm14", "objectType": "ssmparameter"},
+			{
+				"objectName":    "TestParm15",
+				"objectType":    "ssmparameter",
+				"objectVersion": "VersionId",
+				"failoverObject": map[string]string{
+					"objectName":    "TestParm15AnotherRegion",
+					"objectVersion": "VersionId",
+				},
+				"inFallback":  "true",
+				"objectAlias": "TestParm15Alias",
+			},
+			{"objectName": "TestParm16", "objectType": "ssmparameter"},
+			{"objectName": "TestParm17", "objectType": "ssmparameter"},
+			{"objectName": "TestParm18", "objectType": "ssmparameter"},
+			{"objectName": "TestParm19", "objectType": "ssmparameter"},
+			{"objectName": "TestParm20", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{nil, nil},
+		ssmReqErr: awserr.NewRequestFailure(
+			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")), 500, ""),
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+			{SecretBinary: []byte("BinarySecret"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
+		brSsmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser1", "password" : "ParameterStorePassword1"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm2"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser2", "password" : "ParameterStorePassword2"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm3"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser3", "password" : "ParameterStorePassword3"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm4"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser4", "password" : "ParameterStorePassword4"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm5"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser5", "password" : "ParameterStorePassword5"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm6"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser6", "password" : "ParameterStorePassword6"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm7"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser7", "password" : "ParameterStorePassword7"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm8"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser8", "password" : "ParameterStorePassword8"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm9"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser9", "password" : "ParameterStorePassword9"}}`), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm10"), Value: aws.String(`{"dbUser": {"username": "ParameterStoreUser10", "password" : "ParameterStorePassword10"}}`), Version: aws.Int64(1)},
+				},
+			},
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm11"), Value: aws.String("parm11"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm12"), Value: aws.String("parm12"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm13"), Value: aws.String("parm13"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm14"), Value: aws.String("parm14"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm15AnotherRegion"), Value: aws.String("parm15"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm16"), Value: aws.String("parm16"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm17"), Value: aws.String("parm17"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm18"), Value: aws.String("parm18"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm19"), Value: aws.String("parm19"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm20"), Value: aws.String("parm20"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		expErr:   "",
+		brExpErr: "",
+		expSecrets: map[string]string{
+			"TestSecret1":     "secret1",
+			"BinarySecret1":   "BinarySecret",
+			"TestParm1":       `{"dbUser": {"username": "ParameterStoreUser1", "password" : "ParameterStorePassword1"}}`,
+			"TestParm2":       `{"dbUser": {"username": "ParameterStoreUser2", "password" : "ParameterStorePassword2"}}`,
+			"TestParm3":       `{"dbUser": {"username": "ParameterStoreUser3", "password" : "ParameterStorePassword3"}}`,
+			"TestParm4":       `{"dbUser": {"username": "ParameterStoreUser4", "password" : "ParameterStorePassword4"}}`,
+			"TestParm5":       `{"dbUser": {"username": "ParameterStoreUser5", "password" : "ParameterStorePassword5"}}`,
+			"TestParm6":       `{"dbUser": {"username": "ParameterStoreUser6", "password" : "ParameterStorePassword6"}}`,
+			"TestParm7":       `{"dbUser": {"username": "ParameterStoreUser7", "password" : "ParameterStorePassword7"}}`,
+			"TestParm8":       `{"dbUser": {"username": "ParameterStoreUser8", "password" : "ParameterStorePassword8"}}`,
+			"TestParm9":       `{"dbUser": {"username": "ParameterStoreUser9", "password" : "ParameterStorePassword9"}}`,
+			"TestParm10":      `{"dbUser": {"username": "ParameterStoreUser10", "password" : "ParameterStorePassword10"}}`,
+			"ssm1Username":    "ParameterStoreUser1",
+			"ssm2Username":    "ParameterStoreUser2",
+			"ssm3Username":    "ParameterStoreUser3",
+			"ssm4Username":    "ParameterStoreUser4",
+			"ssm5Username":    "ParameterStoreUser5",
+			"ssm6Username":    "ParameterStoreUser6",
+			"ssm7Username":    "ParameterStoreUser7",
+			"ssm8Username":    "ParameterStoreUser8",
+			"ssm9Username":    "ParameterStoreUser9",
+			"ssm10Username":   "ParameterStoreUser10",
+			"TestParm11":      "parm11",
+			"TestParm12":      "parm12",
+			"TestParm13":      "parm13",
+			"TestParm14":      "parm14",
+			"TestParm15Alias": "parm15",
+			"TestParm16":      "parm16",
+			"TestParm17":      "parm17",
+			"TestParm18":      "parm18",
+			"TestParm19":      "parm19",
+			"TestParm20":      "parm20",
+		},
+		perms: "420",
+	},
+}
+
 // Test that only run with driverWriteSecrets = false
 var writeOnlyMountTests []testCase = []testCase{
 	{ // Verify failure when we try to use a path name in a secret
@@ -903,8 +1938,8 @@ func nameMapper(c rune) rune {
 }
 
 func TestMounts(t *testing.T) {
-
-	allTests := append(mountTests, writeOnlyMountTests...)
+	testCases := append(mountTests, mountTestsForMultiRegion...)
+	allTests := append(testCases, writeOnlyMountTests...)
 	for _, tst := range allTests {
 
 		t.Run(tst.testName, func(t *testing.T) {
@@ -932,6 +1967,9 @@ func TestMounts(t *testing.T) {
 			if len(tst.expErr) != 0 && !regexp.MustCompile(tst.expErr).MatchString(err.Error()) {
 				t.Fatalf("%s: Expected error %s got %s", tst.testName, tst.expErr, err.Error())
 			}
+			if len(tst.brExpErr) != 0 && !regexp.MustCompile(tst.brExpErr).MatchString(err.Error()) {
+				t.Fatalf("%s: Expected error %s got %s", tst.testName, tst.expErr, err.Error())
+			}
 			validateMounts(t, req.TargetPath, tst, rsp)
 
 		})
@@ -941,8 +1979,8 @@ func TestMounts(t *testing.T) {
 }
 
 func TestMountsNoWrite(t *testing.T) {
-
-	allTests := append(mountTests, noWriteMountTests...)
+	testCases := append(mountTests, mountTestsForMultiRegion...)
+	allTests := append(testCases, noWriteMountTests...)
 	for _, tst := range allTests {
 
 		t.Run(tst.testName, func(t *testing.T) {
@@ -970,6 +2008,9 @@ func TestMountsNoWrite(t *testing.T) {
 			if len(tst.expErr) != 0 && !regexp.MustCompile(tst.expErr).MatchString(err.Error()) {
 				t.Fatalf("%s: Expected error %s got %s", tst.testName, tst.expErr, err.Error())
 			}
+			if len(tst.brExpErr) != 0 && !regexp.MustCompile(tst.brExpErr).MatchString(err.Error()) {
+				t.Fatalf("%s: Expected error %s got %s", tst.testName, tst.expErr, err.Error())
+			}
 			validateResponse(t, req.TargetPath, tst, rsp)
 
 		})
@@ -988,7 +2029,7 @@ var remountTests []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestSecret2", "objectType": "secretsmanager", "objectVersionLabel": "custom"},
 			{"objectName": "TestSecret3", "objectType": "secretsmanager", "objectVersion": "TestSecret3-1"},
-			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path":"username", "objectAlias": "username"}}},
+			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path": "username", "objectAlias": "username"}}},
 			// SSM parameters with and without lables and versions
 			{"objectName": "TestParm1", "objectType": "ssmparameter", "objectVersionLabel": "current"},
 			{"objectName": "TestParm2", "objectType": "ssmparameter", "objectVersion": "1"},
@@ -1032,22 +2073,22 @@ var remountTests []testCase = []testCase{
 		descRsp: []*secretsmanager.DescribeSecretOutput{},
 		expErr:  "",
 		expSecrets: map[string]string{
-			"TestSecret1": "TestSecret1 v1",
-			"TestSecret2": "TestSecret2 v1",
-			"TestSecret3": "TestSecret3 v1",
+			"TestSecret1":    "TestSecret1 v1",
+			"TestSecret2":    "TestSecret2 v1",
+			"TestSecret3":    "TestSecret3 v1",
 			"TestSecretJSON": `{"username": "SecretsManagerUser", "password": "SecretsManagerPassword"}`,
-			"username": "SecretsManagerUser",
-			"TestParm1":   "parm1 v1",
-			"TestParm2":   "parm2 v1",
-			"TestParm3":   "parm3 v1",
-			"TestParm4":   "parm4 v1",
-			"TestParm5":   "parm5 v1",
-			"TestParm6":   "parm6 v1",
-			"TestParm7":   "parm7 v1",
-			"TestParm8":   "parm8 v1",
-			"TestParm9":   "parm9 v1",
-			"TestParm10":  "parm10 v1",
-			"TestParm11":  "parm11 v1",
+			"username":       "SecretsManagerUser",
+			"TestParm1":      "parm1 v1",
+			"TestParm2":      "parm2 v1",
+			"TestParm3":      "parm3 v1",
+			"TestParm4":      "parm4 v1",
+			"TestParm5":      "parm5 v1",
+			"TestParm6":      "parm6 v1",
+			"TestParm7":      "parm7 v1",
+			"TestParm8":      "parm8 v1",
+			"TestParm9":      "parm9 v1",
+			"TestParm10":     "parm10 v1",
+			"TestParm11":     "parm11 v1",
 		},
 		perms: "420",
 	},
@@ -1059,7 +2100,7 @@ var remountTests []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestSecret2", "objectType": "secretsmanager", "objectVersionLabel": "custom"},
 			{"objectName": "TestSecret3", "objectType": "secretsmanager", "objectVersion": "TestSecret3-1"},
-			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path":"username", "objectAlias": "username"}}},
+			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path": "username", "objectAlias": "username"}}},
 			// SSM parameters with and without lables and versions
 			{"objectName": "TestParm1", "objectType": "ssmparameter", "objectVersionLabel": "current"},
 			{"objectName": "TestParm2", "objectType": "ssmparameter", "objectVersion": "1"},
@@ -1102,22 +2143,22 @@ var remountTests []testCase = []testCase{
 		},
 		expErr: "",
 		expSecrets: map[string]string{
-			"TestSecret1": "TestSecret1 v1",
-			"TestSecret2": "TestSecret2 v1",
-			"TestSecret3": "TestSecret3 v1",
+			"TestSecret1":    "TestSecret1 v1",
+			"TestSecret2":    "TestSecret2 v1",
+			"TestSecret3":    "TestSecret3 v1",
 			"TestSecretJSON": `{"username": "SecretsManagerUser", "password": "SecretsManagerPassword"}`,
-			"username": "SecretsManagerUser",
-			"TestParm1":   "parm1 v1",
-			"TestParm2":   "parm2 v1",
-			"TestParm3":   "parm3 v1",
-			"TestParm4":   "parm4 v1",
-			"TestParm5":   "parm5 v1",
-			"TestParm6":   "parm6 v1",
-			"TestParm7":   "parm7 v1",
-			"TestParm8":   "parm8 v1",
-			"TestParm9":   "parm9 v1",
-			"TestParm10":  "parm10 v1",
-			"TestParm11":  "parm11 v1",
+			"username":       "SecretsManagerUser",
+			"TestParm1":      "parm1 v1",
+			"TestParm2":      "parm2 v1",
+			"TestParm3":      "parm3 v1",
+			"TestParm4":      "parm4 v1",
+			"TestParm5":      "parm5 v1",
+			"TestParm6":      "parm6 v1",
+			"TestParm7":      "parm7 v1",
+			"TestParm8":      "parm8 v1",
+			"TestParm9":      "parm9 v1",
+			"TestParm10":     "parm10 v1",
+			"TestParm11":     "parm11 v1",
 		},
 		perms: "420",
 	},
@@ -1129,7 +2170,7 @@ var remountTests []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestSecret2", "objectType": "secretsmanager", "objectVersionLabel": "custom"},
 			{"objectName": "TestSecret3", "objectType": "secretsmanager", "objectVersion": "TestSecret3-1"},
-			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path":"username", "objectAlias": "username"}}},
+			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path": "username", "objectAlias": "username"}}},
 			// SSM parameters with and without lables and versions
 			{"objectName": "TestParm1", "objectType": "ssmparameter", "objectVersionLabel": "current"},
 			{"objectName": "TestParm2", "objectType": "ssmparameter", "objectVersion": "1"},
@@ -1181,22 +2222,22 @@ var remountTests []testCase = []testCase{
 		},
 		expErr: "",
 		expSecrets: map[string]string{
-			"TestSecret1": "TestSecret1 v2",
-			"TestSecret2": "TestSecret2 v1",
-			"TestSecret3": "TestSecret3 v1",
+			"TestSecret1":    "TestSecret1 v2",
+			"TestSecret2":    "TestSecret2 v1",
+			"TestSecret3":    "TestSecret3 v1",
 			"TestSecretJSON": `{"username": "SecretsManagerUser2", "password": "SecretsManagerPassword"}`,
-			"username": "SecretsManagerUser2",
-			"TestParm1":   "parm1 v2",
-			"TestParm2":   "parm2 v1",
-			"TestParm3":   "parm3 v1",
-			"TestParm4":   "parm4 v2",
-			"TestParm5":   "parm5 v2",
-			"TestParm6":   "parm6 v2",
-			"TestParm7":   "parm7 v2",
-			"TestParm8":   "parm8 v2",
-			"TestParm9":   "parm9 v2",
-			"TestParm10":  "parm10 v2",
-			"TestParm11":  "parm11 v2",
+			"username":       "SecretsManagerUser2",
+			"TestParm1":      "parm1 v2",
+			"TestParm2":      "parm2 v1",
+			"TestParm3":      "parm3 v1",
+			"TestParm4":      "parm4 v2",
+			"TestParm5":      "parm5 v2",
+			"TestParm6":      "parm6 v2",
+			"TestParm7":      "parm7 v2",
+			"TestParm8":      "parm8 v2",
+			"TestParm9":      "parm9 v2",
+			"TestParm10":     "parm10 v2",
+			"TestParm11":     "parm11 v2",
 		},
 		perms: "420",
 	},
@@ -1208,7 +2249,7 @@ var remountTests []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestSecret2", "objectType": "secretsmanager", "objectVersionLabel": "custom"},
 			{"objectName": "TestSecret3", "objectType": "secretsmanager", "objectVersion": "TestSecret3-1"},
-			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path":"username", "objectAlias": "username"}}},
+			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path": "username", "objectAlias": "username"}}},
 			// SSM parameters with and without lables and versions
 			{"objectName": "TestParm1", "objectType": "ssmparameter", "objectVersionLabel": "current"},
 			{"objectName": "TestParm2", "objectType": "ssmparameter", "objectVersion": "1"},
@@ -1259,22 +2300,22 @@ var remountTests []testCase = []testCase{
 		},
 		expErr: "",
 		expSecrets: map[string]string{
-			"TestSecret1": "TestSecret1 v2",
-			"TestSecret2": "TestSecret2 v2",
-			"TestSecret3": "TestSecret3 v1",
+			"TestSecret1":    "TestSecret1 v2",
+			"TestSecret2":    "TestSecret2 v2",
+			"TestSecret3":    "TestSecret3 v1",
 			"TestSecretJSON": `{"username": "SecretsManagerUser2", "password": "SecretsManagerPassword"}`,
-			"username": "SecretsManagerUser2",
-			"TestParm1":   "parm1 v2",
-			"TestParm2":   "parm2 v2",
-			"TestParm3":   "parm3 v1",
-			"TestParm4":   "parm4 v2",
-			"TestParm5":   "parm5 v2",
-			"TestParm6":   "parm6 v2",
-			"TestParm7":   "parm7 v2",
-			"TestParm8":   "parm8 v2",
-			"TestParm9":   "parm9 v2",
-			"TestParm10":  "parm10 v2",
-			"TestParm11":  "parm11 v2",
+			"username":       "SecretsManagerUser2",
+			"TestParm1":      "parm1 v2",
+			"TestParm2":      "parm2 v2",
+			"TestParm3":      "parm3 v1",
+			"TestParm4":      "parm4 v2",
+			"TestParm5":      "parm5 v2",
+			"TestParm6":      "parm6 v2",
+			"TestParm7":      "parm7 v2",
+			"TestParm8":      "parm8 v2",
+			"TestParm9":      "parm9 v2",
+			"TestParm10":     "parm10 v2",
+			"TestParm11":     "parm11 v2",
 		},
 		perms: "420",
 	},
@@ -1286,7 +2327,7 @@ var remountTests []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestSecret2", "objectType": "secretsmanager", "objectVersionLabel": "custom"},
 			{"objectName": "TestSecret3", "objectType": "secretsmanager", "objectVersion": "TestSecret3-2"},
-			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path":"username", "objectAlias": "username"}}},
+			{"objectName": "TestSecretJSON", "objectType": "secretsmanager", "jmesPath": []map[string]string{{"path": "username", "objectAlias": "username"}}},
 			// SSM parameters with and without lables and versions
 			{"objectName": "TestParm1", "objectType": "ssmparameter", "objectVersionLabel": "current"},
 			{"objectName": "TestParm2", "objectType": "ssmparameter", "objectVersion": "2"},
@@ -1337,22 +2378,22 @@ var remountTests []testCase = []testCase{
 		},
 		expErr: "",
 		expSecrets: map[string]string{
-			"TestSecret1": "TestSecret1 v2",
-			"TestSecret2": "TestSecret2 v2",
-			"TestSecret3": "TestSecret3 v2",
+			"TestSecret1":    "TestSecret1 v2",
+			"TestSecret2":    "TestSecret2 v2",
+			"TestSecret3":    "TestSecret3 v2",
 			"TestSecretJSON": `{"username": "SecretsManagerUser2", "password": "SecretsManagerPassword"}`,
-			"username": "SecretsManagerUser2",
-			"TestParm1":   "parm1 v2",
-			"TestParm2":   "parm2 v2",
-			"TestParm3":   "parm3 v2",
-			"TestParm4":   "parm4 v2",
-			"TestParm5":   "parm5 v2",
-			"TestParm6":   "parm6 v2",
-			"TestParm7":   "parm7 v2",
-			"TestParm8":   "parm8 v2",
-			"TestParm9":   "parm9 v2",
-			"TestParm10":  "parm10 v2",
-			"TestParm11":  "parm11 v2",
+			"username":       "SecretsManagerUser2",
+			"TestParm1":      "parm1 v2",
+			"TestParm2":      "parm2 v2",
+			"TestParm3":      "parm3 v2",
+			"TestParm4":      "parm4 v2",
+			"TestParm5":      "parm5 v2",
+			"TestParm6":      "parm6 v2",
+			"TestParm7":      "parm7 v2",
+			"TestParm8":      "parm8 v2",
+			"TestParm9":      "parm9 v2",
+			"TestParm10":     "parm10 v2",
+			"TestParm11":     "parm11 v2",
 		},
 		perms: "420",
 	},
