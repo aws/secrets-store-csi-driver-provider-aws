@@ -33,6 +33,14 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs:
+      - get
+      - list
+      - watch
+      - patch
+      - create
 ---
 apiVersion: v1
 kind: ServiceAccount
