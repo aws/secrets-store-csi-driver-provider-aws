@@ -9,7 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/aws/aws-sdk-go/service/secretsmanager/secretsmanageriface"
-	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 )
@@ -76,8 +75,7 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 	for _, client := range p.clients {
 		secretVal, err := p.fetchSecretManagerValueWithClient(ctx, client, descriptor, curMap)
 
-		//check if fatal(4XX status error) exist to error out the mount
-		if utils.IsFatalError(err) {
+		if err != nil {
 			return nil, err
 		}
 
