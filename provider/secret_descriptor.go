@@ -41,6 +41,9 @@ type SecretDescriptor struct {
 	
 	// Optional Go template to use for transforming the secret value
 	ObjectTemplate string `json:objectTemplate`
+	
+	// Optional alias for template secret
+	ObjectTemplateAlias string `json:objectTemplateAlias`
 
 	// Path translation character (not part of YAML spec).
 	translate string `json:"-"`
@@ -155,6 +158,16 @@ func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
 	return SecretDescriptor{
 		ObjectAlias: j.ObjectAlias,
+		ObjectType:  p.getObjectType(),
+		translate:   p.translate,
+		mountDir:    p.mountDir,
+	}
+}
+
+//Return a descriptor for a jmes object entry within the secret
+func (p *SecretDescriptor) getTemplateSecretDescriptor() (d SecretDescriptor) {
+	return SecretDescriptor{
+		ObjectAlias: p.ObjectTemplateAlias,
 		ObjectType:  p.getObjectType(),
 		translate:   p.translate,
 		mountDir:    p.mountDir,

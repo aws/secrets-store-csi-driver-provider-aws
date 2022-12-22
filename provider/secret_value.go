@@ -85,7 +85,7 @@ func (p *SecretValue) getTemplatedSecrets() (*SecretValue, error) {
 	}
 	secretValue := SecretValue{
 		Value:      result.Bytes(),
-		Descriptor: p.Descriptor,
+		Descriptor: p.Descriptor.getTemplateSecretDescriptor(),
 	}
 	return &secretValue, nil
 }
