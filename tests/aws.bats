@@ -9,7 +9,7 @@ NAMESPACE=kube-system
 CLUSTER_NAME=integ-cluster
 POD_NAME=basic-test-mount
 export REGION=us-west-2
-export FAILOVER_REGION=us-east-2
+export FAILOVERREGION=us-east-2
 export ACCOUNT_NUMBER=$(aws --region $REGION  sts get-caller-identity --query Account --output text)
 
 if [[ -z "${PRIVREPO}" ]]; then
@@ -20,7 +20,7 @@ fi
 if [[ -z "${NODE_TYPE}" ]]; then
     NODE_TYPE=m5.large
 fi
-
+  
 setup_file() {
     #Create and initialize cluster 
     eksctl create cluster \
@@ -49,21 +49,24 @@ setup_file() {
    aws secretsmanager create-secret --name SecretsManagerTest1 --secret-string SecretsManagerTest1Value --region $REGION
    aws secretsmanager create-secret --name SecretsManagerTest2 --secret-string SecretsManagerTest2Value --region $REGION
    aws secretsmanager create-secret --name SecretsManagerSync --secret-string SecretUser --region $REGION
-   aws secretsmanager create-secret --name SecretsManagerFailOverRegionTest --secret-string SecretsManagerTest3Value --region $FAILOVER_REGION
-   aws secretsmanager create-secret --name SMBackupSecret --secret-string SMBackupSecretValue --region $FAILOVER_REGION
-
+   aws secretsmanager create-secret --name SecretsManagerTest1 --secret-string SecretsManagerTest1Value --region $FAILOVERREGION
+   aws secretsmanager create-secret --name SecretsManagerTest2 --secret-string SecretsManagerTest2Value --region $FAILOVERREGION
+   aws secretsmanager create-secret --name SecretsManagerSync --secret-string SecretUser --region $FAILOVERREGION
+ 
    aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $REGION
    aws ssm put-parameter --name ParameterStoreTestWithLongName --value ParameterStoreTest2Value --type SecureString --region $REGION
-   aws ssm put-parameter --name ParameterStoreFailOverRegionTest --value ParameterStoreTest3Value --type SecureString --region $FAILOVER_REGION
-
+   aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $FAILOVERREGION
+   aws ssm put-parameter --name ParameterStoreTestWithLongName --value ParameterStoreTest2Value --type SecureString --region $FAILOVERREGION
+ 
    aws ssm put-parameter --name ParameterStoreRotationTest --value BeforeRotation --type SecureString --region $REGION
    aws secretsmanager create-secret --name SecretsManagerRotationTest --secret-string BeforeRotation --region $REGION
-
-   aws ssm put-parameter --name ParamFailOverRegionRotationTest --value BeforeRotation --type SecureString --region $FAILOVER_REGION
-   aws secretsmanager create-secret --name SMFailOverRegionRotationTest --secret-string BeforeRotation --region $FAILOVER_REGION
+   aws ssm put-parameter --name ParameterStoreRotationTest --value BeforeRotation --type SecureString --region $FAILOVERREGION
+   aws secretsmanager create-secret --name SecretsManagerRotationTest --secret-string BeforeRotation --region $FAILOVERREGION
 
    aws secretsmanager create-secret --name secretsManagerJson  --secret-string '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}' --region $REGION
    aws ssm put-parameter --name jsonSsm --value '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}' --type SecureString --region $REGION
+   aws secretsmanager create-secret --name secretsManagerJson  --secret-string '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}' --region $FAILOVERREGION
+   aws ssm put-parameter --name jsonSsm --value '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}' --type SecureString --region $FAILOVERREGION
 }
  
 teardown_file() { 
@@ -75,21 +78,24 @@ teardown_file() {
     aws secretsmanager delete-secret --secret-id SecretsManagerTest1 --force-delete-without-recovery --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerTest2 --force-delete-without-recovery --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerSync --force-delete-without-recovery --region $REGION
-    aws secretsmanager delete-secret --secret-id SecretsManagerFailOverRegionTest --force-delete-without-recovery --region $FAILOVER_REGION
-    aws secretsmanager delete-secret --secret-id SMBackupSecret --force-delete-without-recovery --region $FAILOVER_REGION
-
+    aws secretsmanager delete-secret --secret-id SecretsManagerTest1 --force-delete-without-recovery --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id SecretsManagerTest2 --force-delete-without-recovery --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id SecretsManagerSync --force-delete-without-recovery --region $FAILOVERREGION
+ 
     aws ssm delete-parameter --name ParameterStoreTest1 --region $REGION
     aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $REGION 
-    aws ssm delete-parameter --name ParameterStoreFailOverRegionTest --region $FAILOVER_REGION
-
+    aws ssm delete-parameter --name ParameterStoreTest1 --region $FAILOVERREGION
+    aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $FAILOVERREGION 
+ 
     aws ssm delete-parameter --name ParameterStoreRotationTest --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerRotationTest --force-delete-without-recovery --region $REGION
-
-    aws ssm delete-parameter --name SSMFailOverRegionRotationTest --region $FAILOVER_REGION
-    aws secretsmanager delete-secret --secret-id SMFailOverRegionRotationTest --force-delete-without-recovery --region $FAILOVER_REGION
+    aws ssm delete-parameter --name ParameterStoreRotationTest --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id SecretsManagerRotationTest --force-delete-without-recovery --region $FAILOVERREGION
 
     aws ssm delete-parameter --name jsonSsm --region $REGION
     aws secretsmanager delete-secret --secret-id secretsManagerJson --force-delete-without-recovery --region $REGION
+    aws ssm delete-parameter --name jsonSsm --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id secretsManagerJson --force-delete-without-recovery --region $FAILOVERREGION
 }
 
 validate_jsme_mount() {
@@ -111,7 +117,7 @@ validate_jsme_mount() {
     result=$(kubectl --namespace=$NAMESPACE get secret $K8_SECRET_NAME -o jsonpath="{.data.password}" | base64 -d)
     [[ "$result" == $PASSWORD ]]
 }
-
+ 
 @test "Install aws provider" {
     envsubst < $PROVIDER_YAML | kubectl apply -f - 
     cmd="kubectl --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
@@ -145,7 +151,7 @@ validate_jsme_mount() {
    run kubectl --namespace $NAMESPACE  get pod/$POD_NAME
    assert_success
 }
-
+ 
 @test "CSI inline  volume test with rotation - parameter store " {
    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreRotationTest)
    [[ "${result//$'\r'}" == "BeforeRotation" ]]
@@ -156,16 +162,6 @@ validate_jsme_mount() {
    [[ "${result//$'\r'}" == "AfterRotation" ]]
 }
  
- @test "CSI inline volume test with rotation - failover secret - parameter store " {
-   result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParamFailOverRegionRotationTest)
-   [[ "${result//$'\r'}" == "BeforeRotation" ]]
- 
-   aws ssm put-parameter --name ParamFailOverRegionRotationTest --value AfterRotation --type SecureString --overwrite --region $FAILOVER_REGION
-   sleep 20
-   result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParamFailOverRegionRotationTest)
-   [[ "${result//$'\r'}" == "AfterRotation" ]]
-}
-
 @test "CSI inline volume test with rotation - secrets manager " {
    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerRotationTest)
    [[ "${result//$'\r'}" == "BeforeRotation" ]]
@@ -175,17 +171,7 @@ validate_jsme_mount() {
    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerRotationTest)
    [[ "${result//$'\r'}" == "AfterRotation" ]]
 }
-
-@test "CSI inline volume test with rotation - failover secret  - secrets manager " {
-   fallback_secret_result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SMFailOverRegionRotationTest)
-   [[ "${result//$'\r'}" == "BeforeRotation" ]]
-  
-   aws secretsmanager put-secret-value --secret-id SMFailOverRegionRotationTest --secret-string AfterRotation --region $FAILOVER_REGION
-   sleep 20
-   result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SMFailOverRegionRotationTest)
-   [[ "${result//$'\r'}" == "AfterRotation" ]]
-}
-
+ 
 @test "CSI inline volume test with pod portability - read ssm parameters from pod" {
    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreTest1)
    [[ "${result//$'\r'}" == "ParameterStoreTest1Value" ]]
@@ -193,27 +179,14 @@ validate_jsme_mount() {
    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreTest2)
    [[ "${result//$'\r'}" == "ParameterStoreTest2Value" ]]
 }
-
-@test "CSI inline volume test with pod portability - read failover ssm parameters from pod" {
-   result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreFailOverRegionTest)
-   [[ "${result//$'\r'}" == "ParameterStoreTest3Value" ]]
-}
  
-
+ 
 @test "CSI inline volume test with pod portability - read secrets manager secrets from pod" {
     result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerTest1)
-    [[ "${result//$'\r'}" == "SecretsManagerTest1Value" ]]          
+    [[ "${result//$'\r'}" == "SecretsManagerTest1Value" ]]
    
     result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerTest2)
-    [[ "${result//$'\r'}" == "SecretsManagerTest2Value" ]]       
-}
-
-@test "CSI inline volume test with pod portability - read secrets manager failover secrets from pod" {
-    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerFailOverRegionTest)
-    [[ "${result//$'\r'}" == "SecretsManagerTest3Value" ]]    
-
-    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/smFailOverSecret)
-    [[ "${result//$'\r'}" == "SMBackupSecretValue" ]]        
+    [[ "${result//$'\r'}" == "SecretsManagerTest2Value" ]]        
 }
 
 @test "CSI inline volume test with pod portability - specify jsmePath for parameter store parameter with rotation" {
@@ -254,7 +227,7 @@ validate_jsme_mount() {
     result=$(kubectl --namespace=$NAMESPACE get secret secret -o jsonpath="{.data.username}" | base64 -d)
     [[ "$result" == "SecretUser" ]]
 }
-
+ 
 @test "Sync with Kubernetes Secret - Delete deployment. Secret should also be deleted" {
     run kubectl --namespace $NAMESPACE  delete -f BasicTestMount.yaml
     assert_success
