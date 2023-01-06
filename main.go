@@ -11,6 +11,8 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/component-base/config"
+	jlogs "k8s.io/component-base/logs/json"
 	"k8s.io/klog/v2"
 	csidriver "sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
@@ -22,16 +24,25 @@ import (
 var (
 	endpointDir        = flag.String("provider-volume", "/etc/kubernetes/secrets-store-csi-providers", "Rendezvous directory for provider socket")
 	driverWriteSecrets = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
+	logFormatJSON      = flag.Bool("log-format-json", false, "set log formatter to json")
 )
 
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
 func main() {
-
-	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
+	klog.InitFlags(nil)
+	defer klog.Flush()
 
 	flag.Parse() // Parse command line flags
+
+	if *logFormatJSON {
+		jsonFactory := jlogs.Factory{}
+		logger, _ := jsonFactory.Create(config.FormatOptions{})
+		klog.SetLogger(logger)
+	}
+
+	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
 
 	//socket on which to listen to for driver calls
 	endpoint := fmt.Sprintf("%s/aws.sock", *endpointDir)
