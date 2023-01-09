@@ -1,5 +1,7 @@
 # csi-secrets-store-provider-aws
 
+[Project repository](https://github.com/aws/secrets-store-csi-driver-provider-aws)
+
 The AWS provider for the [Secrets Store CSI Driver](https://github.com/kubernetes-sigs/secrets-store-csi-driver) allows you to make secrets stored in Secrets Manager and parameters stored in Parameter Store appear as files mounted in Kubernetes pods.
 
 ### Prerequisites
