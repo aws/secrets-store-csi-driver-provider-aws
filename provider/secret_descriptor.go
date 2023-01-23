@@ -33,15 +33,17 @@ type SecretDescriptor struct {
 	// One of secretsmanager or ssmparameter (not required when using full secrets manager ARN).
 	ObjectType string `json:"objectType"`
 
-	//Optional array to specify what json key value pairs to extract from a secret and mount as individual secrets
+	// Optional array to specify what json key value pairs to extract from a secret and mount as individual secrets
 	JMESPath []JMESPathEntry `json:"jmesPath"`
+
+	// Optional failover object
+	FailoverObject FailoverObjectEntry `json:"failoverObject"`
 
 	// Path translation character (not part of YAML spec).
 	translate string `json:"-"`
 
 	// Mount point directory (not part of YAML spec).
 	mountDir string `json:"-"`
-
 }
 
 //An individual json key value pair to mount
@@ -51,6 +53,18 @@ type JMESPathEntry struct {
 
 	//File name in which to store the secret in.
 	ObjectAlias string `json:"objectAlias"`
+}
+
+//An individual json key value pair to mount
+type FailoverObjectEntry struct {
+	// Optional name of the failover secret
+	ObjectName string `json:"objectName"`
+
+	// Optional version id of the secret (default to latest).
+	ObjectVersion string `json:"objectVersion"`
+
+	// Optional version/stage label of the secret (defaults to latest).
+	ObjectVersionLabel string `json:"objectVersionLabel"`
 }
 
 // Enum of supported secret types
@@ -110,7 +124,6 @@ func (p *SecretDescriptor) GetMountPath() string {
 	return filepath.Join(p.GetMountDir(), p.GetFileName())
 }
 
-
 //Return the object type (ssmparameter, secretsmanager, or ssm)
 func (p *SecretDescriptor) getObjectType() (otype string) {
 	oType := p.ObjectType
@@ -140,9 +153,39 @@ func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d Sec
 	return SecretDescriptor{
 		ObjectAlias: j.ObjectAlias,
 		ObjectType:  p.getObjectType(),
-		translate: p.translate,
-		mountDir: p.mountDir,
+		translate:   p.translate,
+		mountDir:    p.mountDir,
 	}
+}
+
+// Returns the secret name for the current descriptor.
+//
+// The current secret name will resolve to the ObjectName if not in failover,
+//  and will resolve the the backup ARN if in failover.
+//
+func (p *SecretDescriptor) GetSecretName(useFailoverRegion bool) (secretName string) {
+	if len(p.FailoverObject.ObjectName) > 0 && useFailoverRegion {
+		return p.FailoverObject.ObjectName
+	}
+	return p.ObjectName
+}
+
+// Return the ObjectVersionLabel
+//
+func (p *SecretDescriptor) GetObjectVersionLabel(useFailoverRegion bool) (secretName string) {
+	if len(p.FailoverObject.ObjectVersionLabel) > 0 && useFailoverRegion {
+		return p.FailoverObject.ObjectVersionLabel
+	}
+	return p.ObjectVersionLabel
+}
+
+// Return the ObjectVersion
+//
+func (p *SecretDescriptor) GetObjectVersion(useFailoverRegion bool) (secretName string) {
+	if len(p.FailoverObject.ObjectVersion) > 0 && useFailoverRegion {
+		return p.FailoverObject.ObjectVersion
+	}
+	return p.ObjectVersion
 }
 
 // Private helper to validate the contents of SecretDescriptor.
@@ -150,42 +193,15 @@ func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d Sec
 // This method is used to validate input before it is used by the rest of the
 // plugin.
 //
-func (p *SecretDescriptor) validateSecretDescriptor() error {
+func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 
 	if len(p.ObjectName) == 0 {
 		return fmt.Errorf("Object name must be specified")
 	}
 
-	var objARN arn.ARN
-	var err error
-	hasARN := strings.HasPrefix(p.ObjectName, "arn:")
-	if hasARN {
-		objARN, err = arn.Parse(p.ObjectName)
-		if err != nil {
-			return fmt.Errorf("Invalid ARN format in object name: %s", p.ObjectName)
-		}
-	}
-
-	// Make sure either objectType is used or a full ARN is specified
-	if len(p.ObjectType) == 0 && !hasARN {
-		return fmt.Errorf("Must use objectType when a full ARN is not specified: %s", p.ObjectName)
-	}
-
-	// Make sure the ARN is for a supported service
-	_, ok := typeMap[objARN.Service]
-	if len(p.ObjectType) == 0 && !ok {
-		return fmt.Errorf("Invalid service in ARN: %s", objARN.Service)
-	}
-
-	// Make sure objectType is one we understand
-	_, ok = typeMap[p.ObjectType]
-	if len(p.ObjectType) != 0 && (!ok || p.ObjectType == "ssm") {
-		return fmt.Errorf("Invalid objectType: %s", p.ObjectType)
-	}
-
-	// If both ARN and objectType are used make sure they agree
-	if len(p.ObjectType) != 0 && hasARN && typeMap[p.ObjectType] != typeMap[objARN.Service] {
-		return fmt.Errorf("objectType does not match ARN: %s", p.ObjectName)
+	err := p.validateObjectName(p.ObjectName, p.ObjectType, regions[0])
+	if err != nil {
+		return err
 	}
 
 	// Can only use objectVersion or objectVersionLabel for SSM not both
@@ -196,10 +212,6 @@ func (p *SecretDescriptor) validateSecretDescriptor() error {
 	// Do not allow ../ in a path when translation is turned off
 	if badPathRE.MatchString(p.GetFileName()) {
 		return fmt.Errorf("path can not contain ../: %s", p.ObjectName)
-	}
-
-	if len(p.JMESPath) == 0 { //jmesPath not specified no more checks
-		return nil
 	}
 
 	//ensure each jmesPath entry has a path and an objectalias
@@ -213,6 +225,79 @@ func (p *SecretDescriptor) validateSecretDescriptor() error {
 		}
 	}
 
+	if len(p.FailoverObject.ObjectName) > 0 {
+		// Backup arns require object alias to be set.
+		if len(p.ObjectAlias) == 0 {
+			return fmt.Errorf("object alias must be specified for objects with failover entries: %s", p.ObjectName)
+		}
+
+		// Our regions must exist
+		if len(regions) < 2 {
+			return fmt.Errorf("failover object allowed only when failover region is defined: %s", p.ObjectName)
+		}
+
+		err := p.validateObjectName(p.FailoverObject.ObjectName, p.ObjectType, regions[1])
+		if err != nil {
+			return err
+		}
+
+		// Can only use objectVersion or objectVersionLabel for SSM not both
+		if p.GetSecretType() == SSMParameter && len(p.FailoverObject.ObjectVersion) != 0 && len(p.FailoverObject.ObjectVersionLabel) != 0 {
+			return fmt.Errorf("ssm parameters can not specify both objectVersion and objectVersionLabel: %s", p.ObjectName)
+		}
+
+		if p.FailoverObject.ObjectVersion != p.ObjectVersion {
+			return fmt.Errorf("object versions must match between primary and failover regions: %s", p.ObjectName)
+		}
+	}
+
+	return nil
+}
+
+// Private helper to validate an objectname.
+//
+// This function validates the objectname string, and makes sure it matches the
+//  corresponding 'objectType' and 'region'.
+//
+func (p *SecretDescriptor) validateObjectName(objectName string, objectType string, region string) (err error) {
+	var objARN arn.ARN
+
+	// Validate if ARNs
+	hasARN := strings.HasPrefix(objectName, "arn:")
+	if hasARN {
+		objARN, err = arn.Parse(objectName)
+		if err != nil {
+			return fmt.Errorf("Invalid ARN format in object name: %s", objectName)
+		}
+	}
+
+	// If has an ARN, validate that it matches the primary region
+	if hasARN && objARN.Region != region {
+		return fmt.Errorf("ARN region must match region %s: %s", region, objectName)
+	}
+
+	// Make sure either objectType is used or a full ARN is specified
+	if len(objectType) == 0 && !hasARN {
+		return fmt.Errorf("Must use objectType when a full ARN is not specified: %s", objectName)
+	}
+
+	// Make sure the ARN is for a supported service
+	_, ok := typeMap[objARN.Service]
+	if len(objectType) == 0 && !ok {
+		return fmt.Errorf("Invalid service in ARN: %s", objARN.Service)
+	}
+
+	// Make sure objectType is one we understand
+	_, ok = typeMap[objectType]
+	if len(objectType) != 0 && (!ok || objectType == "ssm") {
+		return fmt.Errorf("Invalid objectType: %s", objectType)
+	}
+
+	// If both ARN and objectType are used make sure they agree
+	if len(objectType) != 0 && hasARN && typeMap[objectType] != typeMap[objARN.Service] {
+		return fmt.Errorf("objectType does not match ARN: %s", objectName)
+	}
+
 	return nil
 }
 
@@ -224,7 +309,10 @@ func (p *SecretDescriptor) validateSecretDescriptor() error {
 // and returned in a map keyed by secret type. This is to allow batching of
 // requests.
 //
-func NewSecretDescriptorList(mountDir, translate, objectSpec string) (desc map[SecretType][]*SecretDescriptor, e error) {
+func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []string) (
+	desc map[SecretType][]*SecretDescriptor,
+	e error,
+) {
 
 	// See if we should substitite underscore for slash
 	if len(translate) == 0 {
@@ -249,7 +337,7 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string) (desc map[S
 
 		descriptor.translate = translate
 		descriptor.mountDir = mountDir
-		err = descriptor.validateSecretDescriptor()
+		err = descriptor.validateSecretDescriptor(regions)
 		if err != nil {
 			return nil, err
 		}
