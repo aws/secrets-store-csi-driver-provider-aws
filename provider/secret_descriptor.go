@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws/arn"
-	"sigs.k8s.io/yaml"
 )
 
 // An RE pattern to check for bad paths
@@ -38,12 +37,21 @@ type SecretDescriptor struct {
 
 	// Optional failover object
 	FailoverObject FailoverObjectEntry `json:"failoverObject"`
+	
+	// Optional Go template to use for transforming the secret value
+	ObjectTemplate string `json:objectTemplate`
+	
+	// Optional alias for template secret
+	ObjectTemplateAlias string `json:objectTemplateAlias`
 
 	// Path translation character (not part of YAML spec).
 	translate string `json:"-"`
 
 	// Mount point directory (not part of YAML spec).
 	mountDir string `json:"-"`
+
+	// Mount point directory (not part of YAML spec).
+	isTemplated bool `json:"-"`
 }
 
 //An individual json key value pair to mount
@@ -155,6 +163,17 @@ func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d Sec
 		ObjectType:  p.getObjectType(),
 		translate:   p.translate,
 		mountDir:    p.mountDir,
+	}
+}
+
+//Return a descriptor for a jmes object entry within the secret
+func (p *SecretDescriptor) getTemplateSecretDescriptor() (d SecretDescriptor) {
+	return SecretDescriptor{
+		ObjectAlias: p.ObjectTemplateAlias,
+		ObjectType:  p.getObjectType(),
+		translate:   p.translate,
+		mountDir:    p.mountDir,
+		isTemplated: true,
 	}
 }
 
@@ -309,7 +328,7 @@ func (p *SecretDescriptor) validateObjectName(objectName string, objectType stri
 // and returned in a map keyed by secret type. This is to allow batching of
 // requests.
 //
-func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []string) (
+func NewSecretDescriptorList(mountDir, translate string, descriptors []*SecretDescriptor, regions []string) (
 	desc map[SecretType][]*SecretDescriptor,
 	e error,
 ) {
@@ -323,13 +342,6 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 		return nil, fmt.Errorf("pathTranslation must be either 'False' or a single character string")
 	}
 
-	// Unpack the SecretProviderClass mount specification
-	descriptors := make([]*SecretDescriptor, 0)
-	err := yaml.Unmarshal([]byte(objectSpec), &descriptors)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to load SecretProviderClass: %+v", err)
-	}
-
 	// Validate each record and check for duplicates
 	groups := make(map[SecretType][]*SecretDescriptor, 0)
 	names := make(map[string]bool)
@@ -337,7 +349,7 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 
 		descriptor.translate = translate
 		descriptor.mountDir = mountDir
-		err = descriptor.validateSecretDescriptor(regions)
+		err := descriptor.validateSecretDescriptor(regions)
 		if err != nil {
 			return nil, err
 		}

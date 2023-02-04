@@ -135,11 +135,13 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	// Get the list of secrets to mount. These will be grouped together by type
 	// in a map of slices (map[string][]*SecretDescriptor) keyed by secret type
 	// so that requests can be batched if the implementation allows it.
-	descriptors, err := provider.NewSecretDescriptorList(mountDir, translate, attrib[secProvAttrib], regions)
+	globalParams, err := provider.NewGlobalParams(mountDir, translate, attrib[secProvAttrib], regions)
 	if err != nil {
 		klog.Errorf("Failure reading descriptor list: %s", err)
 		return nil, err
 	}
+	
+	descriptors := globalParams.GetDescriptors()
 
 	providerFactory := s.secretProviderFactory(awsSessions, regions)
 	var fetchedSecrets []*provider.SecretValue
@@ -153,6 +155,8 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 		fetchedSecrets = append(fetchedSecrets, secrets...) // Build up the list of all secrets
 	}
+	
+	fetchedSecrets = globalParams.AppendJoinSecret(fetchedSecrets)
 
 	// Write out the secrets to the mount point after everything is fetched.
 	var files []*v1alpha1.File

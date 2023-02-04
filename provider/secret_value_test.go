@@ -70,3 +70,68 @@ func TestInvalidJMESResultType(t *testing.T) {
 
 	RunGetJsonSecretTest(t, jsonContent, path, objectAlias, expectedErrorMessage)
 }
+
+func RunGetTemplatedSecrets(t *testing.T, jsonContent string, objectTemplate string) (*SecretValue, error) {
+	descriptor := SecretDescriptor{
+		ObjectName: TEST_OBJECT_NAME,
+		ObjectTemplate:  objectTemplate,
+	}
+
+	secretValue := SecretValue{
+		Value:      []byte(jsonContent),
+		Descriptor: descriptor,
+	}
+
+	secrets, err := secretValue.getTemplatedSecrets()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return secrets, nil
+}
+func TestSecretsTemplateValidJSON(t *testing.T) {
+	jsonContent := `{"username": 3, "password": "abc"}`
+	template := `
+	{{ range $k, $v := . }}export {{ $k }}={{ $v }}
+	{{ end }}`
+	expectedResult := `
+	export password=abc
+	export username=3
+	`
+	secrets, err := RunGetTemplatedSecrets(t, jsonContent, template)
+	result := string(secrets.Value)
+	if err != nil {
+		t.Fatalf("Failed during template execution %v", err)
+	}
+
+	if result != expectedResult {
+		t.Fatalf("Templated result is not correct\n got: %s\n want: %s", result, expectedResult )
+	}
+}
+
+func TestSecretsTemplateInvalidJSON(t *testing.T) {
+	jsonContent := `{"username": 3`
+	template := `
+	{{ range $k, $v := . }}export {{ $k }}={{ $v }}
+	{{ end }}`
+	expectedErrorMessage := fmt.Sprintf("Invalid JSON used with template in secret: %s", TEST_OBJECT_NAME)
+	_, err := RunGetTemplatedSecrets(t, jsonContent, template)
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+func TestSecretsTemplateInvalidTemplate(t *testing.T) {
+	jsonContent := `{"username": 3}`
+	template := `
+	{ range $k, $v := . }}export {{ $k }}={{ $v }}
+	{{ end }}`
+	expectedErrorMessage := fmt.Sprintf("Invalid template %s", template)
+	_, err := RunGetTemplatedSecrets(t, jsonContent, template)
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}

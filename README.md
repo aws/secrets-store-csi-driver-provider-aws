@@ -105,6 +105,7 @@ The parameters section contains the details of the mount request and contain one
     ```yaml
       parameters:
         objects: |
+          objects:
             - objectName: "MySecret"
               objectType: "secretsmanager"
     ```
@@ -136,6 +137,7 @@ The primary objects field of the SecretProviderClass can contain the following s
 
   ```yaml:
         objects: |
+          objects:
             - objectName: "MySecret"
               objectType: "secretsmanager"
               jmesPath:
@@ -146,7 +148,41 @@ The primary objects field of the SecretProviderClass can contain the following s
   ```
   If you use the jmesPath field,  you must provide the following two sub-fields:
   * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
-  * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
+  * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted.
+
+* objectTemplate: This optional field specifies a Go template for transforming the JSON object containing all key-value secrets to a desired format. If present, objectTemplateAlias is required. For example, to transform secrets into a format that can be sourced in bash:
+```
+    objects:  |
+      objects:
+      - objectName: "MySecret"
+        objectType: "secretsmanager"
+        objectTemplateAlias: template.sh
+        objectTemplate: |
+          {{ range $k, $v := . }}export {{ $k }}={{ $v }}
+          {{ end }}
+
+```
+
+* joinName: This optional field specifies a name in which to join all templated secrets. All templated secrets will not be mounted, just the joint one.
+```
+    objects:  |
+      joinName: all-secrets.yaml
+      objects:
+      - objectName: "MySecret"
+        objectType: "secretsmanager"
+        objectTemplateAlias: mysecret.yaml
+        objectTemplate: |
+          mySecret:
+          {{ range $k, $v := . }}  {{ $k }}: {{ $v }}
+          {{ end }}
+      - objectName: "MySecondSecret"
+        objectType: "secretsmanager"
+        objectTemplateAlias: mysecondsecret.yaml
+        objectTemplate: |
+          mySecondSecret:
+          {{ range $k, $v := . }}  {{ $k }}: {{ $v }}
+          {{ end }}
+```
 
 ## Additional Considerations
 
