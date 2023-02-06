@@ -22,6 +22,8 @@ FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) -extldflags "-static""
 
+CHART_RELEASER_PATH ?= cr
+
 .PHONY: all build clean docker-login docker-buildx docker-manifest
 
 # Build docker image and push to AWS registry
@@ -56,6 +58,6 @@ docker-manifest:
 
 # Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
 upload-helm:
-	chart-releaser package
-	chart-releaser upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
-	chart-releaser index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
+	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} package
+	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
+	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
