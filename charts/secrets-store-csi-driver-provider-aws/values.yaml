@@ -33,3 +33,5 @@ rbac:
 securityContext:
   privileged: false
   allowPrivilegeEscalation: false
+
+imagePullSecrets: []
