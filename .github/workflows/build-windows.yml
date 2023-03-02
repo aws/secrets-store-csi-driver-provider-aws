@@ -1,0 +1,29 @@
+name: Build Windows Image
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: "1.20"
+    - name: Make build
+      run: make -f Makefile.win build
+      shell: bash
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and push
+      run: |
+        docker build . -f Dockerfile.win -t ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:${{ github.ref_name }}
+        docker push ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:${{ github.ref_name }}

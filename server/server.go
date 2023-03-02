@@ -318,6 +318,8 @@ func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode o
 		return nil, err
 	}
 
+	tmpFile.Close()
+
 	// Swap out the old secret for the new
 	err = os.Rename(tmpFile.Name(), secret.Descriptor.GetMountPath())
 	if err != nil {

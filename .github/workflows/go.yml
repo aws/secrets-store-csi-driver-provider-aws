@@ -3,9 +3,17 @@ name: Go
 on: [push, pull_request]
 
 jobs:
-
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+        - os: windows-latest
+          goos: windows
+        - os: ubuntu-latest
+          goos: linux
+    runs-on: ${{ matrix.os }}
+    env:
+      GOOS: ${{ matrix.goos }}
     steps:
     - uses: actions/checkout@v3
     - name: Set up Go
