@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/aws/aws-sdk-go/service/secretsmanager/secretsmanageriface"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 )
@@ -79,6 +80,8 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 		//check if fatal(4XX status error) exist to error out the mount
 		if utils.IsFatalError(err) {
 			return nil, err
+		} else if err != nil {
+			klog.Warning(err)
 		}
 
 		if len(secretVal) > 0 && len(value) == 0 {
