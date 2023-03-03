@@ -33,6 +33,9 @@ spec:
             - --provider-volume={{ .Values.providerVolume }}
           resources:
 {{ toYaml .Values.resources | indent 12 }}
+{{- if .Values.priorityClassName }}
+          priorityClassName: {{ .Values.priorityClassName | quote }}
+{{- end }}
           securityContext:
 {{ toYaml .Values.securityContext | indent 12 }}
           volumeMounts:
