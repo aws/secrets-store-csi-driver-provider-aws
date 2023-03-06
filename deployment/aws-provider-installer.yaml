@@ -111,7 +111,7 @@ spec:
       hostNetwork: false
       containers:
         - name: provider-aws-installer
-          image: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:1.0.1
+          image: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:1.0.0
           imagePullPolicy: Always
           args:
               - --provider-volume=C:\k\secrets-store-csi-providers
