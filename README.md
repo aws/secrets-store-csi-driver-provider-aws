@@ -1,7 +1,8 @@
 # AWS Secrets Manager and Config Provider for Secret Store CSI Driver
 
-![badge](https://github.com/aws/secrets-store-csi-driver-provider-aws/actions/workflows/go.yml/badge.svg)
-[![codecov](https://codecov.io/gh/aws/secrets-store-csi-driver-provider-aws/branch/main/graph/badge.svg?token=S7ZDTT1F8K)](https://codecov.io/gh/aws/secrets-store-csi-driver-provider-aws)
+![badge](https://github.com/saedx1/secrets-store-csi-driver-provider-aws/actions/workflows/go.yml/badge.svg)
+
+**This is an unofficial attemp to make ASCP for Secret Store CSI Driver support windows. AWS has no intention of supporting it, as a result, I created this fork. The difference is minimal between this and the original repo, and it's meant to be in-sync with the original repo at all times.**
 
 AWS offers two services to manage secrets and parameters conveniently in your code. AWS [Secrets Manager](https://aws.amazon.com/secrets-manager/) allows you to easily rotate, manage, and retrieve database credentials, API keys, certificates, and other secrets throughout their lifecycle. AWS [Systems Manager Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html) provides hierarchical storage for configuration data. The AWS provider for the [Secrets Store CSI Driver](https://github.com/kubernetes-sigs/secrets-store-csi-driver) allows you to make secrets stored in Secrets Manager and parameters stored in Parameter Store appear as files mounted in Kubernetes pods.
 
