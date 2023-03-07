@@ -28,6 +28,8 @@ port: 8989
 updateStrategy:
   type: RollingUpdate
 
+imagePullSecrets: []
+
 rbac:
   install: true
 

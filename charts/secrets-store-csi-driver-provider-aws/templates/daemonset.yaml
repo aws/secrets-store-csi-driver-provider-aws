@@ -52,6 +52,10 @@ spec:
 {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName | quote }}
 {{- end }}
+{{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- toYaml . | nindent 8 }}
+{{- end }}
       nodeSelector:
         kubernetes.io/os: linux
 {{- if .Values.nodeSelector }}
