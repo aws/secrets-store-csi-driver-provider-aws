@@ -19,6 +19,8 @@ FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 .PHONY: all clean docker-login docker-buildx
 
+CHART_RELEASER_PATH ?= cr
+
 # Build docker image and push to AWS registry
 all: clean docker-login docker-buildx
 
@@ -46,6 +48,6 @@ docker-buildx:
 
 # Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
 upload-helm:
-	chart-releaser package
-	chart-releaser upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
-	chart-releaser index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
+	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} package
+	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
+	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .

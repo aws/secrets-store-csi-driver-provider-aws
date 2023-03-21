@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 )
@@ -85,7 +86,10 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 
 		if utils.IsFatalError(err) {
 			return nil, err
+		} else if err != nil {
+			klog.Warning(err)
 		}
+
 		if len(values) == 0 {
 			values = batchValues
 		}
