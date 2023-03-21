@@ -8,10 +8,6 @@ else
 ECRCMD=ecr
 endif
 
-# Build for AMD64 and ARM64
-ARCHITECTURES=arm64 amd64
-GOOS=linux
-
 MAJOR_REV=1
 MINOR_REV=1
 PATCH_REV=0

@@ -16,7 +16,7 @@ COPY . .
 
 RUN go build -v -o _output/secrets-store-csi-driver-provider-aws
 
-FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2 as base
+FROM --platform=$TARGETPLATFORM public.ecr.aws/amazonlinux/amazonlinux:2 as al2
 ARG TARGETPLATFORM
 
 FROM scratch
@@ -24,7 +24,7 @@ FROM scratch
 COPY --from=go  /workdir/_output/secrets-store-csi-driver-provider-aws /bin/secrets-store-csi-driver-provider-aws
 
 # Copy current certificates from AL2 (/etc/pki/ symlinked in /etc/ssl/certs/)
-COPY --from=base /etc/pki/ /etc/pki/
-COPY --from=base /etc/ssl/certs/ /etc/ssl/certs
+COPY --from=al2 /etc/pki/ /etc/pki/
+COPY --from=al2 /etc/ssl/certs/ /etc/ssl/certs
 
 ENTRYPOINT ["/bin/secrets-store-csi-driver-provider-aws"]
