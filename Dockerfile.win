@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/windows/nanoserver:ltsc2019 as base
+FROM mcr.microsoft.com/windows/nanoserver:1809 as base
 
 COPY ./_output/secrets-store-csi-driver-provider-aws-amd64 /secrets-store-csi-driver-provider-aws.exe
 
