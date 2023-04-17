@@ -7,9 +7,9 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0
 	github.com/stretchr/testify v1.8.2
 	google.golang.org/grpc v1.53.0
-	k8s.io/api v0.26.3
-	k8s.io/apimachinery v0.26.3
-	k8s.io/client-go v0.26.3
+	k8s.io/api v0.27.1
+	k8s.io/apimachinery v0.27.1
+	k8s.io/client-go v0.27.1
 	k8s.io/klog/v2 v2.90.1
 	sigs.k8s.io/secrets-store-csi-driver v1.3.1
 	sigs.k8s.io/yaml v1.3.0
