@@ -15,6 +15,11 @@ func IsFatalError(errMsg error) bool {
 			return true
 		}
 	}
+	if reqErr, ok := errMsg.(awserr.Error); ok {
+		if reqErr.OrigErr() != nil {
+			return IsFatalError(reqErr.OrigErr())
+		}
+	}
 	if errors.Unwrap(errMsg) != nil {
 		return IsFatalError(errors.Unwrap(errMsg))
 	}
