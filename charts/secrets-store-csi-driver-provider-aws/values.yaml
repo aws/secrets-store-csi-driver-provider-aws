@@ -21,7 +21,10 @@ resources:
 priorityClassName: ""
 nodeSelector: {}
 
-tolerations: []
+# ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
+# An empty key with operator Exists matches all keys, values and effects which means this will tolerate everything.
+tolerations:
+  - operator: "Exists"
 
 port: 8989
 
