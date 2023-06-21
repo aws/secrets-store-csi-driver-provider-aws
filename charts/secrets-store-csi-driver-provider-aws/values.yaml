@@ -1,7 +1,7 @@
 image:
   repository: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
   pullPolicy: IfNotPresent
-  tag: 1.0.r2-46-gf2a8f35-2023.03.21.21.55
+  tag: 1.0.r2-50-g5b4aca1-2023.06.09.21.19
 
 nameOverride: ""
 fullnameOverride: ""
@@ -27,6 +27,8 @@ port: 8989
 
 updateStrategy:
   type: RollingUpdate
+
+imagePullSecrets: []
 
 rbac:
   install: true
