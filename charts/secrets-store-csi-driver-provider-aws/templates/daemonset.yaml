@@ -25,6 +25,8 @@ spec:
     spec:
       serviceAccountName: {{ template "provider.serviceAccountName" . }}
       hostNetwork: false
+      affinity:
+{{ toYaml .Values.affinity | indent 8 }}
       containers:
         - name: provider-aws-installer
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}

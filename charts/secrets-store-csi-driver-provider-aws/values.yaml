@@ -23,6 +23,8 @@ nodeSelector: {}
 
 tolerations: []
 
+affinity: {}
+
 port: 8989
 
 updateStrategy:
