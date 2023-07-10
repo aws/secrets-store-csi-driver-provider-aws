@@ -10,6 +10,8 @@ providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
 podLabels: {}
 podAnnotations: {}
 
+affinity: {}
+
 resources:
   requests:
     cpu: 50m
