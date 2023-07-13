@@ -2,6 +2,27 @@ apiVersion: v1
 entries:
   secrets-store-csi-driver-provider-aws:
   - apiVersion: v2
+    created: "2023-07-13T12:15:45.140022-07:00"
+    description: A Helm chart for the AWS Secrets Manager and Config Provider for
+      Secret Store CSI Driver
+    digest: 75e6a18f41b91101c8534d2b5b61c10da659e687bb153810009638da18650ace
+    home: https://github.com/aws/secrets-store-csi-driver-provider-aws
+    icon: https://raw.githubusercontent.com/aws/eks-charts/master/docs/logo/aws.png
+    keywords:
+    - eks
+    - secrets-store-csi-driver
+    - csi
+    - aws
+    - secrets manager
+    kubeVersion: '>=1.17.0-0'
+    name: secrets-store-csi-driver-provider-aws
+    sources:
+    - https://github.com/aws/secrets-store-csi-driver-provider-aws
+    type: application
+    urls:
+    - https://github.com/aws/secrets-store-csi-driver-provider-aws/releases/download/secrets-store-csi-driver-provider-aws-0.3.4/secrets-store-csi-driver-provider-aws-0.3.4.tgz
+    version: 0.3.4
+  - apiVersion: v2
     created: "2023-06-12T10:50:11.206055-05:00"
     description: A Helm chart for the AWS Secrets Manager and Config Provider for
       Secret Store CSI Driver
@@ -127,4 +148,4 @@ entries:
     urls:
     - https://github.com/aws/secrets-store-csi-driver-provider-aws/releases/download/secrets-store-csi-driver-provider-aws-0.1.0/secrets-store-csi-driver-provider-aws-0.1.0.tgz
     version: 0.1.0
-generated: "2023-06-12T10:50:11.206092-05:00"
+generated: "2023-07-13T12:15:45.140053-07:00"
