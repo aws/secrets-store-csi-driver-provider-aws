@@ -145,6 +145,13 @@ The primary objects field of the SecretProviderClass can contain the following s
                   - path: "password"
                     objectAlias: "MySecretPassword"
   ```
+  If either the 'path' or the 'objectAlias' fields contain a hyphen, then they must be escaped with a single quote:
+  
+  ```
+  - path: '"hyphenated-path"'
+    objectAlias: '"hyphenated-alias"'
+  ```
+  
   If you use the jmesPath field,  you must provide the following two sub-fields:
   * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
   * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
