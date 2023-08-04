@@ -4,10 +4,13 @@ on:
   push:
     tags:
       - "*"
-
 jobs:
   build:
-    runs-on: windows-2022
+    strategy:
+      fail-fast: true
+      matrix:
+        version: [2019, 2022]
+    runs-on: windows-${{ matrix.version }}
     steps:
     - uses: actions/checkout@v3
     - name: Set up Go
@@ -24,6 +27,33 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Build and push
+      env:
+        repo: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws
+      shell: bash
       run: |
-        docker build . -f Dockerfile.win -t ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:${{ github.ref_name }}
-        docker push ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:${{ github.ref_name }}
+        BASE_NAME=${{ env.repo }}:${{ github.ref_name }}-windows-${{ matrix.version }}
+        docker build . -f Dockerfile.win -t ${BASE_NAME}
+        docker push ${BASE_NAME}
+
+  annotate:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Annotate and Push
+      env:
+        repo: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws
+      run: |
+        BASE_NAME=${{ env.repo }}:${{ github.ref_name }}
+
+        docker manifest create ${BASE_NAME} ${BASE_NAME}-windows-2019 ${BASE_NAME}-windows-2022
+
+        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2019 --os windows --arch amd64 --os-version 10.0.17763.4645
+        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2022 --os windows --arch amd64 --os-version 10.0.20348.1850
+
+        docker manifest push ${BASE_NAME}
