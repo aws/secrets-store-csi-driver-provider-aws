@@ -33,7 +33,7 @@ jobs:
 
         docker manifest create ${BASE_NAME} ${BASE_NAME}-windows-2019 ${BASE_NAME}-windows-2022
 
-        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2019 --os windows --arch amd64 --os-version 
-        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2022 --os windows --arch amd64 --os-version 
+        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2019 --os windows --arch amd64 --os-version 10.0.17763.4645
+        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2022 --os windows --arch amd64 --os-version 10.0.20348.1850
 
         docker manifest push ${BASE_NAME}
