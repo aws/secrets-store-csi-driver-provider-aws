@@ -24,6 +24,16 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Build and push
+      env:
+        repo: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws
       run: |
-        docker build . -f Dockerfile.win -t ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:${{ github.ref_name }}
-        docker push ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:${{ github.ref_name }}
+        BASE_NAME=${{ env.repo }}:${{ github.ref_name }}
+        docker build . -f Dockerfile.win --build-arg WINDOWS_VERSION=2019 --push ${BASE_NAME}-windows-2019
+        docker build . -f Dockerfile.win --build-arg WINDOWS_VERSION=2022 --push ${BASE_NAME}-windows-2022
+
+        docker manifest create ${BASE_NAME} ${BASE_NAME}-windows-2019 ${BASE_NAME}-windows-2022
+
+        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2019 --os windows --arch amd64 --os-version 
+        docker manifest annotate ${BASE_NAME} ${BASE_NAME}-windows-2022 --os windows --arch amd64 --os-version 
+
+        docker manifest push ${BASE_NAME}
