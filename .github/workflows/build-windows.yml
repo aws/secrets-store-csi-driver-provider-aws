@@ -4,10 +4,13 @@ on:
   push:
     tags:
       - "*"
-
 jobs:
   build:
-    runs-on: windows-2022
+    strategy:
+      fail-fast: true
+      matrix:
+        version: [2019, 2022]
+    runs-on: windows-${{ matrix.version }}
     steps:
     - uses: actions/checkout@v3
     - name: Set up Go
@@ -28,9 +31,17 @@ jobs:
         repo: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws
       shell: bash
       run: |
+        BASE_NAME=${{ env.repo }}:${{ github.ref_name }}-windows-${{ matrix.version }}
+        docker build . -f Dockerfile.win -t ${BASE_NAME}
+        docker push ${BASE_NAME}
+
+  annotate:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+    - name: Annotate and Push
+      run: |
         BASE_NAME=${{ env.repo }}:${{ github.ref_name }}
-        docker build . -f Dockerfile.win --build-arg WINDOWS_VERSION=2019 --push ${BASE_NAME}-windows-2019
-        docker build . -f Dockerfile.win --build-arg WINDOWS_VERSION=2022 --push ${BASE_NAME}-windows-2022
 
         docker manifest create ${BASE_NAME} ${BASE_NAME}-windows-2019 ${BASE_NAME}-windows-2022
 
