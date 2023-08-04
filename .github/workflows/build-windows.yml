@@ -32,7 +32,7 @@ jobs:
       shell: bash
       run: |
         BASE_NAME=${{ env.repo }}:${{ github.ref_name }}-windows-${{ matrix.version }}
-        docker build . -f Dockerfile.win -t ${BASE_NAME}
+        docker build . --build-arg WINDOWS_VERSION=${{ matrix.version }} -f Dockerfile.win -t ${BASE_NAME}
         docker push ${BASE_NAME}
 
   annotate:
