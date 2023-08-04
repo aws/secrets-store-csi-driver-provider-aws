@@ -26,6 +26,7 @@ jobs:
     - name: Build and push
       env:
         repo: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws
+      shell: bash
       run: |
         BASE_NAME=${{ env.repo }}:${{ github.ref_name }}
         docker build . -f Dockerfile.win --build-arg WINDOWS_VERSION=2019 --push ${BASE_NAME}-windows-2019
