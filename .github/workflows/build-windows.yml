@@ -40,6 +40,8 @@ jobs:
     needs: [build]
     steps:
     - name: Annotate and Push
+      env:
+        repo: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws
       run: |
         BASE_NAME=${{ env.repo }}:${{ github.ref_name }}
 
