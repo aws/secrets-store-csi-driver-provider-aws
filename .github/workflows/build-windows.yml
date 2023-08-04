@@ -39,6 +39,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build]
     steps:
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     - name: Annotate and Push
       env:
         repo: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws
