@@ -3,7 +3,7 @@ module github.com/aws/secrets-store-csi-driver-provider-aws
 go 1.19
 
 require (
-	github.com/aws/aws-sdk-go v1.44.225
+	github.com/aws/aws-sdk-go v1.45.6
 	github.com/jmespath/go-jmespath v0.4.0
 	github.com/stretchr/testify v1.8.2
 	google.golang.org/grpc v1.53.0
