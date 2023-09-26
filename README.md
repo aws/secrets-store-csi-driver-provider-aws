@@ -8,7 +8,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 ## Installation
 
 ### Requirements
-* Amazon Elastic Kubernetes Service (EKS) 1.17+ using ECS (Fargate is not supported **[^1]**)
+* Amazon Elastic Kubernetes Service (EKS) 1.17+ running an EC2 node group (Fargate node groups are not supported **[^1]**)
 * [Secrets Store CSI driver installed](https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation.html):
     ```shell
     helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -144,6 +144,13 @@ The primary objects field of the SecretProviderClass can contain the following s
                   - path: "password"
                     objectAlias: "MySecretPassword"
   ```
+  If either the 'path' or the 'objectAlias' fields contain a hyphen, then they must be escaped with a single quote:
+  
+  ```
+  - path: '"hyphenated-path"'
+    objectAlias: '"hyphenated-alias"'
+  ```
+  
   If you use the jmesPath field,  you must provide the following two sub-fields:
   * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
   * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
