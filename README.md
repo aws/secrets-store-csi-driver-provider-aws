@@ -154,6 +154,24 @@ The primary objects field of the SecretProviderClass can contain the following s
   If you use the jmesPath field,  you must provide the following two sub-fields:
   * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
   * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
+### Creating k8s secrets/mounting secret as environment variable
+  The secretObjects section contains the details to create k8s secrets and mount them as environment variables.
+
+```yaml
+spec:
+  secretObjects:
+    - secretName: myk8ssecret
+      type: Opaque
+      data: 
+        - objectName: "MySecretUsername"
+          key: "username"
+```
+
+- secretName: Name of the k8s secret to be created
+- objectName: Name of the secret Object/objectAlias defined in parameters section. Content of this object will be imported in to secret.
+- key: Object that will contain the secret data in k8s secret. K8s secret myk8ssecret will have a field username containing value of MySecretUsername
+
+Note: k8s secret is created only when it is used by pod/Deployment.
 
 ## Additional Considerations
 
