@@ -3,7 +3,7 @@ module github.com/aws/secrets-store-csi-driver-provider-aws
 go 1.19
 
 require (
-	github.com/aws/aws-sdk-go v1.44.225
+	github.com/aws/aws-sdk-go v1.47.3
 	github.com/jmespath/go-jmespath v0.4.0
 	github.com/stretchr/testify v1.8.2
 	google.golang.org/grpc v1.53.0
@@ -37,11 +37,11 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	golang.org/x/net v0.8.0 // indirect
+	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
-	golang.org/x/sys v0.6.0 // indirect
-	golang.org/x/term v0.6.0 // indirect
-	golang.org/x/text v0.8.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/term v0.13.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230320184635-7606e756e683 // indirect
