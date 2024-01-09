@@ -1,3 +1,10 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-deployment-sa
+  annotations:
+    eks.amazonaws.com/role-arn: <replace-with-arn:aws:iam::number:role/secret-name>
+---
 kind: Service
 apiVersion: v1
 metadata:
