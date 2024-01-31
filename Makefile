@@ -30,7 +30,7 @@ CHART_RELEASER_PATH ?= cr
 all: build docker-login docker-buildx docker-manifest
 
 build: clean
-	$(foreach ARCH,$(ARCHITECTURES),CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(ARCH) go build -a -ldflags $(LDFLAGS) -o _output/$(IMAGE_NAME)-$(ARCH) ;)
+	$(foreach ARCH,$(ARCHITECTURES),CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(ARCH) /Users/martysi/sdk/go1.20.13/bin/go build -a -ldflags $(LDFLAGS) -o _output/$(IMAGE_NAME)-$(ARCH) ;)
 
 clean:
 	-rm -rf _output
