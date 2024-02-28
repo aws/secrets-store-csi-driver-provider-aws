@@ -8,7 +8,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 ## Installation
 
 ### Requirements
-* Amazon Elastic Kubernetes Service (EKS) 1.17+ using ECS (Fargate is not supported **[^1]**)
+* Amazon Elastic Kubernetes Service (EKS) 1.17+ running an EC2 node group (Fargate node groups are not supported **[^1]**)
 * [Secrets Store CSI driver installed](https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation.html):
     ```shell
     helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -92,7 +92,7 @@ Where **&lt;PODID&gt;** in this case is the id of the *csi-secrets-store-provide
 ### SecretProviderClass options
 The SecretProviderClass has the following format:
 ```yaml
-apiVersion: secrets-store.csi.x-k8s.io/v1alpha1
+apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
   name: <NAME>
