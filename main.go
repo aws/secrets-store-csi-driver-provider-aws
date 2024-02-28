@@ -22,8 +22,8 @@ import (
 var (
 	endpointDir        = flag.String("provider-volume", "/etc/kubernetes/secrets-store-csi-providers", "Rendezvous directory for provider socket")
 	driverWriteSecrets = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
-	qps                = flag.Int("qps", 20, "Maximum query per second to the master")
-	burst              = flag.Int("burst", 40, "Maximum burst for throttle")
+	qps                = flag.Int("qps", 5, "Maximum query per second to the master")
+	burst              = flag.Int("burst", 10, "Maximum burst for throttle")
 )
 
 // Main entry point for the Secret Store CSI driver AWS provider. This main
