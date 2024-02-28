@@ -92,7 +92,7 @@ Where **&lt;PODID&gt;** in this case is the id of the *csi-secrets-store-provide
 ### SecretProviderClass options
 The SecretProviderClass has the following format:
 ```yaml
-apiVersion: secrets-store.csi.x-k8s.io/v1alpha1
+apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
   name: <NAME>
