@@ -218,6 +218,25 @@ envsubst < deployment/private-installer.yaml | kubectl apply -f -
 
 The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.
 
+### Client-Side Rate-Limitting to Kubernetes API server
+
+To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server. Add your custom qps and burst to the definition of `csi-secrets-store-provider-aws` in `aws-provider-installer.yaml`
+
+```ymal
+kind: DaemonSet
+metadata:
+  namespace: kube-system
+  name: csi-secrets-store-provider-aws
+spec:
+  template:
+    spec:
+      containers:
+        - name: provider-aws-installer
+          args:
+              - --qps=<custom qps>
+              - --burst=<custom burst>
+```
+
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
