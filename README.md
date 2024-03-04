@@ -222,7 +222,7 @@ The AWS Secrets Manager and Config Provider provides compatibility for legacy ap
 
 To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server. Add your custom qps and burst to the definition of `csi-secrets-store-provider-aws` in `aws-provider-installer.yaml`
 
-```ymal
+```yaml
 kind: DaemonSet
 metadata:
   namespace: kube-system
