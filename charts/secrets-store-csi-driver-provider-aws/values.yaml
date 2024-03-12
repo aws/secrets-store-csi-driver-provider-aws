@@ -6,6 +6,7 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
+kubeletPath: "/var/lib/kubelet"
 
 podLabels: {}
 podAnnotations: {}
