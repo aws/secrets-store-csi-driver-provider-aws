@@ -62,8 +62,6 @@ spec:
           imagePullPolicy: Always
           args:
               - --provider-volume=/etc/kubernetes/secrets-store-csi-providers
-              - --qps=5
-              - --burst=10
           resources:
             requests:
               cpu: 50m

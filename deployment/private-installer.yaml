@@ -63,8 +63,6 @@ spec:
           args:
               - --provider-volume=/etc/kubernetes/secrets-store-csi-providers
               - --driver-writes-secrets=false
-              - --qps=5
-              - --burst=10
           resources:
             requests:
               cpu: 50m
