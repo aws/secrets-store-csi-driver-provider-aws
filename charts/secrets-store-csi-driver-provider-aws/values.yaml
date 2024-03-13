@@ -38,3 +38,7 @@ rbac:
 securityContext:
   privileged: false
   allowPrivilegeEscalation: false
+
+secretsManagerClientConfig:
+  - name: AWS_USE_FIPS_ENDPOINT
+    value: false

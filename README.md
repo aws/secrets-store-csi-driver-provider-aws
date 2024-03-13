@@ -216,6 +216,32 @@ Once the image is in your repo you can install it into your cluster from your re
 envsubst < deployment/private-installer.yaml | kubectl apply -f -
 ```
 
+### Configure the Underlying Secrets Manager Client to Use FIPS Endpoint
+
+If you prefer to use Helm chart to install the provider, append the `--set-json 'secretsManagerClientConfig=[{"name": "AWS_USE_FIPS_ENDPOINT", "value": true}]'` flag on the install step. Your install command would be something like
+
+```shell
+helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver-provider-aws
+helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set-json 'secretsManagerClientConfig=[{"name": "AWS_USE_FIPS_ENDPOINT", "value": true}]'
+```
+
+If you install the provider by the YAML file in the deployment directory, set environment variable `AWS_USE_FIPS_ENDPOINT` to be true in the definition of `csi-secrets-store-provider-aws` in `aws-provider-installer.yaml`
+
+```yaml
+kind: DaemonSet
+metadata:
+  namespace: kube-system
+  name: csi-secrets-store-provider-aws
+spec:
+  template:
+    spec:
+      containers:
+        - name: provider-aws-installer
+          env:
+            - name: AWS_USE_FIPS_ENDPOINT
+              value: true
+```
+
 ### Security Considerations
 
 The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.

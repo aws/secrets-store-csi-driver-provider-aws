@@ -69,3 +69,12 @@ spec:
       affinity:
 {{ toYaml . | indent 8 }}
 {{- end }}
+{{- if .Values.secretsManagerClientConfig }}
+      env:
+        {{- range .Values.secretsManagerClientConfig }}
+        {{- if eq .name "AWS_USE_FIPS_ENDPOINT" }}
+        - name: {{ .name }}
+          value: {{ .value }}
+        {{- end }}
+        {{- end }}
+{{- end }}
