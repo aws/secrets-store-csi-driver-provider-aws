@@ -38,3 +38,5 @@ rbac:
 securityContext:
   privileged: false
   allowPrivilegeEscalation: false
+
+useFipsEndpoint: false
