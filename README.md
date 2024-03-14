@@ -218,28 +218,11 @@ envsubst < deployment/private-installer.yaml | kubectl apply -f -
 
 ### Configure the Underlying Secrets Manager Client to Use FIPS Endpoint
 
-If you prefer to use Helm chart to install the provider, append the `--set useFipsEndpoint=true` flag on the install step. Your install command would be something like
+If you use Helm chart to install the provider, append the `--set useFipsEndpoint=true` flag on the install step. Your install command would be something like
 
 ```shell
 helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver-provider-aws
 helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set useFipsEndpoint=true
-```
-
-If you install the provider by the YAML file in the deployment directory, set environment variable `AWS_USE_FIPS_ENDPOINT` to be true in the definition of `csi-secrets-store-provider-aws` in `aws-provider-installer.yaml`
-
-```yaml
-kind: DaemonSet
-metadata:
-  namespace: kube-system
-  name: csi-secrets-store-provider-aws
-spec:
-  template:
-    spec:
-      containers:
-        - name: provider-aws-installer
-          env:
-            - name: AWS_USE_FIPS_ENDPOINT
-              value: true
 ```
 
 ### Security Considerations
