@@ -222,32 +222,9 @@ The AWS Secrets Manager and Config Provider provides compatibility for legacy ap
 
 ### Client-Side Rate-Limitting to Kubernetes API server
 
-To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server.
+To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server.
 
-If you use Helm chart to install the provider, append the following to `values.yaml`
-
-```yaml
-k8sThrottlingParams:
-  qps: <custom qps>
-  burst: <custom burst>
-```
-
-If you install the provider by using the YAML file in the deployment directory, insert your custom qps and burst to the definition of `csi-secrets-store-provider-aws` in `aws-provider-installer.yaml`
-
-```yaml
-kind: DaemonSet
-metadata:
-  namespace: kube-system
-  name: csi-secrets-store-provider-aws
-spec:
-  template:
-    spec:
-      containers:
-        - name: provider-aws-installer
-          args:
-              - --qps=<custom qps>
-              - --burst=<custom burst>
-```
+If you use Helm chart to install the provider, append the `--set-json 'k8sThrottlingParams={"qps": "<custom qps>", "burst": "<custom qps>"}'` flag in the install step.
 
 ## Security
 
