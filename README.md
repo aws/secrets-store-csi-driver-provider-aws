@@ -225,15 +225,15 @@ helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver
 helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set useFipsEndpoint=true
 ```
 
-### Security Considerations
-
-The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.
-
 ### Client-Side Rate-Limitting to Kubernetes API server
 
 To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server.
 
 If you use Helm chart to install the provider, append the `--set-json 'k8sThrottlingParams={"qps": "<custom qps>", "burst": "<custom qps>"}'` flag in the install step.
+
+### Security Considerations
+
+The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.
 
 ## Security
 
