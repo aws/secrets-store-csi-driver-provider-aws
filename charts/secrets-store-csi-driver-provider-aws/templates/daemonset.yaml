@@ -77,3 +77,8 @@ spec:
       affinity:
 {{ toYaml . | indent 8 }}
 {{- end }}
+{{- if .Values.useFipsEndpoint }}
+      env:
+        - name: AWS_USE_FIPS_ENDPOINT
+          value: {{ .Values.useFipsEndpoint }}
+{{- end }}
