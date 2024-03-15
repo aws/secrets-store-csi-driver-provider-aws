@@ -6,6 +6,7 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
+kubeletPath: "/var/lib/kubelet"
 
 podLabels: {}
 podAnnotations: {}
@@ -38,3 +39,5 @@ rbac:
 securityContext:
   privileged: false
   allowPrivilegeEscalation: false
+
+useFipsEndpoint: false
