@@ -47,7 +47,7 @@ spec:
             path: {{ .Values.providerVolume }}
         - name: mountpoint-dir
           hostPath:
-            path: /var/lib/kubelet/pods
+            path: {{ .Values.kubeletPath }}/pods
             type: DirectoryOrCreate
 {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName | quote }}
@@ -68,4 +68,9 @@ spec:
 {{- with .Values.affinity }}
       affinity:
 {{ toYaml . | indent 8 }}
+{{- end }}
+{{- if .Values.useFipsEndpoint }}
+      env:
+        - name: AWS_USE_FIPS_ENDPOINT
+          value: {{ .Values.useFipsEndpoint }}
 {{- end }}

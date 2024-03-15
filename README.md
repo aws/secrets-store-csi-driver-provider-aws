@@ -59,6 +59,8 @@ Next create the service account to be used by the pod and associate the above IA
 ```shell
 eksctl create iamserviceaccount --name nginx-deployment-sa --region="$REGION" --cluster "$CLUSTERNAME" --attach-policy-arn "$POLICY_ARN" --approve --override-existing-serviceaccounts
 ```
+For a private cluster, ensure that the VPC the cluster is in has an AWS STS endpoint. For more information, see [Interface VPC endpoints](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_interface_vpc_endpoints.html) in the AWS IAM User Guide.
+
 Now create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. The ExampleSecretProviderClass.yaml in the [examples](./examples) directory will mount "MySecret" created above:
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleSecretProviderClass.yaml
@@ -212,6 +214,15 @@ make
 Once the image is in your repo you can install it into your cluster from your repo rather than the public repo:
 ```bash
 envsubst < deployment/private-installer.yaml | kubectl apply -f -
+```
+
+### Configure the Underlying Secrets Manager Client to Use FIPS Endpoint
+
+If you use Helm chart to install the provider, append the `--set useFipsEndpoint=true` flag on the install step. Your install command would be something like
+
+```shell
+helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver-provider-aws
+helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set useFipsEndpoint=true
 ```
 
 ### Security Considerations
