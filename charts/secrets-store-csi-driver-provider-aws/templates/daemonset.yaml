@@ -47,7 +47,7 @@ spec:
             path: {{ .Values.providerVolume }}
         - name: mountpoint-dir
           hostPath:
-            path: /var/lib/kubelet/pods
+            path: {{ .Values.kubeletPath }}/pods
             type: DirectoryOrCreate
 {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName | quote }}
