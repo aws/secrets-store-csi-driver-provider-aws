@@ -31,6 +31,14 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --provider-volume={{ .Values.providerVolume }}
+            {{- if .Values.k8sThrottlingParams }}
+            {{- if .Values.k8sThrottlingParams.qps }}
+            - --qps={{ .Values.k8sThrottlingParams.qps }}
+            {{- end }}
+            {{- if .Values.k8sThrottlingParams.burst }}
+            - --burst={{ .Values.k8sThrottlingParams.burst }}
+            {{- end }}
+            {{- end }}
           resources:
 {{ toYaml .Values.resources | indent 12 }}
           securityContext:
