@@ -47,7 +47,7 @@ spec:
             - mountPath: {{ .Values.providerVolume }}
               name: providervol
             - name: mountpoint-dir
-              mountPath: /var/lib/kubelet/pods
+              mountPath: {{ .Values.kubeletPath }}/pods
               mountPropagation: HostToContainer
       volumes:
         - name: providervol
