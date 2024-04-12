@@ -31,6 +31,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --provider-volume={{ .Values.providerVolume }}
+            - --driver-writes-secrets={{ .Values.driverWritesSecrets }}
             {{- if .Values.k8sThrottlingParams }}
             {{- if .Values.k8sThrottlingParams.qps }}
             - --qps={{ .Values.k8sThrottlingParams.qps }}

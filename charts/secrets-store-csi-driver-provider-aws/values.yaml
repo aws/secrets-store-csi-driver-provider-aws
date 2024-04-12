@@ -41,3 +41,5 @@ securityContext:
   allowPrivilegeEscalation: false
 
 useFipsEndpoint: false
+
+driverWritesSecrets: false
