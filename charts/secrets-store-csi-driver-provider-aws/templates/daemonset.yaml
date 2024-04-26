@@ -58,6 +58,7 @@ spec:
         - name: providervol
           hostPath:
             path: {{ .Values.providerVolume }}
+            type: DirectoryOrCreate
         - name: mountpoint-dir
           hostPath:
             path: {{ .Values.kubeletPath }}/pods
