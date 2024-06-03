@@ -31,6 +31,14 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --provider-volume={{ .Values.providerVolume }}
+            {{- if .Values.k8sThrottlingParams }}
+            {{- if .Values.k8sThrottlingParams.qps }}
+            - --qps={{ .Values.k8sThrottlingParams.qps }}
+            {{- end }}
+            {{- if .Values.k8sThrottlingParams.burst }}
+            - --burst={{ .Values.k8sThrottlingParams.burst }}
+            {{- end }}
+            {{- end }}
           resources:
 {{ toYaml .Values.resources | indent 12 }}
           securityContext:
@@ -39,15 +47,20 @@ spec:
             - mountPath: {{ .Values.providerVolume }}
               name: providervol
             - name: mountpoint-dir
-              mountPath: /var/lib/kubelet/pods
+              mountPath: {{ .Values.kubeletPath }}/pods
               mountPropagation: HostToContainer
+          {{- if .Values.useFipsEndpoint }}
+          env:
+            - name: AWS_USE_FIPS_ENDPOINT
+              value: {{ .Values.useFipsEndpoint | quote }}
+          {{- end }}
       volumes:
         - name: providervol
           hostPath:
             path: {{ .Values.providerVolume }}
         - name: mountpoint-dir
           hostPath:
-            path: /var/lib/kubelet/pods
+            path: {{ .Values.kubeletPath }}/pods
             type: DirectoryOrCreate
 {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName | quote }}
