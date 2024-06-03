@@ -1,7 +1,7 @@
 image:
   repository: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
   pullPolicy: IfNotPresent
-  tag: 1.0.r2-58-g4ddce6a-2024.01.31.21.42
+  tag: 1.0.r2-72-gfb78a36-2024.05.29.23.03
 
 nameOverride: ""
 fullnameOverride: ""
