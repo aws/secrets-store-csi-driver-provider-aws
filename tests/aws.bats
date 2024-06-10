@@ -9,6 +9,7 @@ NAMESPACE=kube-system
 CLUSTER_NAME=integ-cluster
 POD_NAME=basic-test-mount
 export REGION=us-west-2
+export FAILOVERREGION=us-east-2
 export ACCOUNT_NUMBER=$(aws --region $REGION  sts get-caller-identity --query Account --output text)
 
 if [[ -z "${PRIVREPO}" ]]; then
@@ -48,15 +49,24 @@ setup_file() {
    aws secretsmanager create-secret --name SecretsManagerTest1 --secret-string SecretsManagerTest1Value --region $REGION
    aws secretsmanager create-secret --name SecretsManagerTest2 --secret-string SecretsManagerTest2Value --region $REGION
    aws secretsmanager create-secret --name SecretsManagerSync --secret-string SecretUser --region $REGION
+   aws secretsmanager create-secret --name SecretsManagerTest1 --secret-string SecretsManagerTest1Value --region $FAILOVERREGION
+   aws secretsmanager create-secret --name SecretsManagerTest2 --secret-string SecretsManagerTest2Value --region $FAILOVERREGION
+   aws secretsmanager create-secret --name SecretsManagerSync --secret-string SecretUser --region $FAILOVERREGION
  
    aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $REGION
    aws ssm put-parameter --name ParameterStoreTestWithLongName --value ParameterStoreTest2Value --type SecureString --region $REGION
+   aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $FAILOVERREGION
+   aws ssm put-parameter --name ParameterStoreTestWithLongName --value ParameterStoreTest2Value --type SecureString --region $FAILOVERREGION
  
    aws ssm put-parameter --name ParameterStoreRotationTest --value BeforeRotation --type SecureString --region $REGION
    aws secretsmanager create-secret --name SecretsManagerRotationTest --secret-string BeforeRotation --region $REGION
+   aws ssm put-parameter --name ParameterStoreRotationTest --value BeforeRotation --type SecureString --region $FAILOVERREGION
+   aws secretsmanager create-secret --name SecretsManagerRotationTest --secret-string BeforeRotation --region $FAILOVERREGION
 
    aws secretsmanager create-secret --name secretsManagerJson  --secret-string '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}' --region $REGION
    aws ssm put-parameter --name jsonSsm --value '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}' --type SecureString --region $REGION
+   aws secretsmanager create-secret --name secretsManagerJson  --secret-string '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}' --region $FAILOVERREGION
+   aws ssm put-parameter --name jsonSsm --value '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}' --type SecureString --region $FAILOVERREGION
 }
  
 teardown_file() { 
@@ -68,15 +78,24 @@ teardown_file() {
     aws secretsmanager delete-secret --secret-id SecretsManagerTest1 --force-delete-without-recovery --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerTest2 --force-delete-without-recovery --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerSync --force-delete-without-recovery --region $REGION
+    aws secretsmanager delete-secret --secret-id SecretsManagerTest1 --force-delete-without-recovery --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id SecretsManagerTest2 --force-delete-without-recovery --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id SecretsManagerSync --force-delete-without-recovery --region $FAILOVERREGION
  
     aws ssm delete-parameter --name ParameterStoreTest1 --region $REGION
     aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $REGION 
+    aws ssm delete-parameter --name ParameterStoreTest1 --region $FAILOVERREGION
+    aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $FAILOVERREGION 
  
     aws ssm delete-parameter --name ParameterStoreRotationTest --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerRotationTest --force-delete-without-recovery --region $REGION
+    aws ssm delete-parameter --name ParameterStoreRotationTest --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id SecretsManagerRotationTest --force-delete-without-recovery --region $FAILOVERREGION
 
     aws ssm delete-parameter --name jsonSsm --region $REGION
     aws secretsmanager delete-secret --secret-id secretsManagerJson --force-delete-without-recovery --region $REGION
+    aws ssm delete-parameter --name jsonSsm --region $FAILOVERREGION
+    aws secretsmanager delete-secret --secret-id secretsManagerJson --force-delete-without-recovery --region $FAILOVERREGION
 }
 
 validate_jsme_mount() {

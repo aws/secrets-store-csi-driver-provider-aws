@@ -16,3 +16,6 @@
 
 # VS Code
 .vscode/
+_output
+
+secrets-store-csi-driver-provider-aws

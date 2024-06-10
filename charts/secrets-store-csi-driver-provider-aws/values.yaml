@@ -1,14 +1,17 @@
 image:
   repository: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
   pullPolicy: IfNotPresent
-  tag: 1.0.r2-6-gee95299-2022.04.14.21.07
+  tag: 1.0.r2-72-gfb78a36-2024.05.29.23.03
 
 nameOverride: ""
 fullnameOverride: ""
 providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
+kubeletPath: "/var/lib/kubelet"
 
 podLabels: {}
 podAnnotations: {}
+
+affinity: {}
 
 resources:
   requests:
@@ -18,6 +21,7 @@ resources:
     cpu: 50m
     memory: 100Mi
 
+priorityClassName: ""
 nodeSelector: {}
 
 tolerations: []
@@ -27,9 +31,13 @@ port: 8989
 updateStrategy:
   type: RollingUpdate
 
+imagePullSecrets: []
+
 rbac:
   install: true
 
 securityContext:
   privileged: false
   allowPrivilegeEscalation: false
+
+useFipsEndpoint: false
