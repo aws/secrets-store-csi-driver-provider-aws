@@ -39,8 +39,8 @@ func main() {
 	flag.Parse() // Parse command line flags
 
 	if *logFormatJSON {
-		jsonFactory := jlogs.Factory{}
-		logger, _ := jsonFactory.Create(config.FormatOptions{})
+		jsonFactory := json.Factory{}
+		logger, _ := jsonFactory.Create(config.LoggingConfiguration{Format: "json"})
 		klog.SetLogger(logger)
 	}
 
