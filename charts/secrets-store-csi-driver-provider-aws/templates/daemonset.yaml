@@ -49,6 +49,11 @@ spec:
             - name: mountpoint-dir
               mountPath: {{ .Values.kubeletPath }}/pods
               mountPropagation: HostToContainer
+          {{- if .Values.clusterName }}
+          env:
+            - name: CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+          {{- end }}
           {{- if .Values.useFipsEndpoint }}
           env:
             - name: AWS_USE_FIPS_ENDPOINT
