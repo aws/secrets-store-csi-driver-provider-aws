@@ -40,4 +40,4 @@ securityContext:
   allowPrivilegeEscalation: false
 
 useFipsEndpoint: false
-clusterName: xxxx
+clusterName: ""

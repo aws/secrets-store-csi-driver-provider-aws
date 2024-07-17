@@ -48,6 +48,7 @@ const (
 // store them are in the request. The secrets will be retrieved using the AWS
 // credentials of the IAM role associated with the pod. If there is a failure
 // during the mount of any one secret no secrets are written to the mount point.
+//
 type CSIDriverProviderServer struct {
 	*grpc.Server
 	secretProviderFactory provider.ProviderFactoryFactory
@@ -56,6 +57,7 @@ type CSIDriverProviderServer struct {
 }
 
 // Factory function to create the server to handle incoming mount requests.
+//
 func NewServer(
 	secretProviderFact provider.ProviderFactoryFactory,
 	k8client k8sv1.CoreV1Interface,
@@ -75,6 +77,7 @@ func NewServer(
 // The provider will fetch the secret value from the secret provider (Parameter
 // Store or Secrets Manager) and write the secrets to the mount point. The
 // version ids of the secrets are then returned to the driver.
+//
 func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.MountRequest) (response *v1alpha1.MountResponse, e error) {
 
 	// Basic sanity check
@@ -178,6 +181,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 // If a region is not specified in the mount request, we must lookup the region from node label and add as primary region to the lookup region list
 // If both the region and node label region are not available, error will be thrown
 // If backupRegion is provided and is equal to region/node region, error will be thrown else backupRegion is added to the lookup region list
+//
 func (s *CSIDriverProviderServer) getAwsRegions(region, backupRegion, nameSpace, podName string, ctx context.Context) (response []string, err error) {
 	var lookupRegionList []string
 
@@ -205,6 +209,7 @@ func (s *CSIDriverProviderServer) getAwsRegions(region, backupRegion, nameSpace,
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If atleast one session is not created, error will be thrown
+//
 func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx context.Context, lookupRegionList []string, podName string) (response []*session.Session, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsSessionsList []*session.Session
@@ -225,6 +230,7 @@ func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx 
 }
 
 // Return the provider plugin version information to the driver.
+//
 func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.VersionRequest) (*v1alpha1.VersionResponse, error) {
 
 	return &v1alpha1.VersionResponse{
@@ -242,6 +248,7 @@ func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.Ver
 // then describing the node to get the region label.
 //
 // See also: https://pkg.go.dev/k8s.io/client-go/kubernetes/typed/core/v1
+//
 func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespace string, podName string) (reg string, err error) {
 
 	// Describe the pod to find the node: kubectl -o yaml -n <namespace> get pod <podid>
@@ -274,6 +281,7 @@ func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespa
 // to an atomic update as the file system supports. This is to avoid having
 // pod applications inadvertantly reading an empty or partial files as it is
 // being updated.
+//
 func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode os.FileMode) (*v1alpha1.File, error) {
 
 	// Don't write if the driver is supposed to do it.
