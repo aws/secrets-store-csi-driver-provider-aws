@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/aws/aws-sdk-go/service/sts/stsiface"
+	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,6 +84,7 @@ func NewAuth(
 
 	// Get an initial session to use for STS calls.
 	sess, err := session.NewSession(aws.NewConfig().
+		WithEndpointResolver(utils.EnvironmentEndpointResolver()).
 		WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint).
 		WithRegion(region),
 	)
@@ -140,6 +142,7 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 	fetcher := &authTokenFetcher{p.nameSpace, p.svcAcc, p.k8sClient}
 	ar := stscreds.NewWebIdentityRoleProviderWithToken(p.stsClient, *roleArn, ProviderName, fetcher)
 	config := aws.NewConfig().
+		WithEndpointResolver(utils.EnvironmentEndpointResolver()).
 		WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint). // Use regional STS endpoint
 		WithRegion(p.region).
 		WithCredentials(credentials.NewCredentials(ar))
