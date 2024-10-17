@@ -123,7 +123,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 
 	klog.Infof("Servicing mount request for pod %s in namespace %s using service account %s with region(s) %s", podName, nameSpace, svcAcct, strings.Join(regions, ", "))
 
-	awsSessions, err := s.getAwsSessions(nameSpace, svcAcct, ctx, regions)
+	awsSessions, err := s.getAwsSessions(nameSpace, svcAcct, ctx, regions, podName)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func (s *CSIDriverProviderServer) getAwsRegions(region, backupRegion, nameSpace,
 // Establishes the connection using Aws cred for each lookup region
 // If atleast one session is not created, error will be thrown
 //
-func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx context.Context, lookupRegionList []string) (response []*session.Session, err error) {
+func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx context.Context, lookupRegionList []string, podName string) (response []*session.Session, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsSessionsList []*session.Session
 
@@ -219,7 +219,7 @@ func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx 
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsSession, err := oidcAuth.GetAWSSession()
+		awsSession, err := oidcAuth.GetAWSSession(podName)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
