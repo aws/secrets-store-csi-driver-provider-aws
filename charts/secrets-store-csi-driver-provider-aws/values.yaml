@@ -1,11 +1,12 @@
 image:
   repository: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
   pullPolicy: IfNotPresent
-  tag: 1.0.r2-56-g41fa54f-2023.11.15.21.38
+  tag: 1.0.r2-75-g1f97be0-2024.10.17.19.45
 
 nameOverride: ""
 fullnameOverride: ""
 providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
+kubeletPath: "/var/lib/kubelet"
 
 podLabels: {}
 podAnnotations: {}
@@ -39,3 +40,5 @@ rbac:
 securityContext:
   privileged: false
   allowPrivilegeEscalation: false
+
+useFipsEndpoint: false
