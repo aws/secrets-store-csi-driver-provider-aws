@@ -5,13 +5,13 @@ go 1.23
 require (
 	github.com/aws/aws-sdk-go v1.55.5
 	github.com/jmespath/go-jmespath v0.4.0
-	github.com/stretchr/testify v1.9.0
-	google.golang.org/grpc v1.67.1
-	k8s.io/api v0.31.1
-	k8s.io/apimachinery v0.31.1
-	k8s.io/client-go v0.31.1
+	github.com/stretchr/testify v1.10.0
+	google.golang.org/grpc v1.68.1
+	k8s.io/api v0.31.3
+	k8s.io/apimachinery v0.31.3
+	k8s.io/client-go v0.31.3
 	k8s.io/klog/v2 v2.130.1
-	sigs.k8s.io/secrets-store-csi-driver v1.4.6
+	sigs.k8s.io/secrets-store-csi-driver v1.4.7
 	sigs.k8s.io/yaml v1.4.0
 )
 
