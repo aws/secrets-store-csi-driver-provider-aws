@@ -1,17 +1,16 @@
 module github.com/aws/secrets-store-csi-driver-provider-aws
 
 go 1.23
-
 require (
 	github.com/aws/aws-sdk-go v1.55.5
 	github.com/jmespath/go-jmespath v0.4.0
-	github.com/stretchr/testify v1.9.0
-	google.golang.org/grpc v1.67.1
-	k8s.io/api v0.31.1
-	k8s.io/apimachinery v0.31.1
-	k8s.io/client-go v0.31.1
+	github.com/stretchr/testify v1.10.0
+	google.golang.org/grpc v1.69.0
+	k8s.io/api v0.32.0
+	k8s.io/apimachinery v0.32.0
+	k8s.io/client-go v0.32.0
 	k8s.io/klog/v2 v2.130.1
-	sigs.k8s.io/secrets-store-csi-driver v1.4.6
+	sigs.k8s.io/secrets-store-csi-driver v1.4.7
 	sigs.k8s.io/yaml v1.4.0
 )
 
@@ -48,10 +47,9 @@ require (
 	google.golang.org/protobuf v1.35.1 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/kube-openapi v0.0.0-20241009091222-67ed5848f094 // indirect
-	k8s.io/utils v0.0.0-20240921022957-49e7df575cb6 // indirect
+	k8s.io/kube-openapi v0.0.0-20241105132330-32ad38e42d3f // indirect
+	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
+	sigs.k8s.io/structured-merge-diff/v4 v4.4.2 // indirect
 )
