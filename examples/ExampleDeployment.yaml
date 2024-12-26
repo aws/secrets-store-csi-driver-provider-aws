@@ -45,4 +45,9 @@ spec:
         - name: secrets-store-inline
           mountPath: "/mnt/secrets-store"
           readOnly: true
-
+        env:
+          - name: MYUSERNAME
+            valueFrom:
+              secretKeyRef:
+                name: "myk8ssecret"
+                key: "username"
