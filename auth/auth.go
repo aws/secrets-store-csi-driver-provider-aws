@@ -9,8 +9,8 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
@@ -19,6 +19,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/aws/aws-sdk-go/service/sts/stsiface"
+	"io"
+	"net/http"
+	"time"
 
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,32 +30,48 @@ import (
 )
 
 const (
-	arnAnno       = "eks.amazonaws.com/role-arn"
-	docURL        = "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
-	tokenAudience = "sts.amazonaws.com"
-	ProviderName  = "secrets-store-csi-driver-provider-aws"
+	arnAnno                         = "eks.amazonaws.com/role-arn"
+	docURL                          = "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
+	irsaAudience                    = "sts.amazonaws.com"
+	podIdentityAudience             = "pods.eks.amazonaws.com"
+	ProviderName                    = "secrets-store-csi-driver-provider-aws"
+	defaultPodIdentityAgentEndpoint = "http://169.254.170.23/v1/credentials"
 )
+
+var podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
 
 // Private implementation of stscreds.TokenFetcher interface to fetch a token
 // for use with AssumeRoleWithWebIdentity given a K8s namespace and service
 // account.
-//
 type authTokenFetcher struct {
-	nameSpace, svcAcc string
-	k8sClient         k8sv1.CoreV1Interface
+	nameSpace, svcAcc, podName string
+	k8sClient                  k8sv1.CoreV1Interface
+	usePodIdentity             bool
 }
 
 // Private helper to fetch a JWT token for a given namespace and service account.
 //
 // See also: https://pkg.go.dev/k8s.io/client-go/kubernetes/typed/core/v1
-//
 func (p authTokenFetcher) FetchToken(ctx credentials.Context) ([]byte, error) {
+	var tokenSpec authv1.TokenRequestSpec
+
+	if p.usePodIdentity {
+		tokenSpec = authv1.TokenRequestSpec{
+			Audiences: []string{podIdentityAudience},
+			BoundObjectRef: &authv1.BoundObjectReference{
+				Kind: "Pod",
+				Name: p.podName,
+			},
+		}
+	} else {
+		tokenSpec = authv1.TokenRequestSpec{
+			Audiences: []string{irsaAudience},
+		}
+	}
 
 	// Use the K8s API to fetch the token from the OIDC provider.
 	tokRsp, err := p.k8sClient.ServiceAccounts(p.nameSpace).CreateToken(ctx, p.svcAcc, &authv1.TokenRequest{
-		Spec: authv1.TokenRequestSpec{
-			Audiences: []string{tokenAudience},
-		},
+		Spec: tokenSpec,
 	}, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
@@ -61,23 +80,23 @@ func (p authTokenFetcher) FetchToken(ctx credentials.Context) ([]byte, error) {
 	return []byte(tokRsp.Status.Token), nil
 }
 
-// Auth is the main entry point to retrive an AWS session. The caller
-// initializes a new Auth object with NewAuth passing the region, namespace, and
-// K8s service account (and request context). The caller can then obtain AWS
+// Auth is the main entry point to retrieve an AWS session. The caller
+// initializes a new Auth object with NewAuth passing the region, namespace, pod name,
+// K8s service account and usePodIdentity flag  (and request context). The caller can then obtain AWS
 // sessions by calling GetAWSSession.
-//
 type Auth struct {
-	region, nameSpace, svcAcc string
-	k8sClient                 k8sv1.CoreV1Interface
-	stsClient                 stsiface.STSAPI
-	ctx                       context.Context
+	region, nameSpace, svcAcc, podName string
+	usePodIdentity                     bool
+	k8sClient                          k8sv1.CoreV1Interface
+	stsClient                          stsiface.STSAPI
+	ctx                                context.Context
 }
 
 // Factory method to create a new Auth object for an incomming mount request.
-//
 func NewAuth(
 	ctx context.Context,
-	region, nameSpace, svcAcc string,
+	region, nameSpace, svcAcc, podName string,
+	usePodIdentity bool,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
 
@@ -91,12 +110,14 @@ func NewAuth(
 	}
 
 	return &Auth{
-		region:    region,
-		nameSpace: nameSpace,
-		svcAcc:    svcAcc,
-		k8sClient: k8sClient,
-		stsClient: sts.New(sess),
-		ctx:       ctx,
+		region:         region,
+		nameSpace:      nameSpace,
+		svcAcc:         svcAcc,
+		podName:        podName,
+		usePodIdentity: usePodIdentity,
+		k8sClient:      k8sClient,
+		stsClient:      sts.New(sess),
+		ctx:            ctx,
 	}, nil
 
 }
@@ -106,7 +127,6 @@ func NewAuth(
 // This method looks up the role ARN associated with the K8s service account by
 // calling the K8s APIs to get the role annotation on the service account.
 // See also: https://pkg.go.dev/k8s.io/client-go/kubernetes/typed/core/v1
-//
 func (p Auth) getRoleARN() (arn *string, e error) {
 
 	// cli equivalent: kubectl -o yaml -n <namespace> get serviceaccount <acct>
@@ -129,20 +149,34 @@ func (p Auth) getRoleARN() (arn *string, e error) {
 //
 // The returned session is capable of automatically refreshing creds as needed
 // by using a private TokenFetcher helper.
-//
 func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
+	var config *aws.Config
 
-	roleArn, err := p.getRoleARN()
-	if err != nil {
-		return nil, err
+	fetcher := &authTokenFetcher{p.nameSpace, p.svcAcc, p.podName, p.k8sClient, p.usePodIdentity}
+
+	if p.usePodIdentity {
+
+		// Get token for Pod Identity
+		token, err := fetcher.FetchToken(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch token: %+v", err)
+		}
+
+		config, err = p.getCredentialsFromPodIdentityAgent(token)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		roleArn, err := p.getRoleARN()
+		if err != nil {
+			return nil, err
+		}
+		ar := stscreds.NewWebIdentityRoleProviderWithToken(p.stsClient, *roleArn, ProviderName, fetcher)
+		config = aws.NewConfig().
+			WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint). // Use regional STS endpoint
+			WithRegion(p.region).
+			WithCredentials(credentials.NewCredentials(ar))
 	}
-
-	fetcher := &authTokenFetcher{p.nameSpace, p.svcAcc, p.k8sClient}
-	ar := stscreds.NewWebIdentityRoleProviderWithToken(p.stsClient, *roleArn, ProviderName, fetcher)
-	config := aws.NewConfig().
-		WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint). // Use regional STS endpoint
-		WithRegion(p.region).
-		WithCredentials(credentials.NewCredentials(ar))
 
 	// Include the provider in the user agent string.
 	sess, err := session.NewSession(config)
@@ -154,4 +188,55 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 	})
 
 	return session.Must(sess, err), nil
+}
+
+// Private helper to fetch temporary AWS credentials from Pod Identity Agent
+func (p Auth) getCredentialsFromPodIdentityAgent(token []byte) (awsConfig *aws.Config, e error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest("GET", podIdentityAgentEndpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request to pod identity agent: %+v", err)
+	}
+	req.Header.Set("Authorization", string(token))
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request to pod identity agent failed: %+v", err)
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Read the response body
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read error response body: %v, status code: %d", err, resp.StatusCode)
+		}
+
+		return nil, fmt.Errorf("pod identity agent returned error - Status: %d, Headers: %v, Body: %s",
+			resp.StatusCode,
+			resp.Header,
+			string(body))
+	}
+
+	var creds struct {
+		AccessKeyId     string `json:"AccessKeyId"`
+		SecretAccessKey string `json:"SecretAccessKey"`
+		Token           string `json:"Token"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&creds); err != nil {
+		return nil, fmt.Errorf("failed to decode credentials from pod identity agent: %+v", err)
+	}
+
+	if creds.AccessKeyId == "" || creds.SecretAccessKey == "" || creds.Token == "" {
+		return nil, fmt.Errorf("received invalid credentials from pod identity agent")
+	}
+
+	return aws.NewConfig().
+		WithRegion(p.region).
+		WithCredentials(credentials.NewStaticCredentials(
+			creds.AccessKeyId,
+			creds.SecretAccessKey,
+			creds.Token,
+		)), nil
 }

@@ -3,6 +3,9 @@ package auth
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/kubernetes/fake"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -11,7 +14,6 @@ import (
 	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
@@ -56,29 +58,59 @@ func (ma *mockK8sV1SA) CreateToken(
 
 }
 
-func newAuthWithMocks(k8SAGetError bool, roleARN string) *Auth {
+func setupMockPodIdentityAgent(shouldFail bool) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if shouldFail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{
+            "AccessKeyId": "TEST_ACCESS_KEY",
+            "SecretAccessKey": "TEST_SECRET",
+            "Token": "TEST_TOKEN"
+        }`)
+	}))
+}
+
+func newAuthWithMocks(k8SAGetError bool, roleARN string, testPodIdentity bool) *Auth {
 
 	nameSpace := "someNamespace"
 	accName := "someServiceAccount"
 	region := "someRegion"
+	podName := "somePodName"
 
-	sa := &corev1.ServiceAccount{}
-	if !k8SAGetError {
-		sa.Name = accName
+	var k8sClient k8sv1.CoreV1Interface
+
+	if testPodIdentity {
+		// Use mock client for Pod Identity tests
+		mockV1 := &mockK8sV1{
+			k8CTOneShotError: k8SAGetError,
+		}
+		k8sClient = mockV1
+
+	} else {
+		sa := &corev1.ServiceAccount{}
+		if !k8SAGetError {
+			sa.Name = accName
+		}
+		sa.Namespace = nameSpace
+		sa.Annotations = map[string]string{"eks.amazonaws.com/role-arn": roleARN}
+
+		clientset := fake.NewSimpleClientset(sa)
+		k8sClient = clientset.CoreV1()
 	}
-	sa.Namespace = nameSpace
-	sa.Annotations = map[string]string{"eks.amazonaws.com/role-arn": roleARN}
-
-	clientset := fake.NewSimpleClientset(sa)
 
 	return &Auth{
-		region:    region,
-		nameSpace: nameSpace,
-		svcAcc:    accName,
-		k8sClient: clientset.CoreV1(),
-		stsClient: &mockSTS{},
+		region:         region,
+		nameSpace:      nameSpace,
+		svcAcc:         accName,
+		podName:        podName,
+		usePodIdentity: testPodIdentity,
+		k8sClient:      k8sClient,
+		stsClient:      &mockSTS{},
 	}
-
 }
 
 type authTest struct {
@@ -86,22 +118,38 @@ type authTest struct {
 	k8SAGetOneShotError bool
 	k8CTOneShotError    bool
 	roleARN             string
+	testPodIdentity     bool
+	podIdentityError    bool
 	expError            string
 }
 
 var authTests []authTest = []authTest{
-	{"Success", false, false, "fakeRoleARN", ""},
-	{"Missing Role", false, false, "", "An IAM role must"},
-	{"Fetch svc acc fail", true, false, "fakeRoleARN", "not found"},
+	{"IRSA Success", false, false, "fakeRoleARN", false, false, ""},
+	{"IRSA Missing Role", false, false, "", false, false, "An IAM role must"},
+	{"Fetch svc acc fail", true, false, "fakeRoleARN", false, false, "not found"},
+	{"Pod Identity Success", false, false, "", true, false, ""},
+	{"Pod identity Failure", false, false, "", true, true, "pod identity agent returned error"},
 }
 
 func TestAuth(t *testing.T) {
+	defer func() {
+		podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
+	}()
 
 	for _, tstData := range authTests {
 
 		t.Run(tstData.testName, func(t *testing.T) {
 
-			tstAuth := newAuthWithMocks(tstData.k8SAGetOneShotError, tstData.roleARN)
+			var mockPodIdentityServer *httptest.Server
+			if tstData.testPodIdentity {
+				mockPodIdentityServer = setupMockPodIdentityAgent(tstData.podIdentityError)
+				defer mockPodIdentityServer.Close()
+				// Override the endpoint for testing
+				podIdentityAgentEndpoint = mockPodIdentityServer.URL
+			}
+
+			tstAuth := newAuthWithMocks(tstData.k8SAGetOneShotError, tstData.roleARN, tstData.testPodIdentity)
+
 			sess, err := tstAuth.GetAWSSession()
 
 			if len(tstData.expError) == 0 && err != nil {
@@ -124,8 +172,9 @@ func TestAuth(t *testing.T) {
 }
 
 var tokenTests []authTest = []authTest{
-	{"Success", false, false, "myRoleARN", ""},
-	{"Fetch JWT fail", false, true, "myRoleARN", "Fake create token"},
+	{"IRSA Token Success", false, false, "myRoleARN", false, false, ""},
+	{"Fetch JWT fail", false, true, "myRoleARN", false, false, "Fake create token"},
+	{"Pod Identity Token Success", false, false, "", true, false, ""},
 }
 
 func TestToken(t *testing.T) {
@@ -134,8 +183,8 @@ func TestToken(t *testing.T) {
 
 		t.Run(tstData.testName, func(t *testing.T) {
 
-			tstAuth := newAuthWithMocks(tstData.k8SAGetOneShotError, tstData.roleARN)
-			fetcher := &authTokenFetcher{tstAuth.nameSpace, tstAuth.svcAcc, &mockK8sV1{k8CTOneShotError: tstData.k8CTOneShotError}}
+			tstAuth := newAuthWithMocks(tstData.k8SAGetOneShotError, tstData.roleARN, tstData.testPodIdentity)
+			fetcher := &authTokenFetcher{tstAuth.nameSpace, tstAuth.svcAcc, tstAuth.podName, &mockK8sV1{k8CTOneShotError: tstData.k8CTOneShotError}, tstAuth.usePodIdentity}
 			tokenOut, err := fetcher.FetchToken(nil)
 
 			if len(tstData.expError) == 0 && err != nil {
