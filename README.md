@@ -43,7 +43,7 @@ CLUSTERNAME=<CLUSTERNAME>
 ```
 Where **&lt;REGION&gt;** is the region in which your Kubernetes cluster is running and **&lt;CLUSTERNAME&gt;** is the name of your cluster.
 
-Now create a test secret:
+Create a test secret:
 ```shell
 aws --region "$REGION" secretsmanager  create-secret --name MySecret --secret-string '{"username":"memeuser", "password":"hunter2"}'
 ```
@@ -67,17 +67,17 @@ POLICY_ARN=$(aws --region "$REGION" --query Policy.Arn --output text iam create-
 ```shell
 eksctl utils associate-iam-oidc-provider --region="$REGION" --cluster="$CLUSTERNAME" --approve # Only run this once
 ```
-2. Next create the service account to be used by the pod and associate the above IAM policy with that service account. For this example we use *nginx-irsa-deployment-sa* for the service account name:
+2. Next, create the service account to be used by the pod and associate the above IAM policy with that service account. For this example we use *nginx-irsa-deployment-sa* for the service account name:
 ```shell
 eksctl create iamserviceaccount --name nginx-irsa-deployment-sa --region="$REGION" --cluster "$CLUSTERNAME" --attach-policy-arn "$POLICY_ARN" --approve --override-existing-serviceaccounts
 ```
 For a private cluster, ensure that the VPC the cluster is in has an AWS STS endpoint. For more information, see [Interface VPC endpoints](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_interface_vpc_endpoints.html) in the AWS IAM User Guide.
 
-3. Now create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. The ExampleSecretProviderClass-IRSA.yaml in the [examples](./examples) directory will mount "MySecret" created above:
+3. Create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. The ExampleSecretProviderClass-IRSA.yaml in the [examples](./examples) directory will mount "MySecret" created above:
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleSecretProviderClass-IRSA.yaml
 ```
-4. Finally we can deploy our pod. The ExampleDeployment-IRSA.yaml in the examples directory contains a sample nginx deployment that mounts the secrets under /mnt/secrets-store in the pod:
+4. Finally, we can deploy our pod. The ExampleDeployment-IRSA.yaml in the examples directory contains a sample nginx deployment that mounts the secrets under /mnt/secrets-store in the pod:
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment-IRSA.yaml
 ```
