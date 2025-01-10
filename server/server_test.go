@@ -699,7 +699,7 @@ var mountTests []testCase = []testCase{
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
-	{ // Verify failure when we can not initialize the auth session (no role).
+	{ // Verify failure when we can not initialize the auth session (incorrect usePodIdentity value).
 		testName: "Fail Pod Identity Session",
 		attributes: map[string]string{
 			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",

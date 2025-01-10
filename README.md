@@ -92,7 +92,7 @@ kubectl exec -it $(kubectl get pods | awk '/nginx-irsa-deployment/{print $1}' | 
 *Note: EKS Pod Identity option is only supported for EKS in the Cloud. It's not supported for [Amazon EKS Anywhere](https://aws.amazon.com/eks/eks-anywhere/), [Red Hat Openshift Service on AWS (ROSA)](https://aws.amazon.com/rosa/) and self-managed Kubernetes clusters on Amazon Elastic Compute Cloud (Amazon EC2) instances.*
 1. Install Amazon EKS Pod Identity Agent Add-on on the cluster.
 ```shell
-eksctl create addon --name eks-pod-identity-agent --cluster "$CLUSTERNAME" --version v1.0.0-eksbuild.1 --region="$REGION"
+eksctl create addon --name eks-pod-identity-agent --cluster "$CLUSTERNAME" --region="$REGION"
 ```
 2. Create an IAM role that can be assumed by the Amazon EKS service principal for Pod Identity and attach the above IAM policy to grant access to the test secret. 
 ```shell

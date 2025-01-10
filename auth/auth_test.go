@@ -6,6 +6,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -207,5 +208,57 @@ func TestToken(t *testing.T) {
 		})
 
 	}
+}
 
+type podIdentityAgentEndpointTest struct {
+	testName string
+	podIP    string
+	expIpv4  bool // true for expecting IPv4 endpoint, false for IPv6 endpoint
+}
+
+var endpointTests []podIdentityAgentEndpointTest = []podIdentityAgentEndpointTest{
+	{"IPv4", "10.0.0.1", true},
+	{"IPv6", "2001:db8::1", false},
+	{"Bad IP", "10.0.0", true},
+	{"Empty POD_IP", "", true},
+}
+
+func TestPodIdentityAgentEndpoint(t *testing.T) {
+	defer func() {
+		podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
+	}()
+
+	for _, tt := range endpointTests {
+		t.Run(tt.testName, func(t *testing.T) {
+			// Set environment variable for test
+			if tt.podIP != "" {
+				os.Setenv("POD_IP", tt.podIP)
+				defer os.Unsetenv("POD_IP")
+			} else {
+				os.Unsetenv("POD_IP")
+			}
+
+			// Re-initialize the endpoint for this test
+			endpoint := func() string {
+				isIPv6, err := isIPv6()
+				if err != nil {
+					return podIdentityAgentEndpointIPv4
+				}
+				if isIPv6 {
+					return podIdentityAgentEndpointIPv6
+				}
+				return podIdentityAgentEndpointIPv4
+			}()
+
+			// Determine expected endpoint
+			wantEndpoint := podIdentityAgentEndpointIPv4
+			if !tt.expIpv4 {
+				wantEndpoint = podIdentityAgentEndpointIPv6
+			}
+
+			if endpoint != wantEndpoint {
+				t.Errorf("defaultPodIdentityAgentEndpoint = %v, want %v", endpoint, wantEndpoint)
+			}
+		})
+	}
 }

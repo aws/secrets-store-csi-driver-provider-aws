@@ -53,6 +53,10 @@ spec:
           env:
             - name: AWS_USE_FIPS_ENDPOINT
               value: {{ .Values.useFipsEndpoint | quote }}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           {{- end }}
       volumes:
         - name: providervol

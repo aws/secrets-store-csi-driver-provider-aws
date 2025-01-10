@@ -20,7 +20,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/aws/aws-sdk-go/service/sts/stsiface"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"time"
 
 	authv1 "k8s.io/api/authentication/v1"
@@ -30,15 +32,139 @@ import (
 )
 
 const (
-	arnAnno                         = "eks.amazonaws.com/role-arn"
-	docURL                          = "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
-	irsaAudience                    = "sts.amazonaws.com"
-	podIdentityAudience             = "pods.eks.amazonaws.com"
-	ProviderName                    = "secrets-store-csi-driver-provider-aws"
-	defaultPodIdentityAgentEndpoint = "http://169.254.170.23/v1/credentials"
+	arnAnno                      = "eks.amazonaws.com/role-arn"
+	docURL                       = "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
+	irsaAudience                 = "sts.amazonaws.com"
+	podIdentityAudience          = "pods.eks.amazonaws.com"
+	ProviderName                 = "secrets-store-csi-driver-provider-aws"
+	podIdentityAgentEndpointIPv4 = "http://169.254.170.23/v1/credentials"
+	podIdentityAgentEndpointIPv6 = "http://[fd00:ec2::23]/v1/credentials"
+	httpTimeout                  = 5 * time.Second
+	podIdentityAuthHeader        = "Authorization"
 )
 
+// defaultPodIdentityAgentEndpoint determines the appropriate EKS Pod Identity Agent endpoint based on IP version
+var defaultPodIdentityAgentEndpoint = func() string {
+	isIPv6, err := isIPv6()
+	if err != nil {
+		klog.Warningf("Error determining IP version: %v. Defaulting to IPv4 endpoint", err)
+		return podIdentityAgentEndpointIPv4
+	}
+
+	if isIPv6 {
+		klog.Infof("Using Pod Identity Agent IPv6 endpoint")
+		return podIdentityAgentEndpointIPv6
+	}
+	klog.Infof("Using Pod Identity Agent IPv4 endpoint")
+	return podIdentityAgentEndpointIPv4
+}()
+
 var podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
+
+// CredentialProvider interface defines methods for obtaining AWS credentials configuration
+type CredentialProvider interface {
+	// GetAWSConfig returns an AWS configuration containing credentials obtained from the provider
+	GetAWSConfig(fetcher *authTokenFetcher) (*aws.Config, error)
+}
+
+// PodIdentityCredentialProvider implements CredentialProvider using pod identity
+type PodIdentityCredentialProvider struct {
+	region     string
+	httpClient *http.Client
+}
+
+func NewPodIdentityCredentialProvider(region string) CredentialProvider {
+	return &PodIdentityCredentialProvider{
+		region: region,
+		httpClient: &http.Client{
+			Timeout: httpTimeout,
+		},
+	}
+}
+
+func (p *PodIdentityCredentialProvider) GetAWSConfig(fetcher *authTokenFetcher) (*aws.Config, error) {
+	// Get token for Pod Identity
+	token, err := fetcher.FetchToken(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch token: %+v", err)
+	}
+
+	req, err := http.NewRequest("GET", podIdentityAgentEndpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request to pod identity agent: %+v", err)
+	}
+	req.Header.Set(podIdentityAuthHeader, string(token))
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request to pod identity agent failed: %+v", err)
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Read the response body
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read error response body: %v, status code: %d", err, resp.StatusCode)
+		}
+
+		return nil, fmt.Errorf("pod identity agent returned error - Status: %d, Headers: %v, Body: %s",
+			resp.StatusCode,
+			resp.Header,
+			string(body))
+	}
+
+	var creds struct {
+		AccessKeyId     string `json:"AccessKeyId"`
+		SecretAccessKey string `json:"SecretAccessKey"`
+		Token           string `json:"Token"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&creds); err != nil {
+		return nil, fmt.Errorf("failed to decode credentials from pod identity agent: %+v", err)
+	}
+
+	if creds.AccessKeyId == "" || creds.SecretAccessKey == "" || creds.Token == "" {
+		return nil, fmt.Errorf("received invalid credentials from pod identity agent")
+	}
+
+	return aws.NewConfig().
+		WithRegion(p.region).
+		WithCredentials(credentials.NewStaticCredentials(
+			creds.AccessKeyId,
+			creds.SecretAccessKey,
+			creds.Token,
+		)), nil
+}
+
+// IRSACredentialProvider implements CredentialProvider using IAM Roles for Service Accounts
+type IRSACredentialProvider struct {
+	stsClient       stsiface.STSAPI
+	roleArn, region string
+}
+
+func NewIRSACredentialProvider(stsClient stsiface.STSAPI, roleArn, region string) CredentialProvider {
+	return &IRSACredentialProvider{
+		stsClient: stsClient,
+		roleArn:   roleArn,
+		region:    region,
+	}
+}
+
+func (p *IRSACredentialProvider) GetAWSConfig(fetcher *authTokenFetcher) (*aws.Config, error) {
+
+	ar := stscreds.NewWebIdentityRoleProviderWithToken(
+		p.stsClient,
+		p.roleArn,
+		ProviderName,
+		fetcher,
+	)
+
+	return aws.NewConfig().
+		WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint).
+		WithRegion(p.region).
+		WithCredentials(credentials.NewCredentials(ar)), nil
+}
 
 // Private implementation of stscreds.TokenFetcher interface to fetch a token
 // for use with AssumeRoleWithWebIdentity given a K8s namespace and service
@@ -155,14 +281,9 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 	fetcher := &authTokenFetcher{p.nameSpace, p.svcAcc, p.podName, p.k8sClient, p.usePodIdentity}
 
 	if p.usePodIdentity {
-
-		// Get token for Pod Identity
-		token, err := fetcher.FetchToken(context.Background())
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch token: %+v", err)
-		}
-
-		config, err = p.getCredentialsFromPodIdentityAgent(token)
+		credProvider := NewPodIdentityCredentialProvider(p.region)
+		var err error
+		config, err = credProvider.GetAWSConfig(fetcher)
 		if err != nil {
 			return nil, err
 		}
@@ -171,11 +292,11 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 		if err != nil {
 			return nil, err
 		}
-		ar := stscreds.NewWebIdentityRoleProviderWithToken(p.stsClient, *roleArn, ProviderName, fetcher)
-		config = aws.NewConfig().
-			WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint). // Use regional STS endpoint
-			WithRegion(p.region).
-			WithCredentials(credentials.NewCredentials(ar))
+		credProvider := NewIRSACredentialProvider(p.stsClient, *roleArn, p.region)
+		config, err = credProvider.GetAWSConfig(fetcher)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Include the provider in the user agent string.
@@ -190,53 +311,19 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 	return session.Must(sess, err), nil
 }
 
-// Private helper to fetch temporary AWS credentials from Pod Identity Agent
-func (p Auth) getCredentialsFromPodIdentityAgent(token []byte) (awsConfig *aws.Config, e error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest("GET", podIdentityAgentEndpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request to pod identity agent: %+v", err)
-	}
-	req.Header.Set("Authorization", string(token))
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request to pod identity agent failed: %+v", err)
+func isIPv6() (isIPv6 bool, err error) {
+	podIP := os.Getenv("POD_IP")
+	if podIP == "" {
+		return false, fmt.Errorf("POD_IP environment variable is not set")
 	}
 
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Read the response body
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read error response body: %v, status code: %d", err, resp.StatusCode)
-		}
-
-		return nil, fmt.Errorf("pod identity agent returned error - Status: %d, Headers: %v, Body: %s",
-			resp.StatusCode,
-			resp.Header,
-			string(body))
+	parsedIP := net.ParseIP(podIP)
+	if parsedIP == nil {
+		return false, fmt.Errorf("invalid IP address format in POD_IP: %s", podIP)
 	}
 
-	var creds struct {
-		AccessKeyId     string `json:"AccessKeyId"`
-		SecretAccessKey string `json:"SecretAccessKey"`
-		Token           string `json:"Token"`
-	}
+	isIPv6 = parsedIP.To4() == nil
+	klog.Infof("Pod IP %s is IPv%d", podIP, map[bool]int{false: 4, true: 6}[isIPv6])
 
-	if err := json.NewDecoder(resp.Body).Decode(&creds); err != nil {
-		return nil, fmt.Errorf("failed to decode credentials from pod identity agent: %+v", err)
-	}
-
-	if creds.AccessKeyId == "" || creds.SecretAccessKey == "" || creds.Token == "" {
-		return nil, fmt.Errorf("received invalid credentials from pod identity agent")
-	}
-
-	return aws.NewConfig().
-		WithRegion(p.region).
-		WithCredentials(credentials.NewStaticCredentials(
-			creds.AccessKeyId,
-			creds.SecretAccessKey,
-			creds.Token,
-		)), nil
+	return isIPv6, nil
 }
