@@ -261,6 +261,12 @@ When the failoverRegion is defined, the driver will attempt to get the secret va
 ```
 If 'failoverObject' is defined, then objectAlias is required.
 
+### Using EKS Pod Identity to Access Cross-Account AWS Resources
+
+EKS Pod Identity [CreatePodIdentityAssociation](https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html) requires the IAM role to reside in the same AWS account as the EKS cluster. 
+
+To mount AWS Secrets Manager secrets from a different AWS account than your EKS cluster, follow [cross-account access](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_examples_cross.html) to set up resource policy for the secret, key policy for the KMS key, and IAM role used in Pod Identity association.
+Fetching cross-account parameters from SSM Parameter Store is not supported in the AWS Provider and Config Provider. 
 
 ### Private Builds
 You can pull down this git repository and build and install this plugin into your account's [AWS ECR](https://aws.amazon.com/ecr/) registry using the following steps. First clone the repository:
