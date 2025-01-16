@@ -277,26 +277,25 @@ func (p Auth) getRoleARN() (arn *string, e error) {
 // by using a private TokenFetcher helper.
 func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 	var config *aws.Config
+	var err error
 
 	fetcher := &authTokenFetcher{p.nameSpace, p.svcAcc, p.podName, p.k8sClient, p.usePodIdentity}
 
 	if p.usePodIdentity {
 		credProvider := NewPodIdentityCredentialProvider(p.region)
-		var err error
 		config, err = credProvider.GetAWSConfig(fetcher)
-		if err != nil {
-			return nil, err
-		}
+
 	} else {
-		roleArn, err := p.getRoleARN()
-		if err != nil {
-			return nil, err
+		roleArn, roleErr := p.getRoleARN()
+		if roleErr != nil {
+			return nil, roleErr
 		}
 		credProvider := NewIRSACredentialProvider(p.stsClient, *roleArn, p.region)
 		config, err = credProvider.GetAWSConfig(fetcher)
-		if err != nil {
-			return nil, err
-		}
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	// Include the provider in the user agent string.
