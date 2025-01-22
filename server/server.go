@@ -133,12 +133,6 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	if usePodIdentity {
-		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", nameSpace, svcAcct)
-	} else {
-		klog.Infof("Using IAM Roles for Service Accounts for authentication in namespace: %s, service account: %s", nameSpace, svcAcct)
-	}
-
 	awsSessions, err := s.getAwsSessions(nameSpace, svcAcct, ctx, regions, usePodIdentity, podName)
 	if err != nil {
 		return nil, err

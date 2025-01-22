@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/sts/stsiface"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -73,8 +74,10 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 	var credProvider credential_provider.CredentialProvider
 
 	if p.usePodIdentity {
+		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
 		credProvider = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.k8sClient)
 	} else {
+		klog.Infof("Using IAM Roles for Service Accounts for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
 		credProvider = credential_provider.NewIRSACredentialProvider(p.stsClient, p.region, p.nameSpace, p.svcAcc, p.k8sClient, p.ctx)
 	}
 
