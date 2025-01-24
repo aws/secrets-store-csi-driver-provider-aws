@@ -55,8 +55,10 @@ setup_file() {
  
    aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $REGION
    aws ssm put-parameter --name ParameterStoreTestWithLongName --value ParameterStoreTest2Value --type SecureString --region $REGION
+   aws ssm put-parameter --name ParameterStoreTestWithARN --value ParameterStoreTest3Value --type SecureString --region $REGION
    aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $FAILOVERREGION
    aws ssm put-parameter --name ParameterStoreTestWithLongName --value ParameterStoreTest2Value --type SecureString --region $FAILOVERREGION
+   aws ssm put-parameter --name ParameterStoreTestWithARN --value ParameterStoreTest3Value --type SecureString --region $FAILOVERREGION
  
    aws ssm put-parameter --name ParameterStoreRotationTest --value BeforeRotation --type SecureString --region $REGION
    aws secretsmanager create-secret --name SecretsManagerRotationTest --secret-string BeforeRotation --region $REGION
@@ -83,9 +85,11 @@ teardown_file() {
     aws secretsmanager delete-secret --secret-id SecretsManagerSync --force-delete-without-recovery --region $FAILOVERREGION
  
     aws ssm delete-parameter --name ParameterStoreTest1 --region $REGION
-    aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $REGION 
+    aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $REGION
+    aws ssm delete-parameter --name ParameterStoreTestWithARN --region $REGION
     aws ssm delete-parameter --name ParameterStoreTest1 --region $FAILOVERREGION
-    aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $FAILOVERREGION 
+    aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $FAILOVERREGION
+    aws ssm delete-parameter --name ParameterStoreTestWithARN --region $FAILOVERREGION
  
     aws ssm delete-parameter --name ParameterStoreRotationTest --region $REGION
     aws secretsmanager delete-secret --secret-id SecretsManagerRotationTest --force-delete-without-recovery --region $REGION
@@ -178,6 +182,9 @@ validate_jsme_mount() {
  
    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreTest2)
    [[ "${result//$'\r'}" == "ParameterStoreTest2Value" ]]
+
+   result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreTest3)
+      [[ "${result//$'\r'}" == "ParameterStoreTest3Value" ]]
 }
  
  

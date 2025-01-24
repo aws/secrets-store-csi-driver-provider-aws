@@ -150,7 +150,13 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 	// Build up the results from the batch
 	for _, parm := range rsp.Parameters {
 
-		descriptor := batchDesc[*(parm.Name)]
+		// The descriptor key will be either the Name or the ARN
+		var descriptor *SecretDescriptor
+		if batchDesc[*(parm.Name)] != nil {
+			descriptor = batchDesc[*(parm.Name)]
+		} else {
+			descriptor = batchDesc[*(parm.ARN)]
+		}
 
 		secretValue := &SecretValue{
 			Value:      []byte(*(parm.Value)),
