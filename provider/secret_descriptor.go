@@ -138,17 +138,15 @@ func (p *SecretDescriptor) getObjectType() (otype string) {
 // If the ObjectType is not specified, a full ARN must be present in the
 // ObjectName so this method pulls the type from the ARN when ObjectType is
 // not specified.
-//
 func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 
-	// If no objectType, use ARN (but convert ssm to ssmparameter). Note that
-	// SSM does not actually allow ARNs but we convert anyway for other checks.
+	// If no objectType, use ARN (but convert ssm to ssmparameter).
 	sType := p.getObjectType()
 
 	return typeMap[sType]
 }
 
-//Return a descriptor for a jmes object entry within the secret
+// Return a descriptor for a jmes object entry within the secret
 func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
 	return SecretDescriptor{
 		ObjectAlias: j.ObjectAlias,
