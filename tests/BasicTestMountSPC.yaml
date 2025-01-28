@@ -34,6 +34,11 @@ spec:
         - objectName: "ParameterStoreTestWithLongName"
           objectAlias: "ParameterStoreTest2"
           objectType: "ssmparameter"
+        - objectName: arn:aws:ssm:${REGION}:${ACCOUNT_NUMBER}:parameter/ParameterStoreTestWithARN
+          objectAlias: "ParameterStoreTest3"
+          failoverObject:
+            objectName: arn:aws:ssm:${FAILOVERREGION}:${ACCOUNT_NUMBER}:parameter/ParameterStoreTestWithARN
+          objectType: "ssmparameter"
         - objectName: "ParameterStoreRotationTest"
           objectType: "ssmparameter"
         - objectName: "SecretsManagerRotationTest"
