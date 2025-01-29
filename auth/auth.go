@@ -29,39 +29,44 @@ const (
 // K8s service account and usePodIdentity flag  (and request context). The caller can then obtain AWS
 // sessions by calling GetAWSSession.
 type Auth struct {
-	region, nameSpace, svcAcc, podName string
-	usePodIdentity                     bool
-	k8sClient                          k8sv1.CoreV1Interface
-	stsClient                          stsiface.STSAPI
-	ctx                                context.Context
+	region, nameSpace, svcAcc, podName, preferredAddressType string
+	usePodIdentity                                           bool
+	k8sClient                                                k8sv1.CoreV1Interface
+	stsClient                                                stsiface.STSAPI
+	ctx                                                      context.Context
 }
 
 // Factory method to create a new Auth object for an incomming mount request.
 func NewAuth(
 	ctx context.Context,
-	region, nameSpace, svcAcc, podName string,
+	region, nameSpace, svcAcc, podName, preferredAddressType string,
 	usePodIdentity bool,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
+	var stsClient stsiface.STSAPI
 
-	// Get an initial session to use for STS calls.
-	sess, err := session.NewSession(aws.NewConfig().
-		WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint).
-		WithRegion(region),
-	)
-	if err != nil {
-		return nil, err
+	if !usePodIdentity {
+		// Get an initial session to use for STS calls when using IRSA
+		sess, err := session.NewSession(aws.NewConfig().
+			WithSTSRegionalEndpoint(endpoints.RegionalSTSEndpoint).
+			WithRegion(region),
+		)
+		if err != nil {
+			return nil, err
+		}
+		stsClient = sts.New(sess)
 	}
 
 	return &Auth{
-		region:         region,
-		nameSpace:      nameSpace,
-		svcAcc:         svcAcc,
-		podName:        podName,
-		usePodIdentity: usePodIdentity,
-		k8sClient:      k8sClient,
-		stsClient:      sts.New(sess),
-		ctx:            ctx,
+		region:               region,
+		nameSpace:            nameSpace,
+		svcAcc:               svcAcc,
+		podName:              podName,
+		preferredAddressType: preferredAddressType,
+		usePodIdentity:       usePodIdentity,
+		k8sClient:            k8sClient,
+		stsClient:            stsClient,
+		ctx:                  ctx,
 	}, nil
 
 }
@@ -75,7 +80,7 @@ func (p Auth) GetAWSSession() (awsSession *session.Session, e error) {
 
 	if p.usePodIdentity {
 		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
-		credProvider = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.k8sClient)
+		credProvider = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.k8sClient)
 	} else {
 		klog.Infof("Using IAM Roles for Service Accounts for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
 		credProvider = credential_provider.NewIRSACredentialProvider(p.stsClient, p.region, p.nameSpace, p.svcAcc, p.k8sClient, p.ctx)

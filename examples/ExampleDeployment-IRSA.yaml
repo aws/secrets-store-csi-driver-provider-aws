@@ -6,7 +6,7 @@ metadata:
     app: nginx-irsa
 spec:
   selector:
-    app: nginx-irsas
+    app: nginx-irsa
   ports:
     - protocol: TCP
       port: 80

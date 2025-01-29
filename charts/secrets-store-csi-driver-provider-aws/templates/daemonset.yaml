@@ -53,10 +53,6 @@ spec:
           env:
             - name: AWS_USE_FIPS_ENDPOINT
               value: {{ .Values.useFipsEndpoint | quote }}
-            - name: POD_IP  # This is needed to choose between IPv4 and IPv6 Pod Identity Agent endpoint
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
           {{- end }}
       volumes:
         - name: providervol

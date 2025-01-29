@@ -8,7 +8,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 ## Installation
 
 ### Requirements
-* Amazon Elastic Kubernetes Service (EKS) 1.24+ running an EC2 node group (Fargate node groups are not supported **[^1]**)
+* Amazon Elastic Kubernetes Service (EKS) 1.17+ running an EC2 node group (Fargate node groups are not supported **[^1]**). If using EKS Pod Identity feature, EKS 1.24+ is required. 
 * [Secrets Store CSI driver installed](https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation.html):
     ```shell
     helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -183,6 +183,10 @@ The parameters section contains the details of the mount request and contain one
 * usePodIdentity: An optional field that determines the authentication approach. When not specified, it defaults to using IAM Roles for Service Accounts (IRSA). 
   - To use EKS Pod Identity, use any of these values: "true", "True", "TRUE", "t", "T".
   - To explicitly use IRSA, set to any of these values: "false", "False", "FALSE", "f", or "F".
+* preferredAddressType: An optional field that specifies the preferred IP address type for Pod Identity Agent endpoint communication. Values are case-insensitive. Valid values are:
+  - "ipv4", "IPv4", or "IPV4" - Force the use of Pod Identity Agent IPv4 endpoint
+  - "ipv6", "IPv6", or "IPV6" - Force the use of Pod Identity Agent IPv6 endpoint
+  - not specified or any other value - Use auto endpoint selection, trying IPv4 endpoint first and falling back to IPv6 endpoint if IPv4 fails
 
 The primary objects field of the SecretProviderClass can contain the following sub-fields:
 * objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this must be the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can not be a full ARN.

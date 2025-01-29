@@ -11,55 +11,74 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
-	"net"
 	"net/http"
-	"os"
+	"strings"
 	"time"
 )
 
 const (
-	podIdentityAudience          = "pods.eks.amazonaws.com"
-	podIdentityAgentEndpointIPv4 = "http://169.254.170.23/v1/credentials"
-	podIdentityAgentEndpointIPv6 = "http://[fd00:ec2::23]/v1/credentials"
-	httpTimeout                  = 5 * time.Second
-	podIdentityAuthHeader        = "Authorization"
+	podIdentityAudience   = "pods.eks.amazonaws.com"
+	defaultIPv4Endpoint   = "http://169.254.170.23/v1/credentials"
+	defaultIPv6Endpoint   = "http://[fd00:ec2::23]/v1/credentials"
+	httpTimeout           = 100 * time.Millisecond
+	podIdentityAuthHeader = "Authorization"
 )
 
-// defaultPodIdentityAgentEndpoint determines the appropriate EKS Pod Identity Agent endpoint based on IP version
-var defaultPodIdentityAgentEndpoint = func() string {
-	isIPv6, err := isIPv6()
-	if err != nil {
-		klog.Warningf("Error determining IP version: %v. Defaulting to IPv4 endpoint", err)
-		return podIdentityAgentEndpointIPv4
-	}
+var (
+	podIdentityAgentEndpointIPv4 = defaultIPv4Endpoint
+	podIdentityAgentEndpointIPv6 = defaultIPv6Endpoint
+)
 
-	if isIPv6 {
-		klog.Infof("Using Pod Identity Agent IPv6 endpoint")
-		return podIdentityAgentEndpointIPv6
-	}
-	klog.Infof("Using Pod Identity Agent IPv4 endpoint")
-	return podIdentityAgentEndpointIPv4
-}()
+// endpointPreference represents the preferred IP address type for Pod Identity Agent endpoint
+type endpointPreference int
 
-var podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
+const (
+	// preferenceAuto indicates automatic endpoint selection, trying IPv4 first and falling back to IPv6 if IPv4 fails
+	preferenceAuto endpointPreference = iota
+
+	// preferenceIPv4 forces the use of Pod Identity Agent IPv4 endpoint
+	preferenceIPv4
+
+	// preferenceIPv6 forces the use of Pod Identity Agent IPv6 endpoint
+	preferenceIPv6
+)
 
 // PodIdentityCredentialProvider implements CredentialProvider using pod identity
 type PodIdentityCredentialProvider struct {
-	region     string
-	fetcher    authTokenFetcher
-	httpClient *http.Client
+	region            string
+	preferredEndpoint endpointPreference
+	fetcher           authTokenFetcher
+	httpClient        *http.Client
 }
 
 func NewPodIdentityCredentialProvider(
-	region, nameSpace, svcAcc, podName string,
+	region, nameSpace, svcAcc, podName, preferredAddressType string,
 	k8sClient k8sv1.CoreV1Interface,
 ) CredentialProvider {
+
+	preferredEndpoint := parseAddressPreference(preferredAddressType)
 	return &PodIdentityCredentialProvider{
-		region:  region,
-		fetcher: newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
+		region:            region,
+		preferredEndpoint: preferredEndpoint,
+		fetcher:           newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
 		httpClient: &http.Client{
 			Timeout: httpTimeout,
 		},
+	}
+}
+
+// parseAddressPreference converts the provided preferred address type string into an endpointPreference.
+func parseAddressPreference(preferredAddressType string) endpointPreference {
+	switch strings.ToLower(preferredAddressType) {
+	case "ipv4":
+		return preferenceIPv4
+	case "ipv6":
+		return preferenceIPv6
+	default:
+		if preferredAddressType != "" {
+			klog.Warningf("Unknown preferred address type: %s, falling back to auto selection", preferredAddressType)
+		}
+		return preferenceAuto
 	}
 }
 
@@ -93,7 +112,7 @@ func (p *podIdentityTokenFetcher) FetchToken(ctx credentials.Context) ([]byte, e
 		},
 	}
 
-	// Use the K8s API to fetch the token from the OIDC provider.
+	// Use the K8s API to fetch the token associated with service account
 	tokRsp, err := p.k8sClient.ServiceAccounts(p.nameSpace).CreateToken(ctx, p.svcAcc, &authv1.TokenRequest{
 		Spec: tokenSpec,
 	}, metav1.CreateOptions{})
@@ -111,8 +130,39 @@ func (p *PodIdentityCredentialProvider) GetAWSConfig() (*aws.Config, error) {
 		return nil, fmt.Errorf("failed to fetch token: %+v", err)
 	}
 
+	switch p.preferredEndpoint {
+	case preferenceIPv4:
+		klog.Infof("Using preferred Pod Identity Agent IPv4 endpoint")
+		config, err := p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv4)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get AWS config from pod identity agent IPv4 endpoint: %+v", err)
+		}
+		return config, nil
+	case preferenceIPv6:
+		klog.Infof("Using preferred Pod Identity Agent IPv6 endpoint")
+		config, err := p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv6)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get AWS config from pod identity agent IPv6 endpoint: %+v", err)
+		}
+		return config, nil
+	default:
+		klog.Infof("Using auto Pod Identity Agent endpoint selection")
+		config, err := p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv4)
+		if err != nil {
+			klog.Warningf("IPv4 endpoint attempt failed: %+v. Trying IPv6 endpoint", err)
+			config, err = p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv6)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get AWS config from pod identity agent: %+v", err)
+			}
+		}
+		return config, nil
+	}
+}
+
+func (p *PodIdentityCredentialProvider) getAWSConfigFromPodIdentityAgent(token []byte, podIdentityAgentEndpoint string) (*aws.Config, error) {
 	req, err := http.NewRequest("GET", podIdentityAgentEndpoint, nil)
 	if err != nil {
+
 		return nil, fmt.Errorf("failed to create HTTP request to pod identity agent: %+v", err)
 	}
 	req.Header.Set(podIdentityAuthHeader, string(token))
@@ -157,21 +207,4 @@ func (p *PodIdentityCredentialProvider) GetAWSConfig() (*aws.Config, error) {
 			creds.SecretAccessKey,
 			creds.Token,
 		)), nil
-}
-
-func isIPv6() (isIPv6 bool, err error) {
-	podIP := os.Getenv("POD_IP")
-	if podIP == "" {
-		return false, fmt.Errorf("POD_IP environment variable is not set")
-	}
-
-	parsedIP := net.ParseIP(podIP)
-	if parsedIP == nil {
-		return false, fmt.Errorf("invalid IP address format in POD_IP: %s", podIP)
-	}
-
-	isIPv6 = parsedIP.To4() == nil
-	klog.Infof("Pod IP %s is IPv%d", podIP, map[bool]int{false: 4, true: 6}[isIPv6])
-
-	return isIPv6, nil
 }

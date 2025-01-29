@@ -72,11 +72,6 @@ spec:
           securityContext:
             privileged: false
             allowPrivilegeEscalation: false
-          env:
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
           volumeMounts:
             - mountPath: "/etc/kubernetes/secrets-store-csi-providers"
               name: providervol

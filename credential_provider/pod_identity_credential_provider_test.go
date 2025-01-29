@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 )
@@ -35,7 +34,8 @@ func newPodIdentityCredentialWithMock(tstData podIdentityCredentialTest) *PodIde
 	}
 
 	mockServer := setupMockPodIdentityAgent(tstData.podIdentityError)
-	podIdentityAgentEndpoint = mockServer.URL
+	podIdentityAgentEndpointIPv4 = mockServer.URL
+	podIdentityAgentEndpointIPv6 = mockServer.URL
 
 	return &PodIdentityCredentialProvider{
 		region:     testRegion,
@@ -45,21 +45,27 @@ func newPodIdentityCredentialWithMock(tstData podIdentityCredentialTest) *PodIde
 }
 
 type podIdentityCredentialTest struct {
-	testName         string
-	k8CTOneShotError bool
-	testToken        bool
-	podIdentityError bool
-	expError         string
+	testName          string
+	k8CTOneShotError  bool
+	testToken         bool
+	podIdentityError  bool
+	preferredEndpoint endpointPreference
+	expError          string
 }
 
 var podIdentityCredentialTests []podIdentityCredentialTest = []podIdentityCredentialTest{
-	{"Pod Identity Success", false, false, false, ""},
-	{"Pod identity Failure", false, false, true, "pod identity agent returned error"},
+	{"Pod Identity Success via IPv4", false, false, false, preferenceIPv4, ""},
+	{"Pod Identity Success via IPv6", false, false, false, preferenceIPv6, ""},
+	{"Pod Identity Success via auto selection", false, false, false, preferenceAuto, ""},
+	{"Pod identity Failure via IPv4", false, false, true, preferenceIPv4, "pod identity agent returned error"},
+	{"Pod identity Failure via IPv6", false, false, true, preferenceIPv6, "pod identity agent returned error"},
+	{"Pod identity Failure via auto selection", false, false, true, preferenceAuto, "pod identity agent returned error"},
 }
 
 func TestPodIdentityCredentialProvider(t *testing.T) {
 	defer func() {
-		podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
+		podIdentityAgentEndpointIPv4 = defaultIPv4Endpoint
+		podIdentityAgentEndpointIPv6 = defaultIPv6Endpoint
 	}()
 
 	for _, tstData := range podIdentityCredentialTests {
@@ -85,7 +91,8 @@ func TestPodIdentityCredentialProvider(t *testing.T) {
 
 func TestPodIdentityToken(t *testing.T) {
 	defer func() {
-		podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
+		podIdentityAgentEndpointIPv4 = defaultIPv4Endpoint
+		podIdentityAgentEndpointIPv6 = defaultIPv6Endpoint
 	}()
 
 	for _, tstData := range podIdentityTokenTests {
@@ -119,58 +126,33 @@ func TestPodIdentityToken(t *testing.T) {
 }
 
 var podIdentityTokenTests []podIdentityCredentialTest = []podIdentityCredentialTest{
-	{"Pod Identity Token Success", false, true, false, ""},
-	{"Pod Identity Fetch JWT fail", true, true, false, "Fake create token"},
+	{"Pod Identity Token Success", false, true, false, preferenceAuto, ""},
+	{"Pod Identity Fetch JWT fail", true, true, false, preferenceAuto, "Fake create token"},
 }
 
 type podIdentityAgentEndpointTest struct {
-	testName string
-	podIP    string
-	expIpv4  bool // true for expecting IPv4 endpoint, false for IPv6 endpoint
+	testName             string
+	preferredAddressType string
+	expected             endpointPreference
 }
 
 var endpointTests []podIdentityAgentEndpointTest = []podIdentityAgentEndpointTest{
-	{"IPv4", "10.0.0.1", true},
-	{"IPv6", "2001:db8::1", false},
-	{"Bad IP", "10.0.0", true},
-	{"Empty POD_IP", "", true},
+	{"PreferredAddressType not provided", "", preferenceAuto},
+	{"ipv4", "ipv4", preferenceIPv4},
+	{"IPv4", "IPv4", preferenceIPv4},
+	{"ipv6", "ipv6", preferenceIPv6},
+	{"IPv6", "IPv6", preferenceIPv6},
+	{"Invalid PreferredAddressType", "invalid", preferenceAuto},
 }
 
 func TestPodIdentityAgentEndpoint(t *testing.T) {
-	defer func() {
-		podIdentityAgentEndpoint = defaultPodIdentityAgentEndpoint
-	}()
 
 	for _, tt := range endpointTests {
 		t.Run(tt.testName, func(t *testing.T) {
-			// Set environment variable for test
-			if tt.podIP != "" {
-				os.Setenv("POD_IP", tt.podIP)
-				defer os.Unsetenv("POD_IP")
-			} else {
-				os.Unsetenv("POD_IP")
-			}
+			endpoint := parseAddressPreference(tt.preferredAddressType)
 
-			// Re-initialize the endpoint for this test
-			endpoint := func() string {
-				isIPv6, err := isIPv6()
-				if err != nil {
-					return podIdentityAgentEndpointIPv4
-				}
-				if isIPv6 {
-					return podIdentityAgentEndpointIPv6
-				}
-				return podIdentityAgentEndpointIPv4
-			}()
-
-			// Determine expected endpoint
-			wantEndpoint := podIdentityAgentEndpointIPv4
-			if !tt.expIpv4 {
-				wantEndpoint = podIdentityAgentEndpointIPv6
-			}
-
-			if endpoint != wantEndpoint {
-				t.Errorf("defaultPodIdentityAgentEndpoint = %v, want %v", endpoint, wantEndpoint)
+			if endpoint != tt.expected {
+				t.Errorf("defaultPodIdentityAgentEndpoint = %v, want %v", endpoint, tt.expected)
 			}
 		})
 	}

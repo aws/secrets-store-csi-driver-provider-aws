@@ -41,6 +41,7 @@ const (
 	secProvAttrib        = "objects"                       // The attribute used to pass the SecretProviderClass definition (with what to mount)
 	failoverRegionAttrib = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
 	usePodIdentityAttrib = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
+	preferredAddressTypeAttrib = "preferredAddressType"    // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
 )
 
 // A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
@@ -100,6 +101,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	translate := attrib[transAttrib]
 	failoverRegion := attrib[failoverRegionAttrib]
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
+	preferredAddressType := attrib[preferredAddressTypeAttrib]
 
 	// Make a map of the currently mounted versions (if any)
 	curVersions := req.GetCurrentObjectVersion()
@@ -133,7 +135,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsSessions, err := s.getAwsSessions(nameSpace, svcAcct, ctx, regions, usePodIdentity, podName)
+	awsSessions, err := s.getAwsSessions(nameSpace, svcAcct, ctx, regions, usePodIdentity, podName, preferredAddressType)
 	if err != nil {
 		return nil, err
 	}
@@ -218,12 +220,12 @@ func (s *CSIDriverProviderServer) getAwsRegions(region, backupRegion, nameSpace,
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If atleast one session is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx context.Context, lookupRegionList []string, usePodIdentity bool, podName string) (response []*session.Session, err error) {
+func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx context.Context, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []*session.Session, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsSessionsList []*session.Session
 
 	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(ctx, region, nameSpace, svcAcct, podName, usePodIdentity, s.k8sClient)
+		awsAuth, err := auth.NewAuth(ctx, region, nameSpace, svcAcct, podName, preferredAddressType, usePodIdentity, s.k8sClient)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
