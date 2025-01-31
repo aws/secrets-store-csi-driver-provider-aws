@@ -183,7 +183,7 @@ The parameters section contains the details of the mount request and contain one
 * usePodIdentity: An optional field that determines the authentication approach. When not specified, it defaults to using IAM Roles for Service Accounts (IRSA). 
   - To use EKS Pod Identity, use any of these values: "true", "True", "TRUE", "t", "T".
   - To explicitly use IRSA, set to any of these values: "false", "False", "FALSE", "f", or "F".
-* preferredAddressType: An optional field that specifies the preferred IP address type for Pod Identity Agent endpoint communication. Values are case-insensitive. Valid values are:
+* preferredAddressType: An optional field that specifies the preferred IP address type for Pod Identity Agent endpoint communication. The field is only applicable when using EKS Pod Identity feature and will be ignored when using IAM Roles for Service Accounts.Values are case-insensitive. Valid values are:
   - "ipv4", "IPv4", or "IPV4" - Force the use of Pod Identity Agent IPv4 endpoint
   - "ipv6", "IPv6", or "IPV6" - Force the use of Pod Identity Agent IPv6 endpoint
   - not specified or any other value - Use auto endpoint selection, trying IPv4 endpoint first and falling back to IPv6 endpoint if IPv4 fails
