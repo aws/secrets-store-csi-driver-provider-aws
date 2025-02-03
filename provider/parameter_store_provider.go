@@ -29,12 +29,11 @@ const (
 //
 // This implementation reduces API calls by batching multiple parameter requests
 // together using the GetParameters call.
-//
 type ParameterStoreProvider struct {
 	clients []ParameterStoreClient
 }
 
-//Parameterstore client with region
+// Parameterstore client with region
 type ParameterStoreClient struct {
 	IsFailover bool
 	Region     string
@@ -46,7 +45,6 @@ type ParameterStoreClient struct {
 // This method iterates over the requested secrets build up batches of requests
 // and fetching them. As each batch is fetched, the results are saved and the
 // current version map (curMap) is updated with the current version information.
-//
 func (p *ParameterStoreProvider) GetSecretValues(
 	ctx context.Context,
 	descriptors []*SecretDescriptor,
@@ -74,7 +72,6 @@ func (p *ParameterStoreProvider) GetSecretValues(
 // This method iterates over all available clients in the ParameterProvider.
 // It requests a fetch from each of them.  Once a fetch succeeds it returns the
 // value. If a fetch fails in all clients it returns all errors.
-//
 func (p *ParameterStoreProvider) fetchParameterStoreValue(
 	ctx context.Context,
 	batchDescriptors []*SecretDescriptor,
@@ -106,7 +103,6 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 // This method builds batch of parameters and fetches the values.
 // if any parameter is failed to fetch, the parameter is returned as invalid parameter
 // and the version information is updated in the current version map.
-//
 func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 	client ParameterStoreClient,
 	ctx context.Context,
@@ -150,7 +146,11 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 	// Build up the results from the batch
 	for _, parm := range rsp.Parameters {
 
+		// SecretDescriptor key is either Name or ARN.
 		descriptor := batchDesc[*(parm.Name)]
+		if descriptor == nil {
+			descriptor = batchDesc[*(parm.ARN)]
+		}
 
 		secretValue := &SecretValue{
 			Value:      []byte(*(parm.Value)),
@@ -185,7 +185,6 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 }
 
 // Factory methods to build a new ParameterStoreProvider
-//
 func NewParameterStoreProviderWithClients(clients ...ParameterStoreClient) *ParameterStoreProvider {
 	return &ParameterStoreProvider{
 		clients: clients,

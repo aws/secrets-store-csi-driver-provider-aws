@@ -189,7 +189,7 @@ The parameters section contains the details of the mount request and contain one
   - not specified or any other value - Use auto endpoint selection, trying IPv4 endpoint first and falling back to IPv6 endpoint if IPv4 fails
 
 The primary objects field of the SecretProviderClass can contain the following sub-fields:
-* objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this must be the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can not be a full ARN.
+* objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this is the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can be either the name or full ARN of the parameter.
 * objectType: This field is optional when using a Secrets Manager ARN for objectName, otherwise it is required. This field can be either "secretsmanager" or "ssmparameter".
 * objectAlias: This optional field specifies the file name under which the secret will be mounted. When not specified the file name defaults to objectName.
 * objectVersion: This field is optional, and generally not recommended since updates to the secret require updating this field. For Secrets Manager this is the [VersionId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store, this is the optional [version number](https://docs.aws.amazon.com/systems-manager/latest/userguide/sysman-paramstore-versions.html#reference-parameter-version).
@@ -270,7 +270,7 @@ If 'failoverObject' is defined, then objectAlias is required.
 EKS Pod Identity [CreatePodIdentityAssociation](https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html) requires the IAM role to reside in the same AWS account as the EKS cluster. 
 
 To mount AWS Secrets Manager secrets from a different AWS account than your EKS cluster, follow [cross-account access](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_examples_cross.html) to set up resource policy for the secret, key policy for the KMS key, and IAM role used in Pod Identity association.
-Fetching cross-account parameters from SSM Parameter Store is not supported in the AWS Provider and Config Provider. 
+Fetching cross-account parameters from SSM Parameter Store is only supported for parameters in the advanced parameter tier. See [Working with Shared Parameters](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-store-shared-parameters.html) for details. 
 
 ### Private Builds
 You can pull down this git repository and build and install this plugin into your account's [AWS ECR](https://aws.amazon.com/ecr/) registry using the following steps. First clone the repository:
