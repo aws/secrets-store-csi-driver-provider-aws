@@ -134,24 +134,37 @@ type podIdentityAgentEndpointTest struct {
 	testName             string
 	preferredAddressType string
 	expected             endpointPreference
+	expError             string
 }
 
 var endpointTests []podIdentityAgentEndpointTest = []podIdentityAgentEndpointTest{
-	{"PreferredAddressType not provided", "", preferenceAuto},
-	{"ipv4", "ipv4", preferenceIPv4},
-	{"IPv4", "IPv4", preferenceIPv4},
-	{"ipv6", "ipv6", preferenceIPv6},
-	{"IPv6", "IPv6", preferenceIPv6},
-	{"Invalid PreferredAddressType", "invalid", preferenceAuto},
+	{"PreferredAddressType not provided", "", preferenceAuto, ""},
+	{"ipv4", "ipv4", preferenceIPv4, ""},
+	{"IPv4", "IPv4", preferenceIPv4, ""},
+	{"ipv6", "ipv6", preferenceIPv6, ""},
+	{"IPv6", "IPv6", preferenceIPv6, ""},
+	{"Invalid PreferredAddressType", "invalid", preferenceInvalid, "invalid preferred address type"},
 }
 
 func TestPodIdentityAgentEndpoint(t *testing.T) {
 
 	for _, tt := range endpointTests {
 		t.Run(tt.testName, func(t *testing.T) {
-			endpoint := parseAddressPreference(tt.preferredAddressType)
+			endpoint, err := parseAddressPreference(tt.preferredAddressType)
 
-			if endpoint != tt.expected {
+			if len(tt.expError) == 0 && err != nil {
+				t.Errorf("%s case: got unexpected error: %s", tt.testName, err)
+			}
+			if len(tt.expError) != 0 && err == nil {
+				t.Errorf("%s case: expected error but got none", tt.testName)
+			}
+			if len(tt.expError) != 0 && endpoint != preferenceInvalid {
+				t.Errorf("%s case: expected preferenceInvalid but got %v", tt.testName, endpoint)
+			}
+			if len(tt.expError) != 0 && !strings.HasPrefix(err.Error(), tt.expError) {
+				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tt.testName, tt.expError, err.Error())
+			}
+			if len(tt.expError) == 0 && endpoint != tt.expected {
 				t.Errorf("defaultPodIdentityAgentEndpoint = %v, want %v", endpoint, tt.expected)
 			}
 		})

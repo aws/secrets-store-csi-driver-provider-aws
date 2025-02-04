@@ -33,8 +33,9 @@ var (
 type endpointPreference int
 
 const (
+	preferenceInvalid endpointPreference = iota - 1
 	// preferenceAuto indicates automatic endpoint selection, trying IPv4 first and falling back to IPv6 if IPv4 fails
-	preferenceAuto endpointPreference = iota
+	preferenceAuto
 
 	// preferenceIPv4 forces the use of Pod Identity Agent IPv4 endpoint
 	preferenceIPv4
@@ -54,9 +55,12 @@ type PodIdentityCredentialProvider struct {
 func NewPodIdentityCredentialProvider(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
 	k8sClient k8sv1.CoreV1Interface,
-) CredentialProvider {
+) (CredentialProvider, error) {
 
-	preferredEndpoint := parseAddressPreference(preferredAddressType)
+	preferredEndpoint, err := parseAddressPreference(preferredAddressType)
+	if err != nil {
+		return nil, err
+	}
 	return &PodIdentityCredentialProvider{
 		region:            region,
 		preferredEndpoint: preferredEndpoint,
@@ -64,21 +68,21 @@ func NewPodIdentityCredentialProvider(
 		httpClient: &http.Client{
 			Timeout: httpTimeout,
 		},
-	}
+	}, nil
 }
 
 // parseAddressPreference converts the provided preferred address type string into an endpointPreference.
-func parseAddressPreference(preferredAddressType string) endpointPreference {
+// returns an error if the preferredAddressType is invalid.
+func parseAddressPreference(preferredAddressType string) (endpointPreference, error) {
 	switch strings.ToLower(preferredAddressType) {
+	case "":
+		return preferenceAuto, nil
 	case "ipv4":
-		return preferenceIPv4
+		return preferenceIPv4, nil
 	case "ipv6":
-		return preferenceIPv6
+		return preferenceIPv6, nil
 	default:
-		if preferredAddressType != "" {
-			klog.Warningf("Unknown preferred address type: %s, falling back to auto selection", preferredAddressType)
-		}
-		return preferenceAuto
+		return preferenceInvalid, fmt.Errorf("invalid preferred address type: %s. Must be one of: ipv4, ipv6", preferredAddressType)
 	}
 }
 
@@ -125,38 +129,34 @@ func (p *podIdentityTokenFetcher) FetchToken(ctx credentials.Context) ([]byte, e
 
 func (p *PodIdentityCredentialProvider) GetAWSConfig() (*aws.Config, error) {
 	// Get token for Pod Identity
-	token, err := p.fetcher.FetchToken(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch token: %+v", err)
+	token, tokenErr := p.fetcher.FetchToken(context.Background())
+	if tokenErr != nil {
+		return nil, fmt.Errorf("failed to fetch token: %+v", tokenErr)
 	}
 
-	switch p.preferredEndpoint {
-	case preferenceIPv4:
-		klog.Infof("Using preferred Pod Identity Agent IPv4 endpoint")
-		config, err := p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv4)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get AWS config from pod identity agent IPv4 endpoint: %+v", err)
+	var config *aws.Config
+	var configErr error
+	if p.preferredEndpoint == preferenceIPv4 || p.preferredEndpoint == preferenceAuto {
+		config, configErr = p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv4)
+		if configErr != nil {
+			klog.Warningf("IPv4 endpoint attempt failed: %+v.", configErr)
+		} else {
+			return config, nil
 		}
-		return config, nil
-	case preferenceIPv6:
-		klog.Infof("Using preferred Pod Identity Agent IPv6 endpoint")
-		config, err := p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv6)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get AWS config from pod identity agent IPv6 endpoint: %+v", err)
-		}
-		return config, nil
-	default:
-		klog.Infof("Using auto Pod Identity Agent endpoint selection")
-		config, err := p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv4)
-		if err != nil {
-			klog.Warningf("IPv4 endpoint attempt failed: %+v. Trying IPv6 endpoint", err)
-			config, err = p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv6)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get AWS config from pod identity agent: %+v", err)
-			}
-		}
-		return config, nil
 	}
+
+	if p.preferredEndpoint == preferenceIPv6 || p.preferredEndpoint == preferenceAuto {
+		config, configErr = p.getAWSConfigFromPodIdentityAgent(token, podIdentityAgentEndpointIPv6)
+		if configErr != nil {
+			klog.Warningf("IPv6 endpoint attempt failed: %+v.", configErr)
+		}
+	}
+
+	if configErr != nil {
+		return nil, fmt.Errorf("failed to get AWS config from pod identity agent: %+v", configErr)
+	}
+
+	return config, nil
 }
 
 func (p *PodIdentityCredentialProvider) getAWSConfigFromPodIdentityAgent(token []byte, podIdentityAgentEndpoint string) (*aws.Config, error) {
