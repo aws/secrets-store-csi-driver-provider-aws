@@ -82,7 +82,7 @@ func parseAddressPreference(preferredAddressType string) (endpointPreference, er
 	case "ipv6":
 		return preferenceIPv6, nil
 	default:
-		return preferenceInvalid, fmt.Errorf("invalid preferred address type: %s. Must be one of: ipv4, ipv6", preferredAddressType)
+		return preferenceInvalid, fmt.Errorf("invalid preferred address type: %s. Valid values are: \"ipv4\", \"ipv6\" or not setting preferredAddressType", preferredAddressType)
 	}
 }
 
