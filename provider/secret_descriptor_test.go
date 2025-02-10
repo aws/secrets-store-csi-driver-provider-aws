@@ -33,6 +33,7 @@ func TestGetSecretTypeSSM(t *testing.T) {
 }
 
 func RunDescriptorValidationTest(t *testing.T, descriptor *SecretDescriptor, expectedErrorMessage string) {
+	t.Helper()
 	err := descriptor.validateSecretDescriptor(singleRegion)
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -42,7 +43,7 @@ func RunDescriptorValidationTest(t *testing.T, descriptor *SecretDescriptor, exp
 func TestNoNamePresent(t *testing.T) {
 	descriptor := SecretDescriptor{}
 
-	expectedErrorMessage := "Object name must be specified"
+	expectedErrorMessage := "object name must be specified"
 
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
@@ -54,7 +55,7 @@ func TestNoTypePresent(t *testing.T) {
 		ObjectName: objectName,
 	}
 
-	expectedErrorMessage := fmt.Sprintf("Invalid ARN format in object name: %s", objectName)
+	expectedErrorMessage := fmt.Sprintf("invalid ARN format in object name: %s", objectName)
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
@@ -65,7 +66,7 @@ func TestUnknownService(t *testing.T) {
 		ObjectName: objectName,
 	}
 
-	expectedErrorMessage := fmt.Sprintf("Invalid service in ARN: sts")
+	expectedErrorMessage := "invalid service in ARN: sts"
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
@@ -90,7 +91,7 @@ func TestNoObjectTypeWoArn(t *testing.T) {
 		ObjectName: objectName,
 	}
 
-	expectedErrorMessage := fmt.Sprintf("Must use objectType when a full ARN is not specified: %s", objectName)
+	expectedErrorMessage := fmt.Sprintf("must use objectType when a full ARN is not specified: %s", objectName)
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
@@ -101,7 +102,7 @@ func TestInvalidObjectType(t *testing.T) {
 		ObjectType: objectType,
 	}
 
-	expectedErrorMessage := fmt.Sprintf("Invalid objectType: %s", objectType)
+	expectedErrorMessage := fmt.Sprintf("invalid objectType: %s", objectType)
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
@@ -112,7 +113,7 @@ func TestSSMObjectType(t *testing.T) {
 		ObjectType: objectType,
 	}
 
-	expectedErrorMessage := fmt.Sprintf("Invalid objectType: %s", objectType)
+	expectedErrorMessage := fmt.Sprintf("invalid objectType: %s", objectType)
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
@@ -150,7 +151,7 @@ func TestConflictingName(t *testing.T) {
           objectType: ssmparameter`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectName: %s", "secret1")
+	expectedErrorMessage := fmt.Sprintf("name already in use for objectName: %s", "secret1")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -168,7 +169,7 @@ func TestConflictingAlias(t *testing.T) {
             objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: %s", "aliasOne")
+	expectedErrorMessage := fmt.Sprintf("name already in use for objectAlias: %s", "aliasOne")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -188,7 +189,7 @@ func TestConflictingAliasJMES(t *testing.T) {
                 objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: %s", "aliasOne")
+	expectedErrorMessage := fmt.Sprintf("name already in use for objectAlias: %s", "aliasOne")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -204,7 +205,7 @@ func TestMissingAliasJMES(t *testing.T) {
               - path: .username`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Object alias must be specified for JMES object")
+	expectedErrorMessage := "object alias must be specified for JMES object"
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -220,14 +221,14 @@ func TestMissingPathJMES(t *testing.T) {
               - objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Path must be specified for JMES object")
+	expectedErrorMessage := "path must be specified for JMES object"
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
 	}
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestNewDescriptorList(t *testing.T) {
 	objects := `
           - objectName: secret1
@@ -259,7 +260,7 @@ func TestNewDescriptorList(t *testing.T) {
 
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestBadYaml(t *testing.T) {
 	objects := `
           - objectName: secret1
@@ -272,7 +273,7 @@ func TestBadYaml(t *testing.T) {
 	}
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestErrorYaml(t *testing.T) {
 	objects := `
           - objectName: secret1`
@@ -293,7 +294,7 @@ func TestEnumStrings(t *testing.T) {
 	}
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestBadTrans(t *testing.T) {
 	objects := `
           - objectName: secret1
@@ -412,7 +413,7 @@ func TestNotTraversal(t *testing.T) {
 
 }
 
-//If the failoverObject exists, then the object must have an alias.
+// If the failoverObject exists, then the object must have an alias.
 func TestFallbackObjectRequiresAlias(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -425,7 +426,7 @@ func TestFallbackObjectRequiresAlias(t *testing.T) {
 	}
 }
 
-//If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (failover is not ARN).
+// If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (failover is not ARN).
 func TestFallbackNonARNStillNeedsObjectType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -434,12 +435,12 @@ func TestFallbackNonARNStillNeedsObjectType(t *testing.T) {
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
 
-	if err == nil || !strings.Contains(err.Error(), "Must use objectType when a full ARN is not specified") {
+	if err == nil || !strings.Contains(err.Error(), "must use objectType when a full ARN is not specified") {
 		t.Fatalf("Unexpected error, got %v", err)
 	}
 }
 
-//If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (main objectName is not ARN).
+// If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (main objectName is not ARN).
 func TestBackupArnMustBePairedWithObjectType(t *testing.T) {
 	objects := `
     - objectName: "MySecret"
@@ -449,12 +450,12 @@ func TestBackupArnMustBePairedWithObjectType(t *testing.T) {
 
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-2", "us-west-1"})
 
-	if err == nil || !strings.Contains(err.Error(), "Must use objectType when a full ARN is not specified") {
+	if err == nil || !strings.Contains(err.Error(), "must use objectType when a full ARN is not specified") {
 		t.Fatalf("Unexpected error, got %v", err)
 	}
 }
 
-//If the failover descriptor is an ARN, and the objectType is specified, then they must match which provider to use.
+// If the failover descriptor is an ARN, and the objectType is specified, then they must match which provider to use.
 func TestBackupArnDoesNotMatchType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -469,7 +470,7 @@ func TestBackupArnDoesNotMatchType(t *testing.T) {
 	}
 }
 
-//The failoverObject must be a valid service name.
+// The failoverObject must be a valid service name.
 func TestBackupArnInvalidType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -478,12 +479,12 @@ func TestBackupArnInvalidType(t *testing.T) {
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
 
-	if err == nil || !strings.Contains(err.Error(), "Invalid service in ARN") {
+	if err == nil || !strings.Contains(err.Error(), "invalid service in ARN") {
 		t.Fatalf("Unexpected error, got %v", err)
 	}
 }
 
-//Success case: both ARNs match.
+// Success case: both ARNs match.
 func TestBackupArnSuccess(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -497,7 +498,7 @@ func TestBackupArnSuccess(t *testing.T) {
 	}
 }
 
-//The main regions must now match.  This main ARN is for one region, and the main region is configured for a different one.
+// The main regions must now match.  This main ARN is for one region, and the main region is configured for a different one.
 func TestPrimaryArnRequiresRegionMatch(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -510,7 +511,7 @@ func TestPrimaryArnRequiresRegionMatch(t *testing.T) {
 	}
 }
 
-//The failover regions must now match. This failover ARN is for one region, and failover region is configured for a different one.
+// The failover regions must now match. This failover ARN is for one region, and failover region is configured for a different one.
 func TestBackupArnRequiresRegionMatch(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -524,7 +525,7 @@ func TestBackupArnRequiresRegionMatch(t *testing.T) {
 	}
 }
 
-//If a failoverObject is given, then a failover region must be given.
+// If a failoverObject is given, then a failover region must be given.
 func TestFallbackDataRequiresMultipleRegions(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -538,7 +539,7 @@ func TestFallbackDataRequiresMultipleRegions(t *testing.T) {
 	}
 }
 
-//If using ssmparameter and a failoverObject, then using both objectVersion and objectVersionLabel is invalid
+// If using ssmparameter and a failoverObject, then using both objectVersion and objectVersionLabel is invalid
 func TestObjectVersionAndLabelAreIncompatible(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
@@ -556,7 +557,7 @@ func TestObjectVersionAndLabelAreIncompatible(t *testing.T) {
 	}
 }
 
-//Validate that the mountpoint still follows the objectAlias, even if multiple regions are defined.
+// Validate that the mountpoint still follows the objectAlias, even if multiple regions are defined.
 func TestGetPathForMultiregion(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
@@ -578,7 +579,7 @@ func TestGetPathForMultiregion(t *testing.T) {
 
 }
 
-//A few objectVersion tests. The two must be equal.
+// A few objectVersion tests. The two must be equal.
 func TestVersionIdsMustMatch(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
@@ -597,7 +598,7 @@ func TestVersionIdsMustMatch(t *testing.T) {
 	}
 }
 
-//Test Version Ids acceptibal if they match.
+// Test Version Ids acceptibal if they match.
 func TestVersionidsMatch(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"

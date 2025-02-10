@@ -12,7 +12,7 @@ import (
 )
 
 // An RE pattern to check for bad paths
-var badPathRE = regexp.MustCompile("(/\\.\\./)|(^\\.\\./)|(/\\.\\.$)")
+var badPathRE = regexp.MustCompile(`(/\.\./)|(^\.\./)|(\/\.\.$)`)
 
 // An individual record from the mount request indicating the secret to be
 // fetched and mounted.
@@ -46,7 +46,7 @@ type SecretDescriptor struct {
 	mountDir string `json:"-"`
 }
 
-//An individual json key value pair to mount
+// An individual json key value pair to mount
 type JMESPathEntry struct {
 	//JMES path to use for retrieval
 	Path string `json:"path"`
@@ -55,7 +55,7 @@ type JMESPathEntry struct {
 	ObjectAlias string `json:"objectAlias"`
 }
 
-//An individual json key value pair to mount
+// An individual json key value pair to mount
 type FailoverObjectEntry struct {
 	// Optional name of the failover secret
 	ObjectName string `json:"objectName"`
@@ -68,7 +68,6 @@ type FailoverObjectEntry struct {
 }
 
 // Enum of supported secret types
-//
 type SecretType int
 
 const (
@@ -91,7 +90,6 @@ var typeMap = map[string]SecretType{
 // Returns the file name where the secrets are to be written.
 //
 // Uses either the ObjectName or ObjectAlias to construct the file name.
-//
 func (p *SecretDescriptor) GetFileName() (path string) {
 	fileName := p.ObjectName
 	if len(p.ObjectAlias) != 0 {
@@ -111,7 +109,6 @@ func (p *SecretDescriptor) GetFileName() (path string) {
 // Return the mount point directory
 //
 // Return the mount point directory pass in by the driver in the mount request.
-//
 func (p *SecretDescriptor) GetMountDir() string {
 	return p.mountDir
 }
@@ -119,12 +116,11 @@ func (p *SecretDescriptor) GetMountDir() string {
 // Get the full path name (mount point + file) of the file where the seret is stored.
 //
 // Returns a path name composed of the mount point and the file name.
-//
 func (p *SecretDescriptor) GetMountPath() string {
 	return filepath.Join(p.GetMountDir(), p.GetFileName())
 }
 
-//Return the object type (ssmparameter, secretsmanager, or ssm)
+// Return the object type (ssmparameter, secretsmanager, or ssm)
 func (p *SecretDescriptor) getObjectType() (otype string) {
 	oType := p.ObjectType
 	if len(oType) == 0 {
@@ -138,7 +134,6 @@ func (p *SecretDescriptor) getObjectType() (otype string) {
 // If the ObjectType is not specified, a full ARN must be present in the
 // ObjectName so this method pulls the type from the ARN when ObjectType is
 // not specified.
-//
 func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 
 	// If no objectType, use ARN (but convert ssm to ssmparameter). Note that
@@ -148,7 +143,7 @@ func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 	return typeMap[sType]
 }
 
-//Return a descriptor for a jmes object entry within the secret
+// Return a descriptor for a jmes object entry within the secret
 func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
 	return SecretDescriptor{
 		ObjectAlias: j.ObjectAlias,
@@ -161,8 +156,8 @@ func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d Sec
 // Returns the secret name for the current descriptor.
 //
 // The current secret name will resolve to the ObjectName if not in failover,
-//  and will resolve the the backup ARN if in failover.
 //
+//	and will resolve the the backup ARN if in failover.
 func (p *SecretDescriptor) GetSecretName(useFailoverRegion bool) (secretName string) {
 	if len(p.FailoverObject.ObjectName) > 0 && useFailoverRegion {
 		return p.FailoverObject.ObjectName
@@ -171,7 +166,6 @@ func (p *SecretDescriptor) GetSecretName(useFailoverRegion bool) (secretName str
 }
 
 // Return the ObjectVersionLabel
-//
 func (p *SecretDescriptor) GetObjectVersionLabel(useFailoverRegion bool) (secretName string) {
 	if len(p.FailoverObject.ObjectVersionLabel) > 0 && useFailoverRegion {
 		return p.FailoverObject.ObjectVersionLabel
@@ -180,7 +174,6 @@ func (p *SecretDescriptor) GetObjectVersionLabel(useFailoverRegion bool) (secret
 }
 
 // Return the ObjectVersion
-//
 func (p *SecretDescriptor) GetObjectVersion(useFailoverRegion bool) (secretName string) {
 	if len(p.FailoverObject.ObjectVersion) > 0 && useFailoverRegion {
 		return p.FailoverObject.ObjectVersion
@@ -192,11 +185,10 @@ func (p *SecretDescriptor) GetObjectVersion(useFailoverRegion bool) (secretName 
 //
 // This method is used to validate input before it is used by the rest of the
 // plugin.
-//
 func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 
 	if len(p.ObjectName) == 0 {
-		return fmt.Errorf("Object name must be specified")
+		return fmt.Errorf("object name must be specified")
 	}
 
 	err := p.validateObjectName(p.ObjectName, p.ObjectType, regions[0])
@@ -217,11 +209,11 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 	//ensure each jmesPath entry has a path and an objectalias
 	for _, jmesPathEntry := range p.JMESPath {
 		if len(jmesPathEntry.Path) == 0 {
-			return fmt.Errorf("Path must be specified for JMES object")
+			return fmt.Errorf("path must be specified for JMES object")
 		}
 
 		if len(jmesPathEntry.ObjectAlias) == 0 {
-			return fmt.Errorf("Object alias must be specified for JMES object")
+			return fmt.Errorf("object alias must be specified for JMES object")
 		}
 	}
 
@@ -257,8 +249,8 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 // Private helper to validate an objectname.
 //
 // This function validates the objectname string, and makes sure it matches the
-//  corresponding 'objectType' and 'region'.
 //
+//	corresponding 'objectType' and 'region'.
 func (p *SecretDescriptor) validateObjectName(objectName string, objectType string, region string) (err error) {
 	var objARN arn.ARN
 
@@ -267,7 +259,7 @@ func (p *SecretDescriptor) validateObjectName(objectName string, objectType stri
 	if hasARN {
 		objARN, err = arn.Parse(objectName)
 		if err != nil {
-			return fmt.Errorf("Invalid ARN format in object name: %s", objectName)
+			return fmt.Errorf("invalid ARN format in object name: %s", objectName)
 		}
 	}
 
@@ -278,19 +270,19 @@ func (p *SecretDescriptor) validateObjectName(objectName string, objectType stri
 
 	// Make sure either objectType is used or a full ARN is specified
 	if len(objectType) == 0 && !hasARN {
-		return fmt.Errorf("Must use objectType when a full ARN is not specified: %s", objectName)
+		return fmt.Errorf("must use objectType when a full ARN is not specified: %s", objectName)
 	}
 
 	// Make sure the ARN is for a supported service
 	_, ok := typeMap[objARN.Service]
 	if len(objectType) == 0 && !ok {
-		return fmt.Errorf("Invalid service in ARN: %s", objARN.Service)
+		return fmt.Errorf("invalid service in ARN: %s", objARN.Service)
 	}
 
 	// Make sure objectType is one we understand
 	_, ok = typeMap[objectType]
 	if len(objectType) != 0 && (!ok || objectType == "ssm") {
-		return fmt.Errorf("Invalid objectType: %s", objectType)
+		return fmt.Errorf("invalid objectType: %s", objectType)
 	}
 
 	// If both ARN and objectType are used make sure they agree
@@ -308,7 +300,6 @@ func (p *SecretDescriptor) validateObjectName(objectName string, objectType stri
 // validated. The object will be grouped into slices based on GetSecretType()
 // and returned in a map keyed by secret type. This is to allow batching of
 // requests.
-//
 func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []string) (
 	desc map[SecretType][]*SecretDescriptor,
 	e error,
@@ -327,7 +318,7 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 	descriptors := make([]*SecretDescriptor, 0)
 	err := yaml.Unmarshal([]byte(objectSpec), &descriptors)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to load SecretProviderClass: %+v", err)
+		return nil, fmt.Errorf("failed to load SecretProviderClass: %+v", err)
 	}
 
 	// Validate each record and check for duplicates
@@ -348,13 +339,13 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 
 		// Check for duplicate names
 		if names[descriptor.ObjectName] {
-			return nil, fmt.Errorf("Name already in use for objectName: %s", descriptor.ObjectName)
+			return nil, fmt.Errorf("name already in use for objectName: %s", descriptor.ObjectName)
 		}
 		names[descriptor.ObjectName] = true
 
 		if len(descriptor.ObjectAlias) > 0 {
 			if names[descriptor.ObjectAlias] {
-				return nil, fmt.Errorf("Name already in use for objectAlias: %s", descriptor.ObjectAlias)
+				return nil, fmt.Errorf("name already in use for objectAlias: %s", descriptor.ObjectAlias)
 			}
 			names[descriptor.ObjectAlias] = true
 		}
@@ -365,7 +356,7 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 
 		for _, jmesPathEntry := range descriptor.JMESPath {
 			if names[jmesPathEntry.ObjectAlias] {
-				return nil, fmt.Errorf("Name already in use for objectAlias: %s", jmesPathEntry.ObjectAlias)
+				return nil, fmt.Errorf("name already in use for objectAlias: %s", jmesPathEntry.ObjectAlias)
 			}
 
 			names[jmesPathEntry.ObjectAlias] = true

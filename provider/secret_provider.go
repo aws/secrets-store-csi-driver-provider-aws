@@ -16,30 +16,26 @@ import (
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 )
 
-// Generic interface for the different secret providers.
-//
+// SecretProvider defines the interface for fetching secrets from different AWS services.
+// Implementations of this interface handle retrieving secrets from services like
+// AWS Secrets Manager and AWS Systems Manager Parameter Store.
 type SecretProvider interface {
 	GetSecretValues(ctx context.Context, descriptor []*SecretDescriptor, curMap map[string]*v1alpha1.ObjectVersion) (secret []*SecretValue, e error)
 }
 
-// Factory class to return singltons based on secret type (secretsmanager or ssmparameter).
-//
-type SecretProviderFactory struct {
+// SecretProviderMapping maintains a mapping between SecretTypes (secretsmanager or ssmparameter)
+// and their corresponding singleton provider instances.
+type SecretProviderMaping struct {
 	Providers map[SecretType]SecretProvider // Maps secret type to the provider.
 }
 
-// The prototype for the provider factory fatory
-//
-type ProviderFactoryFactory func(session []*session.Session, reigons []string) (factory *SecretProviderFactory)
+// SecretProviderMappingGenerator is a type for creating a new SecretProviderMapping with initialized providers
+type SecretProviderMappingGenerator func(session []*session.Session, reigons []string) (factory *SecretProviderMaping)
 
-// Creates the provider factory.
-//
-// This factory catagorizes the request and returns the correct concrete
-// provider implementation using the secret type.
-//
-func NewSecretProviderFactory(sessions []*session.Session, regions []string) (factory *SecretProviderFactory) {
-
-	return &SecretProviderFactory{
+// NewSecretProviderMappingGenerator creates a mapping of secret types to their provider implementations.
+// It initializes and returns a SecretProviderMapping containing concrete providers for each supported secret type.
+func NewSecretProviderMappingGenerator(sessions []*session.Session, regions []string) (factory *SecretProviderMaping) {
+	return &SecretProviderMaping{
 		Providers: map[SecretType]SecretProvider{
 			SSMParameter:   NewParameterStoreProvider(sessions, regions),
 			SecretsManager: NewSecretsManagerProvider(sessions, regions),
@@ -48,11 +44,8 @@ func NewSecretProviderFactory(sessions []*session.Session, regions []string) (fa
 
 }
 
-// Factory method to get the correct secret provider for the request type.
-//
-// This factory method uses the secret type to return the previously created
-// provider implementation.
-//
-func (p SecretProviderFactory) GetSecretProvider(secretType SecretType) (prov SecretProvider) {
+// GetSecretProvider returns the appropriate SecretProvider implementation for the given secret type.
+// It looks up and returns the previously initialized provider from the mapping.
+func (p SecretProviderMaping) GetSecretProvider(secretType SecretType) (prov SecretProvider) {
 	return p.Providers[secretType]
 }

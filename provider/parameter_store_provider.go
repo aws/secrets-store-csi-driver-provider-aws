@@ -79,7 +79,7 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 ) (values []*SecretValue, err error) {
 
 	for _, client := range p.clients {
-		batchValues, err := p.fetchParameterStoreBatch(client, ctx, batchDescriptors, curMap)
+		batchValues, err := p.fetchParameterStoreBatch(ctx, client, batchDescriptors, curMap)
 
 		if utils.IsFatalError(err) {
 			return nil, err
@@ -92,7 +92,7 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 		}
 	}
 	if values == nil {
-		return nil, fmt.Errorf("Failed to fetch parameters from all regions.")
+		return nil, fmt.Errorf("failed to fetch parameters from all regions")
 	}
 
 	return values, nil
@@ -104,8 +104,8 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 // if any parameter is failed to fetch, the parameter is returned as invalid parameter
 // and the version information is updated in the current version map.
 func (p *ParameterStoreProvider) fetchParameterStoreBatch(
-	client ParameterStoreClient,
 	ctx context.Context,
+	client ParameterStoreClient,
 	batchDescriptors []*SecretDescriptor,
 	curMap map[string]*v1alpha1.ObjectVersion,
 ) (v []*SecretValue, err error) {
@@ -139,7 +139,7 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 	}
 
 	if len(rsp.InvalidParameters) != 0 {
-		err = awserr.NewRequestFailure(awserr.New("", fmt.Sprintf("%s: Invalid parameters: %s", client.Region, strings.Join(aws.StringValueSlice(rsp.InvalidParameters), ", ")), err), 400, "")
+		err = awserr.NewRequestFailure(awserr.New("", fmt.Sprintf("%s: invalid parameters: %s", client.Region, strings.Join(aws.StringValueSlice(rsp.InvalidParameters), ", ")), err), 400, "")
 		return nil, err
 	}
 

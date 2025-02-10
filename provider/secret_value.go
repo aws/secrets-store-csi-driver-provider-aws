@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/jmespath/go-jmespath"
 )
 
@@ -13,8 +14,9 @@ type SecretValue struct {
 	Descriptor SecretDescriptor
 }
 
-func (p *SecretValue) String() string { return "<REDACTED>" } // Do not log secrets
-//parse out and return specified key value pairs from the secret
+func (p *SecretValue) String() string { return "<REDACTED>" } // Do not print secrets
+
+// parse out and return specified key value pairs from the secret
 func (p *SecretValue) getJsonSecrets() (s []*SecretValue, e error) {
 
 	jsonValues := make([]*SecretValue, 0)
@@ -25,7 +27,7 @@ func (p *SecretValue) getJsonSecrets() (s []*SecretValue, e error) {
 	var data interface{}
 	err := json.Unmarshal(p.Value, &data)
 	if err != nil {
-		return nil, fmt.Errorf("Invalid JSON used with jmesPath in secret: %s.", p.Descriptor.ObjectName)
+		return nil, fmt.Errorf("invalid JSON used with jmesPath in secret: %s", p.Descriptor.ObjectName)
 
 	}
 
@@ -35,18 +37,18 @@ func (p *SecretValue) getJsonSecrets() (s []*SecretValue, e error) {
 		jsonSecret, err := jmespath.Search(jmesPathEntry.Path, data)
 
 		if err != nil {
-			return nil, fmt.Errorf("Invalid JMES Path: %s.", jmesPathEntry.Path)
+			return nil, fmt.Errorf("invalid JMES Path: %s", jmesPathEntry.Path)
 		}
 
 		if jsonSecret == nil {
-			return nil, fmt.Errorf("JMES Path - %s for object alias - %s does not point to a valid object.",
+			return nil, fmt.Errorf("JMES Path - %s for object alias - %s does not point to a valid object",
 				jmesPathEntry.Path, jmesPathEntry.ObjectAlias)
 		}
 
 		jsonSecretAsString, isString := jsonSecret.(string)
 
 		if !isString {
-			return nil, fmt.Errorf("Invalid JMES search result type for path:%s. Only string is allowed.", jmesPathEntry.Path)
+			return nil, fmt.Errorf("invalid JMES search result type for path:%s. Only string is allowed", jmesPathEntry.Path)
 		}
 
 		descriptor := p.Descriptor.getJmesEntrySecretDescriptor(&jmesPathEntry)

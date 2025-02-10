@@ -73,7 +73,7 @@ func main() {
 		os.Remove(endpoint)
 	}()
 
-	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets)
+	providerSrv, err := server.NewServer(provider.NewSecretProviderMappingGenerator, clientset.CoreV1(), *driverWriteSecrets)
 	if err != nil {
 		klog.Fatalf("Could not create server. error: %v", err)
 	}

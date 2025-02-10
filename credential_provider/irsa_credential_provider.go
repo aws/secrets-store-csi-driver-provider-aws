@@ -3,6 +3,7 @@ package credential_provider
 import (
 	"context"
 	"fmt"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
@@ -116,7 +117,7 @@ func (p IRSACredentialProvider) getRoleARN() (arn *string, e error) {
 	roleArn := rsp.Annotations[arnAnno]
 	if len(roleArn) <= 0 {
 		klog.Errorf("Need IAM role for service account %s (namespace: %s) - %s", p.svcAcc, p.nameSpace, docURL)
-		return nil, fmt.Errorf("An IAM role must be associated with service account %s (namespace: %s)", p.svcAcc, p.nameSpace)
+		return nil, fmt.Errorf("an IAM role must be associated with service account %s (namespace: %s)", p.svcAcc, p.nameSpace)
 	}
 	klog.Infof("Role ARN for %s:%s is %s", p.nameSpace, p.svcAcc, roleArn)
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -145,7 +144,7 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 		nodeRegion = "fakeRegion"
 	}
 
-	factory := func(session []*session.Session, regions []string) (factory *provider.SecretProviderFactory) {
+	factory := func(session []*session.Session, regions []string) (factory *provider.SecretProviderMaping) {
 		if len(region) == 0 {
 			region = nodeRegion
 		}
@@ -179,7 +178,7 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 			})
 		}
 
-		return &provider.SecretProviderFactory{
+		return &provider.SecretProviderMaping{
 			Providers: map[provider.SecretType]provider.SecretProvider{
 				provider.SSMParameter:   provider.NewParameterStoreProviderWithClients(paramClients...),
 				provider.SecretsManager: provider.NewSecretsManagerProviderWithClients(ssmClients...),
@@ -297,7 +296,7 @@ func validateMounts(t *testing.T, dir string, tst testCase, rsp *v1alpha1.MountR
 
 	// Check for the expected secrets
 	for file, val := range tst.expSecrets {
-		secretVal, err := ioutil.ReadFile(filepath.Join(dir, file))
+		secretVal, err := os.ReadFile(filepath.Join(dir, file))
 		if err != nil {
 			t.Errorf("%s: Can not read file %s", tst.testName, file)
 			return false
@@ -349,7 +348,7 @@ func validateResponse(t *testing.T, dir string, tst testCase, rsp *v1alpha1.Moun
 			t.Errorf("%s: could not create base directory: %v", tst.testName, err)
 			return false
 		}
-		if err := ioutil.WriteFile(fullPath, secretVal, os.FileMode(perm)); err != nil {
+		if err := os.WriteFile(fullPath, secretVal, os.FileMode(perm)); err != nil {
 			t.Errorf("%s: could not write secret: %v", tst.testName, err)
 			return false
 		}
@@ -695,7 +694,7 @@ var mountTests []testCase = []testCase{
 		ssmRsp:     []*ssm.GetParametersOutput{},
 		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "An IAM role must be associated",
+		expErr:     "an IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -726,7 +725,7 @@ var mountTests []testCase = []testCase{
 		ssmRsp:     []*ssm.GetParametersOutput{},
 		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "Object name must be specified",
+		expErr:     "object name must be specified",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -748,7 +747,7 @@ var mountTests []testCase = []testCase{
 			nil,
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "Failed to fetch secret",
+		expErr:     "failed to fetch secret",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -766,7 +765,7 @@ var mountTests []testCase = []testCase{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "Failed to fetch parameters from all regions",
+		expErr:     "failed to fetch parameters from all regions",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -793,7 +792,7 @@ var mountTests []testCase = []testCase{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "Invalid parameters",
+		expErr:     "invalid parameters",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1095,8 +1094,8 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		brReqErr: awserr.NewRequestFailure(
 			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side.", fmt.Errorf("")),
 			500, ""),
-		expErr:     "Failed to fetch secret from all regions",
-		brExpErr:   "Failed to fetch secret from all regions:",
+		expErr:     "failed to fetch secret from all regions",
+		brExpErr:   "failed to fetch secret from all regions:",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1114,8 +1113,8 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		ssmBrReqErr: awserr.NewRequestFailure(
 			awserr.New(ssm.ErrCodeInternalServerError, "An error occurred on the server side.", fmt.Errorf("")),
 			500, ""),
-		expErr:     "Failed to fetch parameters from all regions.",
-		brExpErr:   "Failed to fetch parameters from all regions.",
+		expErr:     "failed to fetch parameters from all regions",
+		brExpErr:   "failed to fetch parameters from all regions",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1159,7 +1158,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestParm1", "objectType": "ssmparameter"},
 		},
-		expErr:     "fakeRegion: An IAM role must be associated",
+		expErr:     "fakeRegion: an IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1186,7 +1185,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 				InvalidParameters: []*string{aws.String("TestParm2")},
 			},
 		},
-		expErr:     "Invalid parameters",
+		expErr:     "invalid parameters",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1338,7 +1337,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 				InvalidParameters: []*string{aws.String("TestParm1"), aws.String("TestParm2")},
 			},
 		},
-		expErr:     "Invalid parameters: TestParm1, TestParm2",
+		expErr:     "invalid parameters: TestParm1, TestParm2",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1472,7 +1471,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 					aws.String("TestParm9"), aws.String("TestParm10")},
 			},
 		},
-		expErr:     "Invalid parameters: TestParm6, TestParm7, TestParm8, TestParm9, TestParm10",
+		expErr:     "invalid parameters: TestParm6, TestParm7, TestParm8, TestParm9, TestParm10",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1631,7 +1630,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 				},
 			},
 		},
-		expErr:     "Invalid parameters: TestParm6, TestParm7, TestParm8, TestParm9, TestParm10",
+		expErr:     "invalid parameters: TestParm6, TestParm7, TestParm8, TestParm9, TestParm10",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1994,17 +1993,13 @@ func TestMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			dir, err := ioutil.TempDir("", strings.Map(nameMapper, tst.testName))
-			if err != nil {
-				panic(err)
-			}
-			defer os.RemoveAll(dir) // Cleanup
+			dir := t.TempDir()
 
 			svr := newServerWithMocks(&tst, false)
 
 			// Do the mount
 			req := buildMountReq(dir, tst, []*v1alpha1.ObjectVersion{})
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.TODO(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2035,17 +2030,13 @@ func TestMountsNoWrite(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			dir, err := ioutil.TempDir("", strings.Map(nameMapper, tst.testName))
-			if err != nil {
-				panic(err)
-			}
-			defer os.RemoveAll(dir) // Cleanup
+			dir := t.TempDir()
 
 			svr := newServerWithMocks(&tst, true)
 
 			// Do the mount
 			req := buildMountReq(dir, tst, []*v1alpha1.ObjectVersion{})
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.TODO(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2452,11 +2443,7 @@ var remountTests []testCase = []testCase{
 // Validate rotation
 func TestReMounts(t *testing.T) {
 
-	dir, err := ioutil.TempDir("", "TestReMounts")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(dir) // Cleanup
+	dir := t.TempDir()
 
 	curState := []*v1alpha1.ObjectVersion{}
 
@@ -2468,7 +2455,7 @@ func TestReMounts(t *testing.T) {
 
 			// Do the mount
 			req := buildMountReq(dir, tst, curState)
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.TODO(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2494,12 +2481,7 @@ func TestReMounts(t *testing.T) {
 // Validate rotation
 func TestNoWriteReMounts(t *testing.T) {
 
-	dir, err := ioutil.TempDir("", "TestReMounts")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(dir) // Cleanup
-
+	dir := t.TempDir()
 	curState := []*v1alpha1.ObjectVersion{}
 
 	for _, tst := range remountTests {
@@ -2510,7 +2492,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 			// Do the mount
 			req := buildMountReq(dir, tst, curState)
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.TODO(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2547,7 +2529,7 @@ func TestEmptyAttributes(t *testing.T) {
 		Permission:           "420",
 		CurrentObjectVersion: []*v1alpha1.ObjectVersion{},
 	}
-	rsp, err := svr.Mount(nil, req)
+	rsp, err := svr.Mount(context.TODO(), req)
 
 	if rsp != nil {
 		t.Fatalf("TestEmptyAttributes: got unexpected response")
@@ -2567,13 +2549,13 @@ func TestNoPath(t *testing.T) {
 		Permission:           "420",
 		CurrentObjectVersion: []*v1alpha1.ObjectVersion{},
 	}
-	rsp, err := svr.Mount(nil, req)
+	rsp, err := svr.Mount(context.TODO(), req)
 
 	if rsp != nil {
 		t.Fatalf("TestNoPath: got unexpected response")
 	} else if err == nil {
 		t.Fatalf("TestNoPath: did not get error")
-	} else if !strings.Contains(err.Error(), "Missing mount path") {
+	} else if !strings.Contains(err.Error(), "missing mount path") {
 		t.Fatalf("TestNoPath: Unexpected error %s", err.Error())
 	}
 
@@ -2590,7 +2572,7 @@ func TestDriverVersion(t *testing.T) {
 		t.Fatalf("TestDriverVersion: got empty server")
 	}
 
-	ver, err := svr.Version(nil, &v1alpha1.VersionRequest{})
+	ver, err := svr.Version(context.TODO(), &v1alpha1.VersionRequest{})
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected error %s", err.Error())
 	}

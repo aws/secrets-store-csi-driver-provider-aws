@@ -1,11 +1,12 @@
 package credential_provider
 
 import (
+	"strings"
+	"testing"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"strings"
-	"testing"
 )
 
 const (
@@ -54,7 +55,7 @@ type irsaCredentialTest struct {
 
 var irsaCredentialTests []irsaCredentialTest = []irsaCredentialTest{
 	{"IRSA Success", false, false, "fakeRoleARN", false, ""},
-	{"IRSA Missing Role", false, false, "", false, "An IAM role must"},
+	{"IRSA Missing Role", false, false, "", false, "an IAM role must"},
 	{"Fetch svc acc fail", true, false, "fakeRoleARN", false, "not found"},
 }
 
@@ -115,4 +116,3 @@ var irsaTokenTests []irsaCredentialTest = []irsaCredentialTest{
 	{"IRSA Token Success", false, false, "myRoleARN", true, ""},
 	{"IRSA Fetch JWT fail", false, true, "myRoleARN", true, "Fake create token"},
 }
-

@@ -6,7 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 )
 
-//Helper method to check if the request is fatal/4XX status
+// Helper method to check if the request is fatal/4XX status
 func IsFatalError(errMsg error) bool {
 
 	if reqErr, ok := errMsg.(awserr.RequestFailure); ok {

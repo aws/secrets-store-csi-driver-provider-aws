@@ -3,6 +3,7 @@ package credential_provider
 import (
 	"context"
 	"fmt"
+
 	"github.com/aws/aws-sdk-go/service/sts/stsiface"
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,9 +11,9 @@ import (
 )
 
 const (
-	testNamespace        = "someNamespace"
-	testServiceAccount   = "someServiceAccount"
-	testRegion           = "someRegion"
+	testNamespace      = "someNamespace"
+	testServiceAccount = "someServiceAccount"
+	testRegion         = "someRegion"
 )
 
 // Mock STS client
