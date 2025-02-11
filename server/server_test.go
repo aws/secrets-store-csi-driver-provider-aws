@@ -935,7 +935,7 @@ var mountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},
@@ -1904,7 +1904,7 @@ var writeOnlyMountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},
@@ -1930,7 +1930,7 @@ var writeOnlyMountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},
@@ -1960,7 +1960,7 @@ var noWriteMountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("/mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("/mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},

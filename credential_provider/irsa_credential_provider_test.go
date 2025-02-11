@@ -115,4 +115,3 @@ var irsaTokenTests []irsaCredentialTest = []irsaCredentialTest{
 	{"IRSA Token Success", false, false, "myRoleARN", true, ""},
 	{"IRSA Fetch JWT fail", false, true, "myRoleARN", true, "Fake create token"},
 }
-
