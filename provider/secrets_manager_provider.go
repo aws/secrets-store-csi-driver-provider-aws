@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -246,7 +246,7 @@ func (p *SecretsManagerProvider) fetchSecret(
 // Reads a secret back in from the file system.
 func (p *SecretsManagerProvider) reloadSecret(descriptor *SecretDescriptor) (val *SecretValue, e error) {
 
-	sValue, err := ioutil.ReadFile(descriptor.GetMountPath())
+	sValue, err := os.ReadFile(descriptor.GetMountPath())
 	if err != nil {
 		return nil, err
 	}
