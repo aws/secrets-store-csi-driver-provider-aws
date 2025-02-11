@@ -2004,7 +2004,7 @@ func TestMounts(t *testing.T) {
 
 			// Do the mount
 			req := buildMountReq(dir, tst, []*v1alpha1.ObjectVersion{})
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.Background(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2045,7 +2045,7 @@ func TestMountsNoWrite(t *testing.T) {
 
 			// Do the mount
 			req := buildMountReq(dir, tst, []*v1alpha1.ObjectVersion{})
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.Background(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2468,7 +2468,7 @@ func TestReMounts(t *testing.T) {
 
 			// Do the mount
 			req := buildMountReq(dir, tst, curState)
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.Background(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2510,7 +2510,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 			// Do the mount
 			req := buildMountReq(dir, tst, curState)
-			rsp, err := svr.Mount(nil, req)
+			rsp, err := svr.Mount(context.Background(), req)
 			if len(tst.expErr) == 0 && err != nil {
 				t.Fatalf("%s: Got unexpected error: %s", tst.testName, err)
 			}
@@ -2547,7 +2547,7 @@ func TestEmptyAttributes(t *testing.T) {
 		Permission:           "420",
 		CurrentObjectVersion: []*v1alpha1.ObjectVersion{},
 	}
-	rsp, err := svr.Mount(nil, req)
+	rsp, err := svr.Mount(context.Background(), req)
 
 	if rsp != nil {
 		t.Fatalf("TestEmptyAttributes: got unexpected response")
@@ -2567,7 +2567,7 @@ func TestNoPath(t *testing.T) {
 		Permission:           "420",
 		CurrentObjectVersion: []*v1alpha1.ObjectVersion{},
 	}
-	rsp, err := svr.Mount(nil, req)
+	rsp, err := svr.Mount(context.Background(), req)
 
 	if rsp != nil {
 		t.Fatalf("TestNoPath: got unexpected response")
@@ -2590,7 +2590,7 @@ func TestDriverVersion(t *testing.T) {
 		t.Fatalf("TestDriverVersion: got empty server")
 	}
 
-	ver, err := svr.Version(nil, &v1alpha1.VersionRequest{})
+	ver, err := svr.Version(context.Background(), &v1alpha1.VersionRequest{})
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected error %s", err.Error())
 	}
