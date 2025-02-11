@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/secretsmanager"
-	"github.com/aws/aws-sdk-go/service/secretsmanager/secretsmanageriface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 	"k8s.io/klog/v2"
 
@@ -31,10 +29,15 @@ type SecretsManagerProvider struct {
 	clients []SecretsManagerClient
 }
 
+type SecretsManagerGetDescriber interface {
+	GetSecretValue(ctx context.Context, params *secretsmanager.GetSecretValueInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
+	DescribeSecret(ctx context.Context, params *secretsmanager.DescribeSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error)
+}
+
 // SecretsManager client with region
 type SecretsManagerClient struct {
 	Region     string
-	Client     secretsmanageriface.SecretsManagerAPI
+	Client     SecretsManagerGetDescriber
 	IsFailover bool
 }
 
@@ -182,7 +185,7 @@ func (p *SecretsManagerProvider) isCurrent(
 	}
 
 	// Lookup the current version information.
-	rsp, err := client.Client.DescribeSecretWithContext(ctx, &secretsmanager.DescribeSecretInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))})
+	rsp, err := client.Client.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))})
 	if err != nil {
 		return false, curVer.Version, fmt.Errorf("%s: Failed to describe secret %s: %w", client.Region, descriptor.ObjectName, err)
 	}
@@ -197,7 +200,7 @@ func (p *SecretsManagerProvider) isCurrent(
 	stages := rsp.VersionIdsToStages[curVer.Version]
 	hasLabel := false
 	for i := 0; i < len(stages) && !hasLabel; i++ {
-		hasLabel = *(stages[i]) == label
+		hasLabel = stages[i] == label
 	}
 
 	return hasLabel, curVer.Version, nil // If the current version has the desired label, it is current.
@@ -213,19 +216,19 @@ func (p *SecretsManagerProvider) fetchSecret(
 	descriptor *SecretDescriptor,
 ) (ver string, val *SecretValue, err error) {
 
-	req := secretsmanager.GetSecretValueInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))}
+	input := &secretsmanager.GetSecretValueInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))}
 
 	// Use explicit version if specified
 	if len(descriptor.GetObjectVersion(client.IsFailover)) != 0 {
-		req.SetVersionId(descriptor.GetObjectVersion(client.IsFailover))
+		input.VersionId = aws.String(descriptor.GetObjectVersion(client.IsFailover))
 	}
 
 	// Use stage label if specified
 	if len(descriptor.GetObjectVersionLabel(client.IsFailover)) != 0 {
-		req.SetVersionStage(descriptor.GetObjectVersionLabel(client.IsFailover))
+		input.VersionStage = aws.String(descriptor.GetObjectVersionLabel(client.IsFailover))
 	}
 
-	rsp, err := client.Client.GetSecretValueWithContext(ctx, &req)
+	rsp, err := client.Client.GetSecretValue(ctx, input)
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: Failed fetching secret %s: %w", client.Region, descriptor.ObjectName, err)
 	}
@@ -245,12 +248,10 @@ func (p *SecretsManagerProvider) fetchSecret(
 //
 // Reads a secret back in from the file system.
 func (p *SecretsManagerProvider) reloadSecret(descriptor *SecretDescriptor) (val *SecretValue, e error) {
-
 	sValue, err := os.ReadFile(descriptor.GetMountPath())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read secret %s: %w", descriptor.ObjectName, err)
 	}
-
 	return &SecretValue{Value: sValue, Descriptor: *descriptor}, nil
 }
 
@@ -261,15 +262,15 @@ func NewSecretsManagerProviderWithClients(clients ...SecretsManagerClient) *Secr
 	}
 }
 
-func NewSecretsManagerProvider(awsSessions []*session.Session, regions []string) *SecretsManagerProvider {
-	var clients []SecretsManagerClient
-	for i, awsSession := range awsSessions {
+func NewSecretsManagerProvider(configs []aws.Config, regions []string) *SecretsManagerProvider {
+	var secretsManagerClients []SecretsManagerClient
+	for i, cfg := range configs {
 		client := SecretsManagerClient{
-			Region:     *awsSession.Config.Region,
-			Client:     secretsmanager.New(awsSession, aws.NewConfig().WithRegion(regions[i])),
+			Region:     regions[i],
+			Client:     secretsmanager.NewFromConfig(cfg),
 			IsFailover: i > 0,
 		}
-		clients = append(clients, client)
+		secretsManagerClients = append(secretsManagerClients, client)
 	}
-	return NewSecretsManagerProviderWithClients(clients...)
+	return NewSecretsManagerProviderWithClients(secretsManagerClients...)
 }

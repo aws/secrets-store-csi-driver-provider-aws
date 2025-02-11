@@ -2,65 +2,76 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/service/sts/stsiface"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
 // Mock STS client
 type mockSTS struct {
-	stsiface.STSAPI
+	sts.Client
+}
+
+func (m *mockSTS) AssumeRoleWithWebIdentity(ctx context.Context, params *sts.AssumeRoleWithWebIdentityInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error) {
+	return nil, fmt.Errorf("fake error for serviceaccounst")
 }
 
 type sessionTest struct {
 	testName        string
 	testPodIdentity bool
-	expError        string
-}
-
-var sessionTests []sessionTest = []sessionTest{
-	{
-		testName:        "IRSA",
-		testPodIdentity: false,
-		expError:        "serviceaccounts", // IRSA path will fail at getting service account since using fake client
-	},
-	{
-		testName:        "Pod Identity",
-		testPodIdentity: true,
-		expError:        "failed to fetch token", // Pod Identity path will fail fetching token since using fake client
-	},
+	cfgError        string
 }
 
 func TestGetAWSSession(t *testing.T) {
-	for _, tstData := range sessionTests {
-		t.Run(tstData.testName, func(t *testing.T) {
+	cases := []sessionTest{
+		{
+			testName:        "IRSA",
+			testPodIdentity: false,
+			cfgError:        "serviceaccounts", // IRSA path will fail at getting creds since its in the hot path of the config
 
-			auth := &Auth{
-				region:         "someRegion",
-				nameSpace:      "someNamespace",
-				svcAcc:         "someSvcAcc",
-				podName:        "somepod",
-				usePodIdentity: tstData.testPodIdentity,
-				k8sClient:      fake.NewSimpleClientset().CoreV1(),
-				stsClient:      &mockSTS{},
-				ctx:            context.Background(),
-			}
+		},
+		{
+			testName:        "Pod Identity",
+			testPodIdentity: true,
+			cfgError:        "", // Pod Identity path succeeds since token is lazy loaded
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.testName, func(t *testing.T) {
 
-			sess, err := auth.GetAWSSession()
+			auth, err := NewAuth(
+				"someRegion",
+				"someNamespace",
+				"someSvcAcc",
+				"somepod",
+				"",
+				tt.testPodIdentity,
+				fake.NewSimpleClientset().CoreV1(),
+			)
+			if err != nil {
+				t.Fatalf("%s case: failed to create auth: %v", tt.testName, err)
+			}
+			auth.stsClient = &mockSTS{}
+			auth.k8sClient = fake.NewSimpleClientset().CoreV1()
 
-			if len(tstData.expError) == 0 && err != nil {
-				t.Errorf("%s case: got unexpected auth error: %s", tstData.testName, err)
+			cfg, err := auth.GetAWSConfig(context.Background())
+
+			if len(tt.cfgError) == 0 && err != nil {
+				t.Errorf("%s case: got unexpected auth error: %s", tt.testName, err)
 			}
-			if len(tstData.expError) == 0 && sess == nil {
-				t.Errorf("%s case: got empty session", tstData.testName)
+			if len(tt.cfgError) == 0 && cfg.Credentials == nil {
+				t.Errorf("%s case: got empty credentials", tt.testName)
 			}
-			if len(tstData.expError) != 0 && err == nil {
-				t.Errorf("%s case: expected error but got none", tstData.testName)
+			if len(tt.cfgError) != 0 && err == nil {
+				t.Errorf("%s case: expected error but got none", tt.testName)
 			}
-			if len(tstData.expError) != 0 && !strings.Contains(err.Error(), tstData.expError) {
-				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
+			if len(tt.cfgError) != 0 && err != nil {
+				if !strings.Contains(err.Error(), tt.cfgError) {
+					t.Errorf("%s case: expected error prefix '%s' but got '%s'", tt.testName, tt.cfgError, err.Error())
+				}
 			}
 		})
 	}

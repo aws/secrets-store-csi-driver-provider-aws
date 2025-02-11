@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/service/sts/stsiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/aws-sdk-go-v2/service/sts/types"
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -18,23 +20,37 @@ const (
 
 // Mock STS client
 type mockSTS struct {
-	stsiface.STSAPI
+	sts.Client
+}
+
+func (m *mockSTS) AssumeRoleWithWebIdentity(ctx context.Context, params *sts.AssumeRoleWithWebIdentityInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error) {
+	return &sts.AssumeRoleWithWebIdentityOutput{
+		Credentials: &types.Credentials{
+			AccessKeyId:     aws.String("TEST_ACCESS_KEY"),
+			SecretAccessKey: aws.String("TEST_SECRET"),
+			SessionToken:    aws.String("TEST_TOKEN"),
+		},
+	}, nil
 }
 
 // Mock K8s client for creating tokens
 type mockK8sV1 struct {
-	k8sv1.CoreV1Interface
-	k8CTOneShotError bool
+	k8sv1.CoreV1Interface                       // satisfy the interface
+	fake                  k8sv1.CoreV1Interface // plumb down to the ServiceAccounts method
+	k8CTOneShotError      bool
 }
 
 func (m *mockK8sV1) ServiceAccounts(namespace string) k8sv1.ServiceAccountInterface {
-	return &mockK8sV1SA{v1mock: m}
+	return &mockK8sV1SA{
+		m.fake.ServiceAccounts(namespace),
+		m.k8CTOneShotError,
+	}
 }
 
 // Mock the K8s service account client
 type mockK8sV1SA struct {
 	k8sv1.ServiceAccountInterface
-	v1mock *mockK8sV1
+	oneShotGetTokenError bool
 }
 
 func (ma *mockK8sV1SA) CreateToken(
@@ -44,8 +60,8 @@ func (ma *mockK8sV1SA) CreateToken(
 	opts metav1.CreateOptions,
 ) (*authv1.TokenRequest, error) {
 
-	if ma.v1mock.k8CTOneShotError {
-		ma.v1mock.k8CTOneShotError = false // Reset so other tests don't fail
+	if ma.oneShotGetTokenError {
+		ma.oneShotGetTokenError = false // Reset so other tests don't fail
 		return nil, fmt.Errorf("Fake create token error")
 	}
 
