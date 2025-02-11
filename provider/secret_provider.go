@@ -17,26 +17,22 @@ import (
 )
 
 // Generic interface for the different secret providers.
-//
 type SecretProvider interface {
 	GetSecretValues(ctx context.Context, descriptor []*SecretDescriptor, curMap map[string]*v1alpha1.ObjectVersion) (secret []*SecretValue, e error)
 }
 
 // Factory class to return singltons based on secret type (secretsmanager or ssmparameter).
-//
 type SecretProviderFactory struct {
 	Providers map[SecretType]SecretProvider // Maps secret type to the provider.
 }
 
 // The prototype for the provider factory fatory
-//
 type ProviderFactoryFactory func(session []*session.Session, reigons []string) (factory *SecretProviderFactory)
 
 // Creates the provider factory.
 //
 // This factory catagorizes the request and returns the correct concrete
 // provider implementation using the secret type.
-//
 func NewSecretProviderFactory(sessions []*session.Session, regions []string) (factory *SecretProviderFactory) {
 
 	return &SecretProviderFactory{
@@ -52,7 +48,6 @@ func NewSecretProviderFactory(sessions []*session.Session, regions []string) (fa
 //
 // This factory method uses the secret type to return the previously created
 // provider implementation.
-//
 func (p SecretProviderFactory) GetSecretProvider(secretType SecretType) (prov SecretProvider) {
 	return p.Providers[secretType]
 }

@@ -32,16 +32,16 @@ import (
 var Version string
 
 const (
-	namespaceAttrib      = "csi.storage.k8s.io/pod.namespace"
-	acctAttrib           = "csi.storage.k8s.io/serviceAccount.name"
-	podnameAttrib        = "csi.storage.k8s.io/pod.name"
-	regionAttrib         = "region"                        // The attribute name for the region in the SecretProviderClass
-	transAttrib          = "pathTranslation"               // Path translation char
-	regionLabel          = "topology.kubernetes.io/region" // The node label giving the region
-	secProvAttrib        = "objects"                       // The attribute used to pass the SecretProviderClass definition (with what to mount)
-	failoverRegionAttrib = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
-	usePodIdentityAttrib = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
-	preferredAddressTypeAttrib = "preferredAddressType"    // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
+	namespaceAttrib            = "csi.storage.k8s.io/pod.namespace"
+	acctAttrib                 = "csi.storage.k8s.io/serviceAccount.name"
+	podnameAttrib              = "csi.storage.k8s.io/pod.name"
+	regionAttrib               = "region"                        // The attribute name for the region in the SecretProviderClass
+	transAttrib                = "pathTranslation"               // Path translation char
+	regionLabel                = "topology.kubernetes.io/region" // The node label giving the region
+	secProvAttrib              = "objects"                       // The attribute used to pass the SecretProviderClass definition (with what to mount)
+	failoverRegionAttrib       = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
+	usePodIdentityAttrib       = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
+	preferredAddressTypeAttrib = "preferredAddressType"          // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
 )
 
 // A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.

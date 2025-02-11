@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	testNamespace        = "someNamespace"
-	testServiceAccount   = "someServiceAccount"
-	testRegion           = "someRegion"
+	testNamespace      = "someNamespace"
+	testServiceAccount = "someServiceAccount"
+	testRegion         = "someRegion"
 )
 
 // Mock STS client
