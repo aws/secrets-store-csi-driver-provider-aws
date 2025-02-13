@@ -35,12 +35,12 @@ func main() {
 
 	flag.Parse() // Parse command line flags
 
-	//socket on which to listen to for driver calls
+	// socket on which to listen to for driver calls
 	endpoint := fmt.Sprintf("%s/aws.sock", *endpointDir)
 	os.Remove(endpoint) // Make sure to start clean.
 	grpcSrv := grpc.NewServer()
 
-	//Gracefully terminate server on shutdown unix signals
+	// gracefully terminate server on shutdown unix signals
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
 
