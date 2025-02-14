@@ -227,7 +227,7 @@ func TestMissingPathJMES(t *testing.T) {
 	}
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestNewDescriptorList(t *testing.T) {
 	objects := `
           - objectName: secret1
@@ -259,7 +259,7 @@ func TestNewDescriptorList(t *testing.T) {
 
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestBadYaml(t *testing.T) {
 	objects := `
           - objectName: secret1
@@ -272,7 +272,7 @@ func TestBadYaml(t *testing.T) {
 	}
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestErrorYaml(t *testing.T) {
 	objects := `
           - objectName: secret1`
@@ -293,7 +293,7 @@ func TestEnumStrings(t *testing.T) {
 	}
 }
 
-//test separation/grouping into ssm/secretsmanager with valid parameters
+// test separation/grouping into ssm/secretsmanager with valid parameters
 func TestBadTrans(t *testing.T) {
 	objects := `
           - objectName: secret1
@@ -412,7 +412,7 @@ func TestNotTraversal(t *testing.T) {
 
 }
 
-//If the failoverObject exists, then the object must have an alias.
+// If the failoverObject exists, then the object must have an alias.
 func TestFallbackObjectRequiresAlias(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -425,7 +425,7 @@ func TestFallbackObjectRequiresAlias(t *testing.T) {
 	}
 }
 
-//If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (failover is not ARN).
+// If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (failover is not ARN).
 func TestFallbackNonARNStillNeedsObjectType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -439,7 +439,7 @@ func TestFallbackNonARNStillNeedsObjectType(t *testing.T) {
 	}
 }
 
-//If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (main objectName is not ARN).
+// If either the main objectname or failoverObject's object name are not arns, then the objectType must be specified (main objectName is not ARN).
 func TestBackupArnMustBePairedWithObjectType(t *testing.T) {
 	objects := `
     - objectName: "MySecret"
@@ -454,7 +454,7 @@ func TestBackupArnMustBePairedWithObjectType(t *testing.T) {
 	}
 }
 
-//If the failover descriptor is an ARN, and the objectType is specified, then they must match which provider to use.
+// If the failover descriptor is an ARN, and the objectType is specified, then they must match which provider to use.
 func TestBackupArnDoesNotMatchType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -469,7 +469,7 @@ func TestBackupArnDoesNotMatchType(t *testing.T) {
 	}
 }
 
-//The failoverObject must be a valid service name.
+// The failoverObject must be a valid service name.
 func TestBackupArnInvalidType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -483,7 +483,7 @@ func TestBackupArnInvalidType(t *testing.T) {
 	}
 }
 
-//Success case: both ARNs match.
+// Success case: both ARNs match.
 func TestBackupArnSuccess(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -497,7 +497,7 @@ func TestBackupArnSuccess(t *testing.T) {
 	}
 }
 
-//The main regions must now match.  This main ARN is for one region, and the main region is configured for a different one.
+// The main regions must now match.  This main ARN is for one region, and the main region is configured for a different one.
 func TestPrimaryArnRequiresRegionMatch(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -510,7 +510,7 @@ func TestPrimaryArnRequiresRegionMatch(t *testing.T) {
 	}
 }
 
-//The failover regions must now match. This failover ARN is for one region, and failover region is configured for a different one.
+// The failover regions must now match. This failover ARN is for one region, and failover region is configured for a different one.
 func TestBackupArnRequiresRegionMatch(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -524,7 +524,7 @@ func TestBackupArnRequiresRegionMatch(t *testing.T) {
 	}
 }
 
-//If a failoverObject is given, then a failover region must be given.
+// If a failoverObject is given, then a failover region must be given.
 func TestFallbackDataRequiresMultipleRegions(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
@@ -538,7 +538,7 @@ func TestFallbackDataRequiresMultipleRegions(t *testing.T) {
 	}
 }
 
-//If using ssmparameter and a failoverObject, then using both objectVersion and objectVersionLabel is invalid
+// If using ssmparameter and a failoverObject, then using both objectVersion and objectVersionLabel is invalid
 func TestObjectVersionAndLabelAreIncompatible(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
@@ -556,7 +556,7 @@ func TestObjectVersionAndLabelAreIncompatible(t *testing.T) {
 	}
 }
 
-//Validate that the mountpoint still follows the objectAlias, even if multiple regions are defined.
+// Validate that the mountpoint still follows the objectAlias, even if multiple regions are defined.
 func TestGetPathForMultiregion(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
@@ -578,7 +578,7 @@ func TestGetPathForMultiregion(t *testing.T) {
 
 }
 
-//A few objectVersion tests. The two must be equal.
+// A few objectVersion tests. The two must be equal.
 func TestVersionIdsMustMatch(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
@@ -597,7 +597,7 @@ func TestVersionIdsMustMatch(t *testing.T) {
 	}
 }
 
-//Test Version Ids acceptibal if they match.
+// Test Version Ids acceptibal if they match.
 func TestVersionidsMatch(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
