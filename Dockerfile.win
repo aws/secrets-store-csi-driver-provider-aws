@@ -1,0 +1,6 @@
+ARG WINDOWS_VERSION=2019
+FROM mcr.microsoft.com/windows/nanoserver:ltsc${WINDOWS_VERSION} as base
+
+COPY ./_output/secrets-store-csi-driver-provider-aws-amd64 /secrets-store-csi-driver-provider-aws.exe
+
+ENTRYPOINT ["/secrets-store-csi-driver-provider-aws.exe"]
