@@ -620,3 +620,146 @@ func TestVersionidsMatch(t *testing.T) {
 	}
 
 }
+
+// Test validateFilePermission function
+func TestValidateFilePermission(t *testing.T) {
+	descriptor := SecretDescriptor{}
+
+	checkNoError := func(t testing.TB, got error) {
+		t.Helper()
+
+		if got != nil {
+			t.Errorf("Unexpected error: %v", got)
+		}
+	}
+
+	checkErrorMessage := func(t testing.TB, got error, want string) {
+		t.Helper()
+
+		if got == nil {
+			t.Errorf("No error when expected error: %v ", want)
+		}
+
+		if got.Error() != want {
+			t.Errorf("got: %v want: %v", got, want)
+		}
+	}
+
+	t.Run("EmptyFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("")
+		checkNoError(t, got)
+	})
+
+	t.Run("CorrectOctalFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("0600")
+		checkNoError(t, got)
+	})
+
+	t.Run("InvalidFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("abc9")
+		want := "File permission must be valid 4 digit octal string: abc9"
+		checkErrorMessage(t, got, want)
+	})
+
+	t.Run("ShortFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("000")
+		want := "File permission must be valid 4 digit octal string: 000"
+		checkErrorMessage(t, got, want)
+	})
+
+	t.Run("LongFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("00000")
+		want := "File permission must be valid 4 digit octal string: 00000"
+		checkErrorMessage(t, got, want)
+	})
+}
+
+// Test getJmesSecretDescriptor function
+func TestGetJmesEntrySecretDescriptor(t *testing.T) {
+
+	TestDescriptor := func(filePermission string) SecretDescriptor {
+		return SecretDescriptor{
+			ObjectType:     "SecretsManager",
+			FilePermission: filePermission,
+		}
+	}
+
+	TestJmesPath := func(filePermission string) JMESPathEntry {
+		return JMESPathEntry{
+			FilePermission: filePermission,
+		}
+	}
+
+	checkPermissions := func(t testing.TB, got *SecretDescriptor, want string) {
+		t.Helper()
+		if got.FilePermission != want {
+			t.Errorf("got: %v want: %v", got.FilePermission, want)
+		}
+	}
+
+	t.Run("EmptyFilePermission", func(t *testing.T) {
+		descriptor := TestDescriptor("")
+		jmesPath := TestJmesPath("")
+		got := descriptor.getJmesEntrySecretDescriptor(&jmesPath)
+		checkPermissions(t, &got, "")
+	})
+
+	t.Run("InheritFromParent", func(t *testing.T) {
+		descriptor := TestDescriptor("0600")
+		jmesPath := TestJmesPath("")
+		got := descriptor.getJmesEntrySecretDescriptor(&jmesPath)
+		checkPermissions(t, &got, descriptor.FilePermission)
+	})
+
+	t.Run("OverrideParent", func(t *testing.T) {
+		descriptor := TestDescriptor("0600")
+		jmesPath := TestJmesPath("0777")
+		got := descriptor.getJmesEntrySecretDescriptor(&jmesPath)
+		checkPermissions(t, &got, jmesPath.FilePermission)
+	})
+}
+
+// Test the validatedescriptor function calls validate file permission
+func TestValidateDescriptorFilePermission(t *testing.T) {
+
+	TestDescriptor := func(descriptorPermission string, jmesPermission string) SecretDescriptor {
+		return SecretDescriptor{
+			ObjectName:     "foo",
+			ObjectType:     "secretsmanager",
+			FilePermission: descriptorPermission,
+			JMESPath: []JMESPathEntry{
+				{
+					Path:           "bar",
+					ObjectAlias:    "foobar",
+					FilePermission: jmesPermission,
+				},
+			},
+		}
+	}
+
+	t.Run("DescriptorValidPermission", func(t *testing.T) {
+		descriptor := TestDescriptor("0600", "0700")
+		got := descriptor.validateSecretDescriptor(singleRegion)
+		if got != nil {
+			t.Errorf("Unexpected Error %v", got)
+		}
+	})
+
+	t.Run("DescriptorInvalidPermission", func(t *testing.T) {
+		descriptor := TestDescriptor("abcd", "")
+		got := descriptor.validateSecretDescriptor(singleRegion)
+		want := "File permission must be valid 4 digit octal string: abcd"
+		if got == nil || got.Error() != want {
+			t.Errorf("got: %v want: %v", got, want)
+		}
+	})
+
+	t.Run("DescriptorInvalidjmesPermission", func(t *testing.T) {
+		descriptor := TestDescriptor("", "efgh")
+		got := descriptor.validateSecretDescriptor(singleRegion)
+		want := "File permission must be valid 4 digit octal string: efgh"
+		if got == nil || got.Error() != want {
+			t.Errorf("got: %v want: %v", got, want)
+		}
+	})
+}

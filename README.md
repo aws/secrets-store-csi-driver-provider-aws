@@ -192,6 +192,7 @@ The primary objects field of the SecretProviderClass can contain the following s
 * objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this is the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can be either the name or full ARN of the parameter.
 * objectType: This field is optional when using a Secrets Manager ARN for objectName, otherwise it is required. This field can be either "secretsmanager" or "ssmparameter".
 * objectAlias: This optional field specifies the file name under which the secret will be mounted. When not specified the file name defaults to objectName.
+* filePermission: This optional field expects a 4 digit string which specifies the file permission for the secret that will be mounted. When not specified this will default to "0644" permisions. Ensure the 4 digit string is a valid octal file permission.
 * objectVersion: This field is optional, and generally not recommended since updates to the secret require updating this field. For Secrets Manager this is the [VersionId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store, this is the optional [version number](https://docs.aws.amazon.com/systems-manager/latest/userguide/sysman-paramstore-versions.html#reference-parameter-version).
 * objectVersionLabel: This optional field specifies the alias used for the version. Most applications should not use this field since the most recent version of the secret is used by default. For Secrets Manager this is the [VersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store this is the optional [Parameter Label](https://docs.amazonaws.cn/en_us/systems-manager/latest/userguide/sysman-paramstore-labels.html).
 
@@ -230,6 +231,9 @@ The primary objects field of the SecretProviderClass can contain the following s
   If you use the jmesPath field,  you must provide the following two sub-fields:
   * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
   * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
+
+  You may pass an additional sub-field to specify the file permission:
+  * filePermission: This optional field expects a 4 digit string which specifies the file permission for the secret that will be mounted. When not specified this will default to the parent object's file permission.
 
 ## Additional Considerations
 
