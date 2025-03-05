@@ -11,7 +11,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -303,7 +302,7 @@ func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode o
 	}
 
 	// Write to a tempfile first
-	tmpFile, err := ioutil.TempFile(secret.Descriptor.GetMountDir(), secret.Descriptor.GetFileName())
+	tmpFile, err := os.CreateTemp(secret.Descriptor.GetMountDir(), secret.Descriptor.GetFileName())
 	if err != nil {
 		return nil, err
 	}
