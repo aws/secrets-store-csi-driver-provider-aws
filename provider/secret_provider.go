@@ -11,8 +11,7 @@ package provider
 import (
 	"context"
 
-	"github.com/aws/aws-sdk-go/aws/session"
-
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 )
 
@@ -26,22 +25,18 @@ type SecretProviderFactory struct {
 	Providers map[SecretType]SecretProvider // Maps secret type to the provider.
 }
 
-// The prototype for the provider factory fatory
-type ProviderFactoryFactory func(session []*session.Session, reigons []string) (factory *SecretProviderFactory)
+// SecretProviderMappingGenerator is a type for creating a new SecretProviderMapping with initialized providers
+type ProviderFactoryFactory func(configs []aws.Config, regions []string) (factory *SecretProviderFactory)
 
-// Creates the provider factory.
-//
-// This factory catagorizes the request and returns the correct concrete
-// provider implementation using the secret type.
-func NewSecretProviderFactory(sessions []*session.Session, regions []string) (factory *SecretProviderFactory) {
-
+// NewSecretProviderMappingGenerator creates a mapping of secret types to their provider implementations.
+// It initializes and returns a SecretProviderMapping containing concrete providers for each supported secret type.
+func NewSecretProviderFactory(configs []aws.Config, regions []string) (factory *SecretProviderFactory) {
 	return &SecretProviderFactory{
 		Providers: map[SecretType]SecretProvider{
-			SSMParameter:   NewParameterStoreProvider(sessions, regions),
-			SecretsManager: NewSecretsManagerProvider(sessions, regions),
+			SSMParameter:   NewParameterStoreProvider(configs, regions),
+			SecretsManager: NewSecretsManagerProvider(configs, regions),
 		},
 	}
-
 }
 
 // Factory method to get the correct secret provider for the request type.
