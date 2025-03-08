@@ -79,6 +79,12 @@ func NewServer(
 // Store or Secrets Manager) and write the secrets to the mount point. The
 // version ids of the secrets are then returned to the driver.
 func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.MountRequest) (response *v1alpha1.MountResponse, e error) {
+	// Log out the write mode
+	if s.driverWriteSecrets {
+		klog.Infof("Driver is configured to write secrets")
+	} else {
+		klog.Infof("Provider is configured to write secrets")
+	}
 
 	// Basic sanity check
 	if len(req.GetTargetPath()) == 0 {
@@ -168,9 +174,14 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 
 	// Write out the secrets to the mount point after everything is fetched.
 	var files []*v1alpha1.File
+	var permission os.FileMode
 	for _, secret := range fetchedSecrets {
-
-		file, err := s.writeFile(secret, filePermission)
+		permission = filePermission
+		if secret.Descriptor.FilePermission != "" {
+			parsedPermission, _ := strconv.ParseInt(secret.Descriptor.FilePermission, 8, 32)
+			permission = os.FileMode(parsedPermission)
+		}
+		file, err := s.writeFile(secret, permission)
 		if err != nil {
 			return nil, err
 		}

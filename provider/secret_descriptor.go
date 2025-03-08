@@ -33,6 +33,9 @@ type SecretDescriptor struct {
 	// One of secretsmanager or ssmparameter (not required when using full secrets manager ARN).
 	ObjectType string `json:"objectType"`
 
+	// Optional file permission (default to driver file permission).
+	FilePermission string `json:"filePermission"`
+
 	// Optional array to specify what json key value pairs to extract from a secret and mount as individual secrets
 	JMESPath []JMESPathEntry `json:"jmesPath"`
 
@@ -53,6 +56,9 @@ type JMESPathEntry struct {
 
 	//File name in which to store the secret in.
 	ObjectAlias string `json:"objectAlias"`
+
+	// Optional file permission (default to driver file permission).
+	FilePermission string `json:"filePermission"`
 }
 
 // An individual json key value pair to mount
@@ -145,11 +151,17 @@ func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 
 // Return a descriptor for a jmes object entry within the secret
 func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
+	permission := j.FilePermission
+	if permission == "" {
+		permission = p.FilePermission
+	}
+
 	return SecretDescriptor{
-		ObjectAlias: j.ObjectAlias,
-		ObjectType:  p.getObjectType(),
-		translate:   p.translate,
-		mountDir:    p.mountDir,
+		ObjectAlias:    j.ObjectAlias,
+		ObjectType:     p.getObjectType(),
+		translate:      p.translate,
+		mountDir:       p.mountDir,
+		FilePermission: permission,
 	}
 }
 
@@ -181,6 +193,24 @@ func (p *SecretDescriptor) GetObjectVersion(useFailoverRegion bool) (secretName 
 	return p.ObjectVersion
 }
 
+// Private helper to validate a filePermission
+//
+// This function validates the filePermission and ensures it is a valid 4 digit octal string
+func (p *SecretDescriptor) validateFilePermission(filePermission string) error {
+	// No file permission
+	if len(filePermission) == 0 {
+		return nil
+	}
+
+	match, _ := regexp.MatchString("^[0-7]{4}$", filePermission)
+
+	if !match {
+		return fmt.Errorf("File permission must be valid 4 digit octal string: %s", filePermission)
+	}
+
+	return nil
+}
+
 // Private helper to validate the contents of SecretDescriptor.
 //
 // This method is used to validate input before it is used by the rest of the
@@ -206,6 +236,12 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 		return fmt.Errorf("path can not contain ../: %s", p.ObjectName)
 	}
 
+	// Ensure the string file permission is valid octal
+	err = p.validateFilePermission(p.FilePermission)
+	if err != nil {
+		return err
+	}
+
 	//ensure each jmesPath entry has a path and an objectalias
 	for _, jmesPathEntry := range p.JMESPath {
 		if len(jmesPathEntry.Path) == 0 {
@@ -215,6 +251,13 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 		if len(jmesPathEntry.ObjectAlias) == 0 {
 			return fmt.Errorf("Object alias must be specified for JMES object")
 		}
+
+		// Validate the jmesPath has a valid filePermission
+		err = p.validateFilePermission(jmesPathEntry.FilePermission)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	if len(p.FailoverObject.ObjectName) > 0 {
