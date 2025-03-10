@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -321,10 +322,19 @@ func TestGetPath(t *testing.T) {
 	if len(descriptorList[SSMParameter]) != 1 || len(descriptorList[SecretsManager]) != 1 {
 		t.Fatalf("Missing descriptors")
 	}
-	if descriptorList[SSMParameter][0].GetMountPath() != "/mountpoint/parm1" {
+	
+	expectedParam := "/mountpoint/parm1"
+	expectedSecret := "/mountpoint/secret1"
+
+	if runtime.GOOS == "windows" {
+		expectedParam = "\\mountpoint\\parm1"
+		expectedSecret = "\\mountpoint\\secret1"
+	}
+
+	if descriptorList[SSMParameter][0].GetMountPath() != expectedParam {
 		t.Errorf("Bad mount path for SSM parameter")
 	}
-	if descriptorList[SecretsManager][0].GetMountPath() != "/mountpoint/secret1" {
+	if descriptorList[SecretsManager][0].GetMountPath() != expectedSecret {
 		t.Errorf("Bad mount path for secret")
 	}
 
@@ -572,7 +582,14 @@ func TestGetPathForMultiregion(t *testing.T) {
 	if len(descriptorList[SSMParameter]) != 1 {
 		t.Fatalf("Missing descriptors")
 	}
-	if descriptorList[SSMParameter][0].GetMountPath() != "/mountpoint/test" {
+	
+	expected := "/mountpoint/test"
+
+	if runtime.GOOS == "windows" {
+		expected = "\\mountpoint\\test"
+	}
+
+	if descriptorList[SSMParameter][0].GetMountPath() != expected {
 		t.Errorf("Bad mount path for SSM parameter")
 	}
 
@@ -615,7 +632,14 @@ func TestVersionidsMatch(t *testing.T) {
 	if len(descriptorList[SSMParameter]) != 1 {
 		t.Fatalf("Missing descriptors")
 	}
-	if descriptorList[SSMParameter][0].GetMountPath() != "/mountpoint/test" {
+	
+	expected := "/mountpoint/test"
+
+	if runtime.GOOS == "windows" {
+		expected = "\\mountpoint\\test"
+	}
+
+	if descriptorList[SSMParameter][0].GetMountPath() != expected {
 		t.Errorf("Bad mount path for SSM parameter")
 	}
 
