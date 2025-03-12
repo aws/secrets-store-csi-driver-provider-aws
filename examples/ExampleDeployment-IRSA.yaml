@@ -1,12 +1,12 @@
 kind: Service
 apiVersion: v1
 metadata:
-  name: nginx-deployment
+  name: nginx-irsa-deployment
   labels:
-    app: nginx
+    app: nginx-irsa
 spec:
   selector:
-    app: nginx
+    app: nginx-irsa
   ports:
     - protocol: TCP
       port: 80
@@ -15,29 +15,29 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nginx-deployment
+  name: nginx-irsa-deployment
   labels:
-    app: nginx
+    app: nginx-irsa
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: nginx
+      app: nginx-irsa
   template:
     metadata:
       labels:
-        app: nginx
+        app: nginx-irsa
     spec:
-      serviceAccountName: nginx-deployment-sa
+      serviceAccountName: nginx-irsa-deployment-sa
       volumes:
       - name: secrets-store-inline
         csi:
           driver: secrets-store.csi.k8s.io
           readOnly: true
           volumeAttributes:
-            secretProviderClass: "nginx-deployment-aws-secrets"
+            secretProviderClass: "nginx-irsa-deployment-aws-secrets"
       containers:
-      - name: nginx-deployment
+      - name: nginx-irsa-deployment
         image: nginx
         ports:
         - containerPort: 80
