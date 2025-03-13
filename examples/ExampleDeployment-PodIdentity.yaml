@@ -1,0 +1,47 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx-pod-identity-deployment
+  labels:
+    app: nginx-pod-identity
+spec:
+  selector:
+    app: nginx-pod-identity
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-pod-identity-deployment
+  labels:
+    app: nginx-pod-identity
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx-pod-identity
+  template:
+    metadata:
+      labels:
+        app: nginx-pod-identity
+    spec:
+      serviceAccountName: nginx-pod-identity-deployment-sa
+      volumes:
+        - name: secrets-store-inline
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: "nginx-pod-identity-deployment-aws-secrets"
+      containers:
+        - name: nginx-pod-identity-deployment
+          image: nginx
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true

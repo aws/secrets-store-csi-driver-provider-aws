@@ -262,6 +262,11 @@ func buildMountReq(dir string, tst testCase, curState []*v1alpha1.ObjectVersion)
 		attrMap["pathTranslation"] = translate
 	}
 
+	usePodIdentity := tst.attributes["usePodIdentity"]
+	if len(usePodIdentity) > 0 {
+		attrMap["usePodIdentity"] = usePodIdentity
+	}
+
 	objs, err := yaml.Marshal(tst.mountObjs)
 	if err != nil {
 		panic(err)
@@ -362,6 +367,34 @@ var mountTests []testCase = []testCase{
 	{ // Vanila success case.
 		testName:   "New Mount Success",
 		attributes: stdAttributes,
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []*ssm.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+				},
+			},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		expErr:  "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+			"TestParm1":   "parm1",
+		},
+		perms: "420",
+	},
+	{ // Vanila success case.
+		testName: "New Mount Success with usePodIdentity provided",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false",
+		},
 		mountObjs: []map[string]interface{}{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestParm1", "objectType": "ssmparameter"},
@@ -650,7 +683,7 @@ var mountTests []testCase = []testCase{
 		perms:      "",
 	},
 	{ // Verify failure when we can not initialize the auth session (no role).
-		testName: "Fail Session",
+		testName: "Fail IRSA Session",
 		attributes: map[string]string{
 			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
 			"nodeName": "fakeNode", "region": "", "roleARN": "",
@@ -663,6 +696,23 @@ var mountTests []testCase = []testCase{
 		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
 		expErr:     "An IAM role must be associated",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Verify failure when we can not initialize the auth session (incorrect usePodIdentity value).
+		testName: "Fail Pod Identity Session",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "usePodIdentity": "yes",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+			{"objectName": "TestParm1", "objectType": "ssmparameter"},
+		},
+		ssmRsp:     []*ssm.GetParametersOutput{},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "failed to parse usePodIdentity value",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -885,7 +935,7 @@ var mountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},
@@ -1854,7 +1904,7 @@ var writeOnlyMountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},
@@ -1880,7 +1930,7 @@ var writeOnlyMountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},
@@ -1910,7 +1960,7 @@ var noWriteMountTests []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters: []*ssm.Parameter{
-					&ssm.Parameter{Name: aws.String("/mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
+					{Name: aws.String("/mypath/TestParm1"), Value: aws.String("parm1"), Version: aws.Int64(1)},
 				},
 			},
 		},

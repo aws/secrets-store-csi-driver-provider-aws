@@ -27,12 +27,11 @@ import (
 // versions (rotation reconciler case), this implementation will use the lower
 // latency DescribeSecret call to first determine if the secret has been
 // updated.
-//
 type SecretsManagerProvider struct {
 	clients []SecretsManagerClient
 }
 
-//SecretsManager client with region
+// SecretsManager client with region
 type SecretsManagerClient struct {
 	Region     string
 	Client     secretsmanageriface.SecretsManagerAPI
@@ -44,7 +43,6 @@ type SecretsManagerClient struct {
 // This method iterates over all descriptors and requests a fetch. When
 // sucessfully fetched, then it continues until all descriptors have been fetched.
 // Once an error happens, it immediately returns the error.
-//
 func (p *SecretsManagerProvider) GetSecretValues(
 	ctx context.Context,
 	descriptors []*SecretDescriptor,
@@ -66,8 +64,8 @@ func (p *SecretsManagerProvider) GetSecretValues(
 //
 // This method iterates over all available clients in the SecretsManagerProvider.
 // It requests a fetch from each of them.  Once a fetch succeeds it returns the
-//  value. If a fetch fails all clients it returns all errors.
 //
+//	value. If a fetch fails all clients it returns all errors.
 func (p *SecretsManagerProvider) fetchSecretManagerValue(
 	ctx context.Context,
 	descriptor *SecretDescriptor,
@@ -100,7 +98,6 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 // This method checks if the secret is current. If a secret is not current
 // (or this is the first time), the secret is fetched, added to the list of
 // secrets, and the version information is updated in the current version map.
-//
 func (p *SecretsManagerProvider) fetchSecretManagerValueWithClient(
 	ctx context.Context,
 	client SecretsManagerClient,
@@ -166,7 +163,6 @@ func (p *SecretsManagerProvider) fetchSecretManagerValueWithClient(
 // information is fetched using DescribeSecret and this method checks if the
 // current version is labeled as current (AWSCURRENT) or has the label
 // sepecified via objectVersionLable (if any).
-//
 func (p *SecretsManagerProvider) isCurrent(
 	ctx context.Context,
 	client SecretsManagerClient,
@@ -211,7 +207,6 @@ func (p *SecretsManagerProvider) isCurrent(
 //
 // This method builds up the GetSecretValue request using the objectName from
 // the request and any objectVersion or objectVersionLabel parameters.
-//
 func (p *SecretsManagerProvider) fetchSecret(
 	ctx context.Context,
 	client SecretsManagerClient,
@@ -249,7 +244,6 @@ func (p *SecretsManagerProvider) fetchSecret(
 // Private helper to refesh a secret from its previously stored value.
 //
 // Reads a secret back in from the file system.
-//
 func (p *SecretsManagerProvider) reloadSecret(descriptor *SecretDescriptor) (val *SecretValue, e error) {
 
 	sValue, err := ioutil.ReadFile(descriptor.GetMountPath())
@@ -261,7 +255,6 @@ func (p *SecretsManagerProvider) reloadSecret(descriptor *SecretDescriptor) (val
 }
 
 // Factory methods to build a new SecretsManagerProvider
-//
 func NewSecretsManagerProviderWithClients(clients ...SecretsManagerClient) *SecretsManagerProvider {
 	return &SecretsManagerProvider{
 		clients: clients,
