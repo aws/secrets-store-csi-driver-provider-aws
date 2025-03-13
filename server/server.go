@@ -259,6 +259,11 @@ func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.Ver
 // See also: https://pkg.go.dev/k8s.io/client-go/kubernetes/typed/core/v1
 func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespace string, podName string) (reg string, err error) {
 
+	// Check if AWS_REGION environment variable is set
+	if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
+		return envRegion, nil
+	}
+
 	// Describe the pod to find the node: kubectl -o yaml -n <namespace> get pod <podid>
 	pod, err := s.k8sClient.Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
