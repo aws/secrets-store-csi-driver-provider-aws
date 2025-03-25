@@ -79,7 +79,7 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 ) (values []*SecretValue, err error) {
 
 	for _, client := range p.clients {
-		batchValues, err := p.fetchParameterStoreBatch(client, ctx, batchDescriptors, curMap)
+		batchValues, err := p.fetchParameterStoreBatch(ctx, client, batchDescriptors, curMap)
 
 		if utils.IsFatalError(err) {
 			return nil, err
@@ -104,8 +104,8 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 // if any parameter is failed to fetch, the parameter is returned as invalid parameter
 // and the version information is updated in the current version map.
 func (p *ParameterStoreProvider) fetchParameterStoreBatch(
-	client ParameterStoreClient,
 	ctx context.Context,
+	client ParameterStoreClient,
 	batchDescriptors []*SecretDescriptor,
 	curMap map[string]*v1alpha1.ObjectVersion,
 ) (v []*SecretValue, err error) {
