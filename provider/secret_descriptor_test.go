@@ -325,7 +325,7 @@ func TestConflictingAliasJMES(t *testing.T) {
                 objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("found duplicate object alias %s in JMES path entry %s", "aliasOne", ".username")
+	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: found duplicate object alias %s in JMES path entry %s", "aliasOne", ".username")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)

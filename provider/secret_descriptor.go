@@ -468,7 +468,7 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 
 		for _, jmesPathEntry := range descriptor.JMESPath {
 			if seenAliases[jmesPathEntry.ObjectAlias] {
-				return nil, fmt.Errorf("found duplicate object alias %s in JMES path entry %s", jmesPathEntry.ObjectAlias, jmesPathEntry.Path)
+				return nil, fmt.Errorf("Name already in use for objectAlias: found duplicate object alias %s in JMES path entry %s", jmesPathEntry.ObjectAlias, jmesPathEntry.Path)
 			}
 			seenAliases[jmesPathEntry.ObjectAlias] = true
 		}
