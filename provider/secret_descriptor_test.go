@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -621,6 +622,35 @@ func TestVersionidsMatch(t *testing.T) {
 
 }
 
+// Test GetFilePermission function
+func TestGetFilePermission(t *testing.T) {
+
+	TestDescriptor := func(filePermission string) SecretDescriptor {
+		return SecretDescriptor{
+			ObjectType:     "SecretsManager",
+			FilePermission: filePermission,
+		}
+	}
+
+	t.Run("DefaultFilePermission", func(t *testing.T) {
+		descriptor := TestDescriptor("")
+		got := descriptor.GetFilePermission()
+		want := os.FileMode(0644)
+		if got != want {
+			t.Errorf("got: %v != want: %v", got, want)
+		}
+	})
+
+	t.Run("CustomFilePermission", func(t *testing.T) {
+		descriptor := TestDescriptor("0600")
+		got := descriptor.GetFilePermission()
+		want := os.FileMode(0600)
+		if got != want {
+			t.Errorf("got: %v != want: %v", got, want)
+		}
+	})
+}
+
 // Test validateFilePermission function
 func TestValidateFilePermission(t *testing.T) {
 	descriptor := SecretDescriptor{}
@@ -645,6 +675,10 @@ func TestValidateFilePermission(t *testing.T) {
 		}
 	}
 
+	expectedErrorMessage := func(filePermission string) string {
+		return fmt.Sprintf("Invalid File Permission: %s", filePermission)
+	}
+
 	t.Run("EmptyFilePermission", func(t *testing.T) {
 		got := descriptor.validateFilePermission("")
 		checkNoError(t, got)
@@ -657,20 +691,17 @@ func TestValidateFilePermission(t *testing.T) {
 
 	t.Run("InvalidFilePermission", func(t *testing.T) {
 		got := descriptor.validateFilePermission("abc9")
-		want := "File permission must be valid 4 digit octal string: abc9"
-		checkErrorMessage(t, got, want)
+		checkErrorMessage(t, got, expectedErrorMessage("abc9"))
 	})
 
 	t.Run("ShortFilePermission", func(t *testing.T) {
 		got := descriptor.validateFilePermission("000")
-		want := "File permission must be valid 4 digit octal string: 000"
-		checkErrorMessage(t, got, want)
+		checkErrorMessage(t, got, expectedErrorMessage("000"))
 	})
 
 	t.Run("LongFilePermission", func(t *testing.T) {
 		got := descriptor.validateFilePermission("00000")
-		want := "File permission must be valid 4 digit octal string: 00000"
-		checkErrorMessage(t, got, want)
+		checkErrorMessage(t, got, expectedErrorMessage("00000"))
 	})
 }
 
@@ -737,6 +768,10 @@ func TestValidateDescriptorFilePermission(t *testing.T) {
 		}
 	}
 
+	expectedErrorMessage := func(filePermission string) string {
+		return fmt.Sprintf("Invalid File Permission: %s", filePermission)
+	}
+
 	t.Run("DescriptorValidPermission", func(t *testing.T) {
 		descriptor := TestDescriptor("0600", "0700")
 		got := descriptor.validateSecretDescriptor(singleRegion)
@@ -748,7 +783,7 @@ func TestValidateDescriptorFilePermission(t *testing.T) {
 	t.Run("DescriptorInvalidPermission", func(t *testing.T) {
 		descriptor := TestDescriptor("abcd", "")
 		got := descriptor.validateSecretDescriptor(singleRegion)
-		want := "File permission must be valid 4 digit octal string: abcd"
+		want := expectedErrorMessage("abcd")
 		if got == nil || got.Error() != want {
 			t.Errorf("got: %v want: %v", got, want)
 		}
@@ -757,7 +792,7 @@ func TestValidateDescriptorFilePermission(t *testing.T) {
 	t.Run("DescriptorInvalidjmesPermission", func(t *testing.T) {
 		descriptor := TestDescriptor("", "efgh")
 		got := descriptor.validateSecretDescriptor(singleRegion)
-		want := "File permission must be valid 4 digit octal string: efgh"
+		want := expectedErrorMessage("efgh")
 		if got == nil || got.Error() != want {
 			t.Errorf("got: %v want: %v", got, want)
 		}

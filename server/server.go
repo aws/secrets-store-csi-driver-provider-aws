@@ -123,6 +123,9 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		return nil, fmt.Errorf("failed to unmarshal file permission, error: %+v", err)
 	}
 
+	// Set the default file permission
+	provider.SetDefaultFilePermission(filePermission)
+
 	regions, err := s.getAwsRegions(region, failoverRegion, nameSpace, podName, ctx)
 	if err != nil {
 		klog.ErrorS(err, "Failed to initialize AWS session")
@@ -174,14 +177,8 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 
 	// Write out the secrets to the mount point after everything is fetched.
 	var files []*v1alpha1.File
-	var permission os.FileMode
 	for _, secret := range fetchedSecrets {
-		permission = filePermission
-		if secret.Descriptor.FilePermission != "" {
-			parsedPermission, _ := strconv.ParseInt(secret.Descriptor.FilePermission, 8, 32)
-			permission = os.FileMode(parsedPermission)
-		}
-		file, err := s.writeFile(secret, permission)
+		file, err := s.writeFile(secret, secret.Descriptor.GetFilePermission())
 		if err != nil {
 			return nil, err
 		}

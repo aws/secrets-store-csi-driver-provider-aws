@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws/arn"
@@ -13,6 +14,12 @@ import (
 
 // An RE pattern to check for bad paths
 var badPathRE = regexp.MustCompile("(/\\.\\./)|(^\\.\\./)|(/\\.\\.$)")
+
+// An RE pattern to check for valid file permission
+var validFilePermissionRE = regexp.MustCompile("^[0-7]{4}$")
+
+// Default file permission
+var defaultFilePermission = os.FileMode(0644)
 
 // An individual record from the mount request indicating the secret to be
 // fetched and mounted.
@@ -71,6 +78,11 @@ type FailoverObjectEntry struct {
 
 	// Optional version/stage label of the secret (defaults to latest).
 	ObjectVersionLabel string `json:"objectVersionLabel"`
+}
+
+// Helper function to set the default file permission
+func SetDefaultFilePermission(defaultFilePermission os.FileMode) {
+	defaultFilePermission = defaultFilePermission
 }
 
 // Enum of supported secret types
@@ -193,6 +205,15 @@ func (p *SecretDescriptor) GetObjectVersion(useFailoverRegion bool) (secretName 
 	return p.ObjectVersion
 }
 
+// Returns the secret descriptor file permission in octal
+func (p *SecretDescriptor) GetFilePermission() (filePermission os.FileMode) {
+	if len(p.FilePermission) == 0 {
+		return defaultFilePermission
+	}
+	parsedPermission, _ := strconv.ParseInt(p.FilePermission, 8, 32)
+	return os.FileMode(parsedPermission)
+}
+
 // Private helper to validate a filePermission
 //
 // This function validates the filePermission and ensures it is a valid 4 digit octal string
@@ -202,10 +223,8 @@ func (p *SecretDescriptor) validateFilePermission(filePermission string) error {
 		return nil
 	}
 
-	match, _ := regexp.MatchString("^[0-7]{4}$", filePermission)
-
-	if !match {
-		return fmt.Errorf("File permission must be valid 4 digit octal string: %s", filePermission)
+	if !validFilePermissionRE.MatchString(filePermission) {
+		return fmt.Errorf("Invalid File Permission: %s", filePermission)
 	}
 
 	return nil
