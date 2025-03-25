@@ -2579,6 +2579,71 @@ func TestNoPath(t *testing.T) {
 
 }
 
+func TestGetRegionFromNodeWithAWSRegionEnvVar(t *testing.T) {
+	// Test with AWS_REGION set
+	os.Setenv("AWS_REGION", "us-west-2")
+	defer os.Unsetenv("AWS_REGION")
+
+	svr := newServerWithMocks(&testCase{
+		testName: "Get Region From AWS_REGION Env",
+		attributes: map[string]string{
+			"namespace": "fakeNS",
+			"podName":   "fakePod",
+			"nodeName":  "fakeNode",
+		},
+	}, false)
+
+	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
+
+	if err != nil {
+		t.Fatalf("Expected no error with AWS_REGION set, got: %v", err)
+	}
+	if region != "us-west-2" {
+		t.Fatalf("Expected region us-west-2, got: %s", region)
+	}
+}
+
+func TestGetRegionFromNodeWithNodeLabels(t *testing.T) {
+	// Test with AWS_REGION not set
+	os.Unsetenv("AWS_REGION")
+
+	svr := newServerWithMocks(&testCase{
+		testName: "Get Region From Node Labels",
+		attributes: map[string]string{
+			"namespace": "fakeNS",
+			"podName":   "fakePod",
+			"nodeName":  "fakeNode",
+		},
+	}, false)
+
+	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
+	if err != nil {
+		t.Fatalf("Expected no error with node labels, got: %v", err)
+	}
+	if region != "fakeRegion" {
+		t.Fatalf("Expected region fakeRegion, got: %s", region)
+	}
+}
+
+func TestGetRegionFromNodeError(t *testing.T) {
+	// Test error case when no region available
+	os.Unsetenv("AWS_REGION")
+
+	svr := newServerWithMocks(&testCase{
+		testName: "Get Region Error",
+		attributes: map[string]string{
+			"namespace": "fakeNS",
+			"podName":   "fakePod",
+			"nodeName":  "FailNode",
+		},
+	}, false)
+
+	_, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
+	if err == nil {
+		t.Fatal("Expected error when no region available")
+	}
+}
+
 // Make sure the Version call works
 func TestDriverVersion(t *testing.T) {
 
