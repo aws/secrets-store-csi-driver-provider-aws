@@ -141,7 +141,8 @@ func TestSSMBothVersionandLabel(t *testing.T) {
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
-func TestConflictingName(t *testing.T) {
+// Conflicting name; alias and version label not present -- should throw
+func TestConflictingNameWoAliasAndVersionLabel(t *testing.T) {
 	objects :=
 		`
         - objectName: secret1
@@ -150,10 +151,145 @@ func TestConflictingName(t *testing.T) {
           objectType: ssmparameter`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectName: %s", "secret1")
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s with no object alias or version label", "secret1")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name and alias; version label not present -- should throw
+func TestConflictingNameAndAliasWoVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s and object alias %s with no version label", "secret1", "aliasOne")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name and alias; version label present -- should throw
+func TestConflictingNameAndAliasWithVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found duplicate object alias %s", "aliasOne")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name; alias present, version label not present -- should not throw
+func TestConflictingNameAndNotAliasWoVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasTwo
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
+	}
+}
+
+// Conflicting name; alias and version label present -- should not throw
+func TestConflictingNameAndNotAliasWithVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasTwo
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
+	}
+}
+
+// Conflicting name and version label; alias not present -- should throw
+func TestConflictingNameAndVersionLabelWoAlias(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s and version label %s with no object alias", "secret1", "AWSCURRENT")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name; version label present, alias not present -- should not throw
+func TestConflictingNameAndNotVersionLabelWoAlias(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
+	}
+}
+
+// Conflicting name; version label and alias present -- should not throw
+func TestConflictingNameWithAliasAndVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasTwo
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
 	}
 }
 
@@ -168,7 +304,7 @@ func TestConflictingAlias(t *testing.T) {
             objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: %s", "aliasOne")
+	expectedErrorMessage := fmt.Sprintf("found duplicate object alias %s", "aliasOne")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -188,7 +324,7 @@ func TestConflictingAliasJMES(t *testing.T) {
                 objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: %s", "aliasOne")
+	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: found duplicate object alias %s in JMES path entry %s", "aliasOne", ".username")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -416,7 +552,7 @@ func TestNotTraversal(t *testing.T) {
 func TestFallbackObjectRequiresAlias(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: 
+      failoverObject:
         objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"`
 
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -429,7 +565,7 @@ func TestFallbackObjectRequiresAlias(t *testing.T) {
 func TestFallbackNonARNStillNeedsObjectType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "MySecret"}        
+      failoverObject: {objectName: "MySecret"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -444,7 +580,7 @@ func TestBackupArnMustBePairedWithObjectType(t *testing.T) {
 	objects := `
     - objectName: "MySecret"
       objectAlias: test
-      failoverObject: 
+      failoverObject:
          objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"`
 
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-2", "us-west-1"})
@@ -473,7 +609,7 @@ func TestBackupArnDoesNotMatchType(t *testing.T) {
 func TestBackupArnInvalidType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "arn:aws:bad:us-west-2:123456789012:secret:secret1"}	  
+      failoverObject: {objectName: "arn:aws:bad:us-west-2:123456789012:secret:secret1"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -487,7 +623,7 @@ func TestBackupArnInvalidType(t *testing.T) {
 func TestBackupArnSuccess(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}	 
+      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -528,7 +664,7 @@ func TestBackupArnRequiresRegionMatch(t *testing.T) {
 func TestFallbackDataRequiresMultipleRegions(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}	 
+      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1"})
@@ -543,7 +679,7 @@ func TestObjectVersionAndLabelAreIncompatible(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
       objectType: ssmparameter
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
         objectVersion:      VersionId
         objectVersionLabel: MyLabel
@@ -561,7 +697,7 @@ func TestGetPathForMultiregion(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
       objectType: ssmparameter
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
       objectAlias: test
     `
@@ -584,7 +720,7 @@ func TestVersionIdsMustMatch(t *testing.T) {
     - objectName: "MySecret1"
       objectType: ssmparameter
       objectVersion:  OldVersionId
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
         objectVersion:      ADifferentVersionId
       objectAlias: test
@@ -603,7 +739,7 @@ func TestVersionidsMatch(t *testing.T) {
     - objectName: "MySecret1"
       objectType: ssmparameter
       objectVersion:  VersionId
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
         objectVersion:  VersionId
       objectAlias: test
