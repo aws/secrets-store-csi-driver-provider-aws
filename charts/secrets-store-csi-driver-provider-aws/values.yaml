@@ -8,6 +8,8 @@ fullnameOverride: ""
 providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
 kubeletPath: "/var/lib/kubelet"
 
+driverWritesSecrets: false
+
 podLabels: {}
 podAnnotations: {}
 
