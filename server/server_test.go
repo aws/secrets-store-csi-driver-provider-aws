@@ -1095,8 +1095,8 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		brReqErr: awserr.NewRequestFailure(
 			awserr.New(secretsmanager.ErrCodeInternalServiceError, "An error occurred on the server side.", fmt.Errorf("")),
 			500, ""),
-		expErr:     "Failed to fetch secret from all regions",
-		brExpErr:   "Failed to fetch secret from all regions:",
+		expErr:     "Failed to fetch secret from all regions. Verify secret exists and required permissions are granted for",
+		brExpErr:   "Failed to fetch secret from all regions. Verify secret exists and required permissions are granted for:",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
