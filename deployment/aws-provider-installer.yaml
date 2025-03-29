@@ -88,3 +88,58 @@ spec:
             type: DirectoryOrCreate
       nodeSelector:
         kubernetes.io/os: linux
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  namespace: kube-system
+  name: csi-secrets-store-provider-aws-windows
+  labels:
+    app: csi-secrets-store-provider-aws-windows
+spec:
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: csi-secrets-store-provider-aws-windows
+  template:
+    metadata:
+      labels:
+        app: csi-secrets-store-provider-aws-windows
+    spec:
+      serviceAccountName: csi-secrets-store-provider-aws
+      hostNetwork: false
+      containers:
+        - name: provider-aws-installer
+          image: ghcr.io/saedx1/secrets-store-csi-driver-provider-aws:1.0.0
+          imagePullPolicy: Always
+          args:
+              - --provider-volume=C:\k\secrets-store-csi-providers
+          resources:
+            requests:
+              cpu: 50m
+              memory: 100Mi
+            limits:
+              cpu: 50m
+              memory: 100Mi
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - mountPath: C:\k\secrets-store-csi-providers
+              name: providervol
+            - name: mountpoint-dir
+              mountPath: C:\var\lib\kubelet\pods
+              mountPropagation: HostToContainer
+      volumes:
+        - name: providervol
+          hostPath:
+            path: C:\k\secrets-store-csi-providers
+        - name: mountpoint-dir
+          hostPath:
+            path: C:\var\lib\kubelet\pods
+            type: DirectoryOrCreate
+      tolerations:
+        - operator: Exists
+      nodeSelector:
+        kubernetes.io/os: windows
