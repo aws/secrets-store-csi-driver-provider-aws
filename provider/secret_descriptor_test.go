@@ -152,7 +152,7 @@ func TestConflictingNameWoAliasAndVersionLabel(t *testing.T) {
           objectType: ssmparameter`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s with no object alias or version label", "secret1")
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, no object alias, and no version label", "secret1")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -171,7 +171,7 @@ func TestConflictingNameAndAliasWoVersionLabel(t *testing.T) {
           objectType: ssmparameter`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s and object alias %s with no version label", "secret1", "aliasOne")
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, duplicate object alias %s, and no version label", "secret1", "aliasOne")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -249,7 +249,7 @@ func TestConflictingNameAndVersionLabelWoAlias(t *testing.T) {
           objectType: ssmparameter`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s and version label %s with no object alias", "secret1", "AWSCURRENT")
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, no object alias, and duplicate version label %s", "secret1", "AWSCURRENT")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)

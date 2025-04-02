@@ -424,28 +424,33 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 			descHasVersionLabel := descriptor.ObjectVersionLabel != ""
 			foundHasVersionLabel := found.ObjectVersionLabel != ""
 
-			if descHasAlias && foundHasAlias {
-				if descriptor.ObjectAlias == found.ObjectAlias {
-					if descHasVersionLabel && foundHasVersionLabel {
-						if descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
-							// Case 3
-							return nil, fmt.Errorf("found descriptor with duplicate object name %s, object alias %s, and version label %s", descriptor.ObjectName, descriptor.ObjectAlias, descriptor.ObjectVersionLabel)
-						}
-					} else {
-						// Case 1
-						return nil, fmt.Errorf("found descriptor with duplicate object name %s and object alias %s with no version label", descriptor.ObjectName, descriptor.ObjectAlias)
-					}
-				}
-			} else {
-				if descHasVersionLabel && foundHasVersionLabel {
-					if descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
-						// Case 2
-						return nil, fmt.Errorf("found descriptor with duplicate object name %s and version label %s with no object alias", descriptor.ObjectName, descriptor.ObjectVersionLabel)
-					}
-				} else {
-					// Case 4
-					return nil, fmt.Errorf("found descriptor with duplicate object name %s with no object alias or version label", descriptor.ObjectName)
-				}
+			errorPrefix := fmt.Errorf("found descriptor with duplicate object name %s", descriptor.ObjectName)
+
+			// Case 1
+			if descHasAlias && foundHasAlias && !descHasVersionLabel && !foundHasVersionLabel &&
+				descriptor.ObjectAlias == found.ObjectAlias {
+				return nil, fmt.Errorf("%s, duplicate object alias %s, and no version label",
+					errorPrefix, descriptor.ObjectAlias)
+			}
+
+			// Case 2
+			if !descHasAlias && !foundHasAlias && descHasVersionLabel && foundHasVersionLabel &&
+				descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
+				return nil, fmt.Errorf("%s, no object alias, and duplicate version label %s",
+					errorPrefix, descriptor.ObjectVersionLabel)
+			}
+
+			// Case 3
+			if descHasAlias && foundHasAlias && descHasVersionLabel && foundHasVersionLabel &&
+				descriptor.ObjectAlias == found.ObjectAlias &&
+				descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
+				return nil, fmt.Errorf("%s, duplicate object alias %s, and duplicate version label %s",
+					errorPrefix, descriptor.ObjectAlias, descriptor.ObjectVersionLabel)
+			}
+
+			// Case 4
+			if !descHasAlias && !foundHasAlias && !descHasVersionLabel && !foundHasVersionLabel {
+				return nil, fmt.Errorf("%s, no object alias, and no version label", errorPrefix)
 			}
 		}
 		// Add the descriptor to the seenNames map after validation
