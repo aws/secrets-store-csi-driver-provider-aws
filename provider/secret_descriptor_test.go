@@ -142,7 +142,7 @@ func TestSSMBothVersionandLabel(t *testing.T) {
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
-// Conflicting name; alias and version label not present -- should throw
+// Conflicting name; alias and version label not present -- should throw (case 4)
 func TestConflictingNameWoAliasAndVersionLabel(t *testing.T) {
 	objects :=
 		`
@@ -159,7 +159,7 @@ func TestConflictingNameWoAliasAndVersionLabel(t *testing.T) {
 	}
 }
 
-// Conflicting name and alias; version label not present -- should throw
+// Conflicting name and alias; version label not present -- should throw (case 1)
 func TestConflictingNameAndAliasWoVersionLabel(t *testing.T) {
 	objects :=
 		`
@@ -237,7 +237,7 @@ func TestConflictingNameAndNotAliasWithVersionLabel(t *testing.T) {
 	}
 }
 
-// Conflicting name and version label; alias not present -- should throw
+// Conflicting name and version label; alias not present -- should throw (case 2)
 func TestConflictingNameAndVersionLabelWoAlias(t *testing.T) {
 	objects :=
 		`
@@ -250,6 +250,27 @@ func TestConflictingNameAndVersionLabelWoAlias(t *testing.T) {
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
 	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, no object alias, and duplicate version label %s", "secret1", "AWSCURRENT")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name, alias, and version label -- should throw (case 3)
+func TestConflictingNameAndVersionLabelAndAlias(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, duplicate object alias %s, and duplicate version label %s", "secret1", "aliasOne", "AWSCURRENT")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
