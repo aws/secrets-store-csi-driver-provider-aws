@@ -20,9 +20,11 @@ jobs:
 
       - name: Check Formatting
         run: |
-          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-            gofmt -s -l .
-            echo "Please format Go code by running: go fmt ./..."
+          unformatted=$(gofmt -s -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::The following files are not formatted properly:"
+            echo "$unformatted"
+            echo "Please run `gofmt -s -w .` to format your code."
             exit 1
           fi
 
