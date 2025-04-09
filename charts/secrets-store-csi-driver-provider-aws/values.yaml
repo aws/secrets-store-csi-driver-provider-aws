@@ -3,10 +3,13 @@ image:
   pullPolicy: IfNotPresent
   tag: 1.0.r2-80-g8244505-2025.02.10.18.44
 
+awsRegion: ""
 nameOverride: ""
 fullnameOverride: ""
 providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
 kubeletPath: "/var/lib/kubelet"
+
+driverWritesSecrets: false
 
 podLabels: {}
 podAnnotations: {}
