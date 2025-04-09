@@ -167,8 +167,8 @@ sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8/go.mod h1:mdzfpAEoE6DHQEN0uh
 sigs.k8s.io/randfill v0.0.0-20250304075658-069ef1bbf016/go.mod h1:XeLlZ/jmk4i1HRopwe7/aU3H5n1zNUcX6TM94b3QxOY=
 sigs.k8s.io/randfill v1.0.0 h1:JfjMILfT8A6RbawdsK2JXGBR5AQVfd+9TbzrlneTyrU=
 sigs.k8s.io/randfill v1.0.0/go.mod h1:XeLlZ/jmk4i1HRopwe7/aU3H5n1zNUcX6TM94b3QxOY=
-sigs.k8s.io/secrets-store-csi-driver v1.4.8 h1:YmL0lx9HMYqeZCnLyOZRMuGAZXmP/e42UGCCAnMKjgE=
-sigs.k8s.io/secrets-store-csi-driver v1.4.8/go.mod h1:IawZyjzh3xGt6hHdckJUf3ls04O0zG5H550PEZz/beo=
+sigs.k8s.io/secrets-store-csi-driver v1.5.0 h1:j55i0V8jbNiYXv/18/ThjTr2x43jnlxs5MfCNEu/wE8=
+sigs.k8s.io/secrets-store-csi-driver v1.5.0/go.mod h1:Pn1YIev3/FKaW4KRwQ4oHLL6D3jem6wqyZF/+EV7Pig=
 sigs.k8s.io/structured-merge-diff/v4 v4.6.0 h1:IUA9nvMmnKWcj5jl84xn+T5MnlZKThmUW1TdblaLVAc=
 sigs.k8s.io/structured-merge-diff/v4 v4.6.0/go.mod h1:dDy58f92j70zLsuZVuUX5Wp9vtxXpaZnkPGWeqDfCps=
 sigs.k8s.io/yaml v1.4.0 h1:Mk1wCc2gy/F0THH0TAp1QYyJNzRm2KCLy3o5ASXVI5E=
