@@ -18,4 +18,7 @@
 .vscode/
 _output
 
+# JetBrains
+.idea/
+
 secrets-store-csi-driver-provider-aws
