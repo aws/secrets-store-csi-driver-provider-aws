@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -297,7 +296,7 @@ func validateMounts(t *testing.T, dir string, tst testCase, rsp *v1alpha1.MountR
 
 	// Check for the expected secrets
 	for file, val := range tst.expSecrets {
-		secretVal, err := ioutil.ReadFile(filepath.Join(dir, file))
+		secretVal, err := os.ReadFile(filepath.Join(dir, file))
 		if err != nil {
 			t.Errorf("%s: Can not read file %s", tst.testName, file)
 			return false
@@ -349,7 +348,7 @@ func validateResponse(t *testing.T, dir string, tst testCase, rsp *v1alpha1.Moun
 			t.Errorf("%s: could not create base directory: %v", tst.testName, err)
 			return false
 		}
-		if err := ioutil.WriteFile(fullPath, secretVal, os.FileMode(perm)); err != nil {
+		if err := os.WriteFile(fullPath, secretVal, os.FileMode(perm)); err != nil {
 			t.Errorf("%s: could not write secret: %v", tst.testName, err)
 			return false
 		}
@@ -1994,11 +1993,7 @@ func TestMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			dir, err := ioutil.TempDir("", strings.Map(nameMapper, tst.testName))
-			if err != nil {
-				panic(err)
-			}
-			defer os.RemoveAll(dir) // Cleanup
+			dir := t.TempDir() // t.TempDir() handles cleanup automatically
 
 			svr := newServerWithMocks(&tst, false)
 
@@ -2035,11 +2030,7 @@ func TestMountsNoWrite(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			dir, err := ioutil.TempDir("", strings.Map(nameMapper, tst.testName))
-			if err != nil {
-				panic(err)
-			}
-			defer os.RemoveAll(dir) // Cleanup
+			dir := t.TempDir() // t.TempDir() handles cleanup automatically
 
 			svr := newServerWithMocks(&tst, true)
 
@@ -2452,11 +2443,7 @@ var remountTests []testCase = []testCase{
 // Validate rotation
 func TestReMounts(t *testing.T) {
 
-	dir, err := ioutil.TempDir("", "TestReMounts")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(dir) // Cleanup
+	dir := t.TempDir() // t.TempDir() handles cleanup automatically
 
 	curState := []*v1alpha1.ObjectVersion{}
 
@@ -2494,11 +2481,7 @@ func TestReMounts(t *testing.T) {
 // Validate rotation
 func TestNoWriteReMounts(t *testing.T) {
 
-	dir, err := ioutil.TempDir("", "TestReMounts")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(dir) // Cleanup
+	dir := t.TempDir() // t.TempDir() handles cleanup automatically
 
 	curState := []*v1alpha1.ObjectVersion{}
 
