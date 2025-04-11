@@ -1,11 +1,12 @@
 package credential_provider
 
 import (
+	"strings"
+	"testing"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"strings"
-	"testing"
 )
 
 const (
