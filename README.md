@@ -56,3 +56,5 @@ The following table lists the configurable parameters of the csi-secrets-store-p
 | `podAnnotations` | Additional pod annotations| `{}` |
 | `updateStrategy` | Configure a custom update strategy for the daemonset on nodes | `RollingUpdate`|
 | `rbac.install` | Install default service account | true |
+| `priorityClassName` | Indicates the importance of a Pod relative to other Pods| `""` |
+
