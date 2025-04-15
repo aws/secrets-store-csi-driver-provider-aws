@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws/arn"
@@ -13,6 +14,12 @@ import (
 
 // An RE pattern to check for bad paths
 var badPathRE = regexp.MustCompile("(/\\.\\./)|(^\\.\\./)|(/\\.\\.$)")
+
+// An RE pattern to check for valid file permission
+var validFilePermissionRE = regexp.MustCompile("^[0-7]{4}$")
+
+// Default file permission
+var defaultFilePermission = os.FileMode(0644)
 
 // An individual record from the mount request indicating the secret to be
 // fetched and mounted.
@@ -32,6 +39,9 @@ type SecretDescriptor struct {
 
 	// One of secretsmanager or ssmparameter (not required when using full secrets manager ARN).
 	ObjectType string `json:"objectType"`
+
+	// Optional file permission (default to driver file permission).
+	FilePermission string `json:"filePermission"`
 
 	// Optional array to specify what json key value pairs to extract from a secret and mount as individual secrets
 	JMESPath []JMESPathEntry `json:"jmesPath"`
@@ -53,6 +63,9 @@ type JMESPathEntry struct {
 
 	//File name in which to store the secret in.
 	ObjectAlias string `json:"objectAlias"`
+
+	// Optional file permission (default to driver file permission).
+	FilePermission string `json:"filePermission"`
 }
 
 // An individual json key value pair to mount
@@ -65,6 +78,11 @@ type FailoverObjectEntry struct {
 
 	// Optional version/stage label of the secret (defaults to latest).
 	ObjectVersionLabel string `json:"objectVersionLabel"`
+}
+
+// Helper function to set the default file permission
+func SetDefaultFilePermission(defaultFilePermission os.FileMode) {
+	defaultFilePermission = defaultFilePermission
 }
 
 // Enum of supported secret types
@@ -145,11 +163,17 @@ func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 
 // Return a descriptor for a jmes object entry within the secret
 func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
+	permission := j.FilePermission
+	if len(permission) == 0 {
+		permission = p.FilePermission
+	}
+
 	return SecretDescriptor{
-		ObjectAlias: j.ObjectAlias,
-		ObjectType:  p.getObjectType(),
-		translate:   p.translate,
-		mountDir:    p.mountDir,
+		ObjectAlias:    j.ObjectAlias,
+		ObjectType:     p.getObjectType(),
+		translate:      p.translate,
+		mountDir:       p.mountDir,
+		FilePermission: permission,
 	}
 }
 
@@ -181,6 +205,31 @@ func (p *SecretDescriptor) GetObjectVersion(useFailoverRegion bool) (secretName 
 	return p.ObjectVersion
 }
 
+// Returns the secret descriptor file permission in octal
+func (p *SecretDescriptor) GetFilePermission() (filePermission os.FileMode) {
+	if len(p.FilePermission) == 0 {
+		return defaultFilePermission
+	}
+	parsedPermission, _ := strconv.ParseInt(p.FilePermission, 8, 32)
+	return os.FileMode(parsedPermission)
+}
+
+// Private helper to validate a filePermission
+//
+// This function validates the filePermission and ensures it is a valid 4 digit octal string
+func (p *SecretDescriptor) validateFilePermission(filePermission string) error {
+	// No file permission
+	if len(filePermission) == 0 {
+		return nil
+	}
+
+	if !validFilePermissionRE.MatchString(filePermission) {
+		return fmt.Errorf("Invalid File Permission: %s", filePermission)
+	}
+
+	return nil
+}
+
 // Private helper to validate the contents of SecretDescriptor.
 //
 // This method is used to validate input before it is used by the rest of the
@@ -206,6 +255,12 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 		return fmt.Errorf("path can not contain ../: %s", p.ObjectName)
 	}
 
+	// Ensure the string file permission is valid octal
+	err = p.validateFilePermission(p.FilePermission)
+	if err != nil {
+		return err
+	}
+
 	//ensure each jmesPath entry has a path and an objectalias
 	for _, jmesPathEntry := range p.JMESPath {
 		if len(jmesPathEntry.Path) == 0 {
@@ -215,6 +270,13 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 		if len(jmesPathEntry.ObjectAlias) == 0 {
 			return fmt.Errorf("Object alias must be specified for JMES object")
 		}
+
+		// Validate the jmesPath has a valid filePermission
+		err = p.validateFilePermission(jmesPathEntry.FilePermission)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	if len(p.FailoverObject.ObjectName) > 0 {
