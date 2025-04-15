@@ -164,7 +164,7 @@ func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 // Return a descriptor for a jmes object entry within the secret
 func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
 	permission := j.FilePermission
-	if permission == "" {
+	if len(permission) == 0 {
 		permission = p.FilePermission
 	}
 
