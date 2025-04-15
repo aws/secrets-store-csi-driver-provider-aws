@@ -56,6 +56,13 @@ type SecretDescriptor struct {
 	mountDir string `json:"-"`
 }
 
+// Slice of the above type used for validation in NewSecretDescriptorList
+type SecretDescriptorSlice struct {
+	ObjectAlias string `json:"objectAlias"`
+
+	ObjectVersionLabel string `json:"objectVersionLabel"`
+}
+
 // An individual json key value pair to mount
 type JMESPathEntry struct {
 	//JMES path to use for retrieval
@@ -385,7 +392,8 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 
 	// Validate each record and check for duplicates
 	groups := make(map[SecretType][]*SecretDescriptor, 0)
-	names := make(map[string]bool)
+	seenNames := make(map[string]SecretDescriptorSlice)
+	seenAliases := make(map[string]bool)
 	for _, descriptor := range descriptors {
 
 		descriptor.translate = translate
@@ -399,17 +407,64 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 		sType := descriptor.GetSecretType()
 		groups[sType] = append(groups[sType], descriptor)
 
-		// Check for duplicate names
-		if names[descriptor.ObjectName] {
-			return nil, fmt.Errorf("Name already in use for objectName: %s", descriptor.ObjectName)
-		}
-		names[descriptor.ObjectName] = true
+		// We iterate over the descriptors, checking each one for duplicates and then adding it to the seenNames map.
+		// There are 4 cases in which a validation error is thrown when a descriptor with a duplicate object name is found:
+		// -------------------------------------------
+		// | # | OBJECT ALIAS | OBJECT VERSION LABEL |
+		// |---|--------------|----------------------|
+		// | 1 | duplicate    | empty                |
+		// | 2 | empty        | duplicate            |
+		// | 3 | duplicate    | duplicate            |
+		// | 4 | empty        | empty                |
+		// -------------------------------------------
+		found, ok := seenNames[descriptor.ObjectName]
+		if ok {
+			descHasAlias := descriptor.ObjectAlias != ""
+			foundHasAlias := found.ObjectAlias != ""
+			descHasVersionLabel := descriptor.ObjectVersionLabel != ""
+			foundHasVersionLabel := found.ObjectVersionLabel != ""
 
-		if len(descriptor.ObjectAlias) > 0 {
-			if names[descriptor.ObjectAlias] {
-				return nil, fmt.Errorf("Name already in use for objectAlias: %s", descriptor.ObjectAlias)
+			errorPrefix := fmt.Errorf("found descriptor with duplicate object name %s", descriptor.ObjectName)
+
+			// Case 1
+			if descHasAlias && foundHasAlias && !descHasVersionLabel && !foundHasVersionLabel &&
+				descriptor.ObjectAlias == found.ObjectAlias {
+				return nil, fmt.Errorf("%s, duplicate object alias %s, and no version label",
+					errorPrefix, descriptor.ObjectAlias)
 			}
-			names[descriptor.ObjectAlias] = true
+
+			// Case 2
+			if !descHasAlias && !foundHasAlias && descHasVersionLabel && foundHasVersionLabel &&
+				descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
+				return nil, fmt.Errorf("%s, no object alias, and duplicate version label %s",
+					errorPrefix, descriptor.ObjectVersionLabel)
+			}
+
+			// Case 3
+			if descHasAlias && foundHasAlias && descHasVersionLabel && foundHasVersionLabel &&
+				descriptor.ObjectAlias == found.ObjectAlias &&
+				descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
+				return nil, fmt.Errorf("%s, duplicate object alias %s, and duplicate version label %s",
+					errorPrefix, descriptor.ObjectAlias, descriptor.ObjectVersionLabel)
+			}
+
+			// Case 4
+			if !descHasAlias && !foundHasAlias && !descHasVersionLabel && !foundHasVersionLabel {
+				return nil, fmt.Errorf("%s, no object alias, and no version label", errorPrefix)
+			}
+		}
+		// Add the descriptor to the seenNames map after validation
+		seenNames[descriptor.ObjectName] = SecretDescriptorSlice{
+			ObjectAlias:        descriptor.ObjectAlias,
+			ObjectVersionLabel: descriptor.ObjectVersionLabel,
+		}
+
+		if seenAliases[descriptor.ObjectAlias] {
+			return nil, fmt.Errorf("found duplicate object alias %s", descriptor.ObjectAlias)
+		}
+		// Add the object alias to the seenAliases map for use in JMES path validation below
+		if descriptor.ObjectAlias != "" {
+			seenAliases[descriptor.ObjectAlias] = true
 		}
 
 		if len(descriptor.JMESPath) == 0 { //jmesPath not used. No more checks
@@ -417,11 +472,10 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 		}
 
 		for _, jmesPathEntry := range descriptor.JMESPath {
-			if names[jmesPathEntry.ObjectAlias] {
-				return nil, fmt.Errorf("Name already in use for objectAlias: %s", jmesPathEntry.ObjectAlias)
+			if seenAliases[jmesPathEntry.ObjectAlias] {
+				return nil, fmt.Errorf("Name already in use for objectAlias: found duplicate object alias %s in JMES path entry %s", jmesPathEntry.ObjectAlias, jmesPathEntry.Path)
 			}
-
-			names[jmesPathEntry.ObjectAlias] = true
+			seenAliases[jmesPathEntry.ObjectAlias] = true
 		}
 
 	}
