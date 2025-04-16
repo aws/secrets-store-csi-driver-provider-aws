@@ -287,6 +287,67 @@ func buildMountReq(dir string, tst testCase, curState []*v1alpha1.ObjectVersion)
 
 }
 
+// resolveFilePath returns the expected filename taking into consideration the translate flag.
+func resolveFilePath(fileName string, translate string) string {
+	if len(translate) == 0 {
+		translate = "_" // Use default
+	} else if strings.ToLower(translate) == "false" {
+		translate = "" // Turn it off.
+	}
+
+	// Translate slashes to underscore if required.
+	if len(translate) != 0 {
+		fileName = strings.ReplaceAll(fileName, string(os.PathSeparator), translate)
+	} else {
+		fileName = strings.TrimLeft(fileName, string(os.PathSeparator))
+	}
+	return fileName
+}
+
+// createFilePermissionMapping returns a map of fileNames -> filePermission mappings.
+//
+// createFilePermissionMapping takes in testCase and creates the keys by calling the resolveFilePath
+// the values are extracted from the testCase or inherited if not specified.
+func createFilePermissionMapping(tst *testCase) map[string]string {
+	// Extract the path translation
+	translate := tst.attributes["pathTranslation"]
+
+	// Create the fileNames -> filePermission map
+	fileToPermissionMap := make(map[string]string)
+
+	// Proccess the mountobjects
+	for _, obj := range tst.mountObjs {
+		// Extract the parent name/alias
+		parentName, _ := obj["objectName"].(string)
+		if objectAlias, ok := obj["objectAlias"].(string); ok {
+			parentName = objectAlias
+		}
+
+		parentName = resolveFilePath(parentName, translate)
+
+		// Extract parent file permission
+		parentFilePermission := "0644"
+		if filePermission, ok := obj["filePermission"].(string); ok {
+			parentFilePermission = filePermission
+		}
+		fileToPermissionMap[parentName] = parentFilePermission
+
+		// Proccess the jmesPathEntries
+		if jmesObjs, ok := obj["jmesPath"].([]map[string]string); ok {
+			for _, jmesObj := range jmesObjs {
+				jmesObjectAlias, _ := jmesObj["objectAlias"]
+				jmesObjectAlias = resolveFilePath(jmesObjectAlias, translate)
+				if filePermission, ok := jmesObj["filePermission"]; ok {
+					fileToPermissionMap[jmesObjectAlias] = filePermission
+				} else {
+					fileToPermissionMap[jmesObjectAlias] = parentFilePermission
+				}
+			}
+		}
+	}
+	return fileToPermissionMap
+}
+
 func validateMounts(t *testing.T, dir string, tst testCase, rsp *v1alpha1.MountResponse) bool {
 
 	// Make sure the mount response does not contain the Files attribute
@@ -295,16 +356,47 @@ func validateMounts(t *testing.T, dir string, tst testCase, rsp *v1alpha1.MountR
 		return false
 	}
 
+	// Parse the mount objects and extract specified file permission
+	expectedPermissionMap := createFilePermissionMapping(&tst)
+
 	// Check for the expected secrets
 	for file, val := range tst.expSecrets {
+
 		secretVal, err := ioutil.ReadFile(filepath.Join(dir, file))
 		if err != nil {
 			t.Errorf("%s: Can not read file %s", tst.testName, file)
 			return false
 		}
+
+		// Check secret value
 		if string(secretVal) != val {
 			t.Errorf("%s: Expected secret value %s got %s", tst.testName, val, string(secretVal))
 			return false
+		}
+
+		// Extract expected file permission from mapping
+		if expectedPermission, ok := expectedPermissionMap[file]; ok {
+
+			// Retrieve the actual permissions for the written file
+			fileInfo, err := os.Stat(filepath.Join(dir, file))
+			if err != nil {
+				t.Errorf("%s: Can not retrieve file's permission %s", tst.testName, file)
+				return false
+			}
+			actualPermission := fileInfo.Mode()
+
+			// Parse the expected file permission
+			parsedPermission, err := strconv.ParseInt(expectedPermission, 8, 32)
+			if err != nil {
+				t.Errorf("%s: Failed to parse the permission: %s", tst.testName, expectedPermission)
+				return false
+			}
+
+			// Compare the parsed file permission with the actual file permission
+			if os.FileMode(parsedPermission) != actualPermission {
+				t.Errorf("%s: File: %s expected file permission %v got %v", tst.testName, file, os.FileMode(parsedPermission), actualPermission)
+				return false
+			}
 		}
 	}
 
@@ -325,16 +417,49 @@ func validateResponse(t *testing.T, dir string, tst testCase, rsp *v1alpha1.Moun
 
 	// Map response by pathname
 	fileRsp := make(map[string][]byte)
+
+	// Map files to permissions
+	rspPerms := make(map[string]int32)
+
 	for _, file := range rsp.Files {
 		fileRsp[file.Path] = file.Contents
+		rspPerms[file.Path] = file.Mode
 	}
 
-	// Check for the expected secrets
-	perm, err := strconv.Atoi(tst.perms)
+	// Parse the mount objects and extract specified file permission
+	expectedPermissionMap := createFilePermissionMapping(&tst)
+
+	// Go through the response permissions map and ensure it matches with the expected permissions
+	for file, actualPermission := range rspPerms {
+
+		// Extract the expected file permission
+		expectedPermission, ok := expectedPermissionMap[file]
+		if !ok {
+			t.Errorf("%s: File: %s was not expected", tst.testName, file)
+			return false
+		}
+
+		// Parse the expected file permission to an octal
+		parsedPermission, err := strconv.ParseInt(expectedPermission, 8, 32)
+		if err != nil {
+			t.Errorf("%s: Failed to parse the expected permission: %s", tst.testName, expectedPermission)
+			return false
+		}
+
+		// Check if the parsed permission matches the acutal permission
+		if os.FileMode(parsedPermission) != os.FileMode(actualPermission) {
+			t.Errorf("%s: File: %s expected file permission %v got %v", tst.testName, file, os.FileMode(parsedPermission), os.FileMode(actualPermission))
+			return false
+		}
+	}
+
+	// Check default perm
+	_, err := strconv.Atoi(tst.perms)
 	if err != nil {
 		panic(err)
 	}
 
+	// Check for the expected secrets
 	for file, val := range tst.expSecrets {
 		secretVal := fileRsp[file]
 		if string(secretVal) != val {
@@ -349,7 +474,7 @@ func validateResponse(t *testing.T, dir string, tst testCase, rsp *v1alpha1.Moun
 			t.Errorf("%s: could not create base directory: %v", tst.testName, err)
 			return false
 		}
-		if err := ioutil.WriteFile(fullPath, secretVal, os.FileMode(perm)); err != nil {
+		if err := ioutil.WriteFile(fullPath, secretVal, os.FileMode(rspPerms[file])); err != nil {
 			t.Errorf("%s: could not write secret: %v", tst.testName, err)
 			return false
 		}
@@ -364,6 +489,102 @@ var stdAttributes map[string]string = map[string]string{
 	"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole",
 }
 var mountTests []testCase = []testCase{
+	{ // Vanilla Mount File Permission
+		testName:   "Mount File Permission",
+		attributes: stdAttributes,
+		mountObjs: []map[string]interface{}{
+			{
+				"objectName":     "TestSecret1",
+				"objectType":     "secretsmanager",
+				"filePermission": "0600",
+			},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String(`{"dbUser": {"username": "SecretsManagerUser", "password": "SecretsManagerPassword"}}`), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		expErr:  "",
+		expSecrets: map[string]string{
+			"TestSecret1": `{"dbUser": {"username": "SecretsManagerUser", "password": "SecretsManagerPassword"}}`,
+		},
+		perms: "420",
+	},
+	{ // Mount File Permission Failure
+		testName:   "Mount File Permission Failure",
+		attributes: stdAttributes,
+		mountObjs: []map[string]interface{}{
+			{
+				"objectName":     "TestSecret1",
+				"objectType":     "secretsmanager",
+				"filePermission": "0900",
+			},
+		},
+		ssmRsp:     []*ssm.GetParametersOutput{},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "Invalid File Permission: 0900",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Mount File Permission Jmes
+		testName:   "Mount JMES File Permission",
+		attributes: stdAttributes,
+		mountObjs: []map[string]interface{}{
+			{
+				"objectName":     "TestSecret1",
+				"objectType":     "secretsmanager",
+				"filePermission": "0600",
+				"jmesPath": []map[string]string{
+					{
+						"path":           "dbUser.username",
+						"objectAlias":    "username",
+						"filePermission": "0777",
+					},
+					{
+						"path":        "dbUser.password",
+						"objectAlias": "password",
+					},
+				},
+			},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String(`{"dbUser": {"username": "SecretsManagerUser", "password": "SecretsManagerPassword"}}`), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		expErr:  "",
+		expSecrets: map[string]string{
+			"TestSecret1": `{"dbUser": {"username": "SecretsManagerUser", "password": "SecretsManagerPassword"}}`,
+			"username":    "SecretsManagerUser",
+			"password":    "SecretsManagerPassword",
+		},
+		perms: "420",
+	},
+	{ // Mount File Permission Jmes Failure
+		testName:   "Mount JMES File Permission Failure",
+		attributes: stdAttributes,
+		mountObjs: []map[string]interface{}{
+			{
+				"objectName":     "TestSecret1",
+				"objectType":     "secretsmanager",
+				"filePermission": "0600",
+				"jmesPath": []map[string]string{
+					{
+						"path":           "dbUser.username",
+						"objectAlias":    "username",
+						"filePermission": "a987",
+					},
+				},
+			},
+		},
+		ssmRsp:     []*ssm.GetParametersOutput{},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "Invalid File Permission: a987",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
 	{ // Vanila success case.
 		testName:   "New Mount Success",
 		attributes: stdAttributes,
