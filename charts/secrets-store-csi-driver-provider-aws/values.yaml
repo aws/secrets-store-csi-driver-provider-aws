@@ -6,7 +6,7 @@ image:
 awsRegion: ""
 nameOverride: ""
 fullnameOverride: ""
-providerVolume: "/etc/kubernetes/secrets-store-csi-providers"
+providerVolume: "/var/run/secrets-store-csi-providers"
 kubeletPath: "/var/lib/kubelet"
 
 driverWritesSecrets: false

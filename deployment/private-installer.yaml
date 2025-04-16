@@ -61,7 +61,7 @@ spec:
           image: ${PRIVREPO}:latest
           imagePullPolicy: Always
           args:
-              - --provider-volume=/etc/kubernetes/secrets-store-csi-providers
+              - --provider-volume=/var/run/secrets-store-csi-providers
               - --driver-writes-secrets=false
           resources:
             requests:
@@ -74,7 +74,7 @@ spec:
             privileged: false
             allowPrivilegeEscalation: false
           volumeMounts:
-            - mountPath: "/etc/kubernetes/secrets-store-csi-providers"
+            - mountPath: "/var/run/secrets-store-csi-providers"
               name: providervol
             - name: mountpoint-dir
               mountPath: /var/lib/kubelet/pods
@@ -82,7 +82,7 @@ spec:
       volumes:
         - name: providervol
           hostPath:
-            path: "/etc/kubernetes/secrets-store-csi-providers"
+            path: "/var/run/secrets-store-csi-providers"
         - name: mountpoint-dir
           hostPath:
             path: /var/lib/kubelet/pods
