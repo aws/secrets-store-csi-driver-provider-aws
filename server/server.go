@@ -125,7 +125,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	// Set the default file permission
 	provider.SetDefaultFilePermission(filePermission)
 
-	regions, err := s.getAwsRegions(region, failoverRegion, nameSpace, podName, ctx)
+	regions, err := s.getAwsRegions(ctx, region, failoverRegion, nameSpace, podName)
 	if err != nil {
 		klog.ErrorS(err, "Failed to initialize AWS session")
 		return nil, err
@@ -143,7 +143,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsSessions, err := s.getAwsSessions(nameSpace, svcAcct, ctx, regions, usePodIdentity, podName, preferredAddressType)
+	awsSessions, err := s.getAwsSessions(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 // If a region is not specified in the mount request, we must lookup the region from node label and add as primary region to the lookup region list
 // If both the region and node label region are not available, error will be thrown
 // If backupRegion is provided and is equal to region/node region, error will be thrown else backupRegion is added to the lookup region list
-func (s *CSIDriverProviderServer) getAwsRegions(region, backupRegion, nameSpace, podName string, ctx context.Context) (response []string, err error) {
+func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, backupRegion, nameSpace, podName string) (response []string, err error) {
 	var lookupRegionList []string
 
 	// Find primary region.  Fall back to region node if unavailable.
@@ -227,7 +227,7 @@ func (s *CSIDriverProviderServer) getAwsRegions(region, backupRegion, nameSpace,
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If atleast one session is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsSessions(nameSpace, svcAcct string, ctx context.Context, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []*session.Session, err error) {
+func (s *CSIDriverProviderServer) getAwsSessions(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []*session.Session, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsSessionsList []*session.Session
 
