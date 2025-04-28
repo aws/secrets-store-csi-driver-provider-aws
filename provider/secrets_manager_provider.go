@@ -87,7 +87,7 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 		}
 	}
 	if len(value) == 0 {
-		return nil, fmt.Errorf("Failed to fetch secret from all regions: %s", descriptor.ObjectName)
+		return nil, fmt.Errorf("Failed to fetch secret from all regions. Verify secret exists and required permissions are granted for: %s", descriptor.ObjectName)
 	}
 
 	return value, nil

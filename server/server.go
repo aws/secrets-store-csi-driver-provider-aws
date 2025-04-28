@@ -79,6 +79,12 @@ func NewServer(
 // Store or Secrets Manager) and write the secrets to the mount point. The
 // version ids of the secrets are then returned to the driver.
 func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.MountRequest) (response *v1alpha1.MountResponse, e error) {
+	// Log out the write mode
+	if s.driverWriteSecrets {
+		klog.Infof("Driver is configured to write secrets")
+	} else {
+		klog.Infof("Provider is configured to write secrets")
+	}
 
 	// Basic sanity check
 	if len(req.GetTargetPath()) == 0 {
@@ -116,6 +122,9 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal file permission, error: %+v", err)
 	}
+
+	// Set the default file permission
+	provider.SetDefaultFilePermission(filePermission)
 
 	regions, err := s.getAwsRegions(region, failoverRegion, nameSpace, podName, ctx)
 	if err != nil {
@@ -169,8 +178,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	// Write out the secrets to the mount point after everything is fetched.
 	var files []*v1alpha1.File
 	for _, secret := range fetchedSecrets {
-
-		file, err := s.writeFile(secret, filePermission)
+		file, err := s.writeFile(secret, secret.Descriptor.GetFilePermission())
 		if err != nil {
 			return nil, err
 		}
