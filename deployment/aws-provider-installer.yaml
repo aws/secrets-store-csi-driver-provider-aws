@@ -61,7 +61,7 @@ spec:
           image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:1.0.r2-80-g8244505-2025.02.10.18.44
           imagePullPolicy: Always
           args:
-              - --provider-volume=/etc/kubernetes/secrets-store-csi-providers
+              - --provider-volume=/var/run/secrets-store-csi-providers
           resources:
             requests:
               cpu: 50m
@@ -73,7 +73,7 @@ spec:
             privileged: false
             allowPrivilegeEscalation: false
           volumeMounts:
-            - mountPath: "/etc/kubernetes/secrets-store-csi-providers"
+            - mountPath: "/var/run/secrets-store-csi-providers"
               name: providervol
             - name: mountpoint-dir
               mountPath: /var/lib/kubelet/pods
@@ -81,7 +81,7 @@ spec:
       volumes:
         - name: providervol
           hostPath:
-            path: "/etc/kubernetes/secrets-store-csi-providers"
+            path: "/var/run/secrets-store-csi-providers"
         - name: mountpoint-dir
           hostPath:
             path: /var/lib/kubelet/pods
