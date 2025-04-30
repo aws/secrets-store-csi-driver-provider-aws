@@ -1,29 +1,40 @@
 name: Go
 
-on: [push, pull_request]
+on:
+  push:
+    branches: main
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: "1.23"
-    - name: Check Formatting
-      run: |
-        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-          gofmt -s -l .
-          echo "Please format Go code by running: go fmt ./..."
-          exit 1
-        fi
-    - name: Build
-      run: go build -v ./...
-    - name: Test
-      run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
-    - name: Codecov
-      uses: codecov/codecov-action@v5
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Check Formatting
+        run: |
+          unformatted=$(gofmt -s -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::The following files are not formatted properly:"
+            echo "$unformatted"
+            echo "Please run `gofmt -s -w .` to format your code."
+            exit 1
+          fi
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
+
+      - name: Codecov
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
