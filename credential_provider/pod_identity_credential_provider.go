@@ -20,7 +20,7 @@ const (
 	podIdentityAudience   = "pods.eks.amazonaws.com"
 	defaultIPv4Endpoint   = "http://169.254.170.23/v1/credentials"
 	defaultIPv6Endpoint   = "http://[fd00:ec2::23]/v1/credentials"
-	httpTimeout           = 100 * time.Millisecond
+	httpTimeout           = time.Second * 10
 	podIdentityAuthHeader = "Authorization"
 )
 
