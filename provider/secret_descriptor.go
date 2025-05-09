@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws/arn"
@@ -13,6 +14,12 @@ import (
 
 // An RE pattern to check for bad paths
 var badPathRE = regexp.MustCompile("(/\\.\\./)|(^\\.\\./)|(/\\.\\.$)")
+
+// An RE pattern to check for valid file permission
+var validFilePermissionRE = regexp.MustCompile("^[0-7]{4}$")
+
+// Default file permission
+var defaultFilePermission = os.FileMode(0644)
 
 // An individual record from the mount request indicating the secret to be
 // fetched and mounted.
@@ -33,6 +40,9 @@ type SecretDescriptor struct {
 	// One of secretsmanager or ssmparameter (not required when using full secrets manager ARN).
 	ObjectType string `json:"objectType"`
 
+	// Optional file permission (default to driver file permission).
+	FilePermission string `json:"filePermission"`
+
 	// Optional array to specify what json key value pairs to extract from a secret and mount as individual secrets
 	JMESPath []JMESPathEntry `json:"jmesPath"`
 
@@ -46,6 +56,13 @@ type SecretDescriptor struct {
 	mountDir string `json:"-"`
 }
 
+// Slice of the above type used for validation in NewSecretDescriptorList
+type SecretDescriptorSlice struct {
+	ObjectAlias string `json:"objectAlias"`
+
+	ObjectVersionLabel string `json:"objectVersionLabel"`
+}
+
 // An individual json key value pair to mount
 type JMESPathEntry struct {
 	//JMES path to use for retrieval
@@ -53,6 +70,9 @@ type JMESPathEntry struct {
 
 	//File name in which to store the secret in.
 	ObjectAlias string `json:"objectAlias"`
+
+	// Optional file permission (default to driver file permission).
+	FilePermission string `json:"filePermission"`
 }
 
 // An individual json key value pair to mount
@@ -65,6 +85,11 @@ type FailoverObjectEntry struct {
 
 	// Optional version/stage label of the secret (defaults to latest).
 	ObjectVersionLabel string `json:"objectVersionLabel"`
+}
+
+// Helper function to set the default file permission
+func SetDefaultFilePermission(defaultFilePermission os.FileMode) {
+	defaultFilePermission = defaultFilePermission
 }
 
 // Enum of supported secret types
@@ -145,11 +170,17 @@ func (p *SecretDescriptor) GetSecretType() (stype SecretType) {
 
 // Return a descriptor for a jmes object entry within the secret
 func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d SecretDescriptor) {
+	permission := j.FilePermission
+	if len(permission) == 0 {
+		permission = p.FilePermission
+	}
+
 	return SecretDescriptor{
-		ObjectAlias: j.ObjectAlias,
-		ObjectType:  p.getObjectType(),
-		translate:   p.translate,
-		mountDir:    p.mountDir,
+		ObjectAlias:    j.ObjectAlias,
+		ObjectType:     p.getObjectType(),
+		translate:      p.translate,
+		mountDir:       p.mountDir,
+		FilePermission: permission,
 	}
 }
 
@@ -181,6 +212,31 @@ func (p *SecretDescriptor) GetObjectVersion(useFailoverRegion bool) (secretName 
 	return p.ObjectVersion
 }
 
+// Returns the secret descriptor file permission in octal
+func (p *SecretDescriptor) GetFilePermission() (filePermission os.FileMode) {
+	if len(p.FilePermission) == 0 {
+		return defaultFilePermission
+	}
+	parsedPermission, _ := strconv.ParseInt(p.FilePermission, 8, 32)
+	return os.FileMode(parsedPermission)
+}
+
+// Private helper to validate a filePermission
+//
+// This function validates the filePermission and ensures it is a valid 4 digit octal string
+func (p *SecretDescriptor) validateFilePermission(filePermission string) error {
+	// No file permission
+	if len(filePermission) == 0 {
+		return nil
+	}
+
+	if !validFilePermissionRE.MatchString(filePermission) {
+		return fmt.Errorf("Invalid File Permission: %s", filePermission)
+	}
+
+	return nil
+}
+
 // Private helper to validate the contents of SecretDescriptor.
 //
 // This method is used to validate input before it is used by the rest of the
@@ -206,6 +262,12 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 		return fmt.Errorf("path can not contain ../: %s", p.ObjectName)
 	}
 
+	// Ensure the string file permission is valid octal
+	err = p.validateFilePermission(p.FilePermission)
+	if err != nil {
+		return err
+	}
+
 	//ensure each jmesPath entry has a path and an objectalias
 	for _, jmesPathEntry := range p.JMESPath {
 		if len(jmesPathEntry.Path) == 0 {
@@ -215,6 +277,13 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 		if len(jmesPathEntry.ObjectAlias) == 0 {
 			return fmt.Errorf("Object alias must be specified for JMES object")
 		}
+
+		// Validate the jmesPath has a valid filePermission
+		err = p.validateFilePermission(jmesPathEntry.FilePermission)
+		if err != nil {
+			return err
+		}
+
 	}
 
 	if len(p.FailoverObject.ObjectName) > 0 {
@@ -323,7 +392,8 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 
 	// Validate each record and check for duplicates
 	groups := make(map[SecretType][]*SecretDescriptor, 0)
-	names := make(map[string]bool)
+	seenNames := make(map[string]SecretDescriptorSlice)
+	seenAliases := make(map[string]bool)
 	for _, descriptor := range descriptors {
 
 		descriptor.translate = translate
@@ -337,17 +407,64 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 		sType := descriptor.GetSecretType()
 		groups[sType] = append(groups[sType], descriptor)
 
-		// Check for duplicate names
-		if names[descriptor.ObjectName] {
-			return nil, fmt.Errorf("Name already in use for objectName: %s", descriptor.ObjectName)
-		}
-		names[descriptor.ObjectName] = true
+		// We iterate over the descriptors, checking each one for duplicates and then adding it to the seenNames map.
+		// There are 4 cases in which a validation error is thrown when a descriptor with a duplicate object name is found:
+		// -------------------------------------------
+		// | # | OBJECT ALIAS | OBJECT VERSION LABEL |
+		// |---|--------------|----------------------|
+		// | 1 | duplicate    | empty                |
+		// | 2 | empty        | duplicate            |
+		// | 3 | duplicate    | duplicate            |
+		// | 4 | empty        | empty                |
+		// -------------------------------------------
+		found, ok := seenNames[descriptor.ObjectName]
+		if ok {
+			descHasAlias := descriptor.ObjectAlias != ""
+			foundHasAlias := found.ObjectAlias != ""
+			descHasVersionLabel := descriptor.ObjectVersionLabel != ""
+			foundHasVersionLabel := found.ObjectVersionLabel != ""
 
-		if len(descriptor.ObjectAlias) > 0 {
-			if names[descriptor.ObjectAlias] {
-				return nil, fmt.Errorf("Name already in use for objectAlias: %s", descriptor.ObjectAlias)
+			errorPrefix := fmt.Errorf("found descriptor with duplicate object name %s", descriptor.ObjectName)
+
+			// Case 1
+			if descHasAlias && foundHasAlias && !descHasVersionLabel && !foundHasVersionLabel &&
+				descriptor.ObjectAlias == found.ObjectAlias {
+				return nil, fmt.Errorf("%s, duplicate object alias %s, and no version label",
+					errorPrefix, descriptor.ObjectAlias)
 			}
-			names[descriptor.ObjectAlias] = true
+
+			// Case 2
+			if !descHasAlias && !foundHasAlias && descHasVersionLabel && foundHasVersionLabel &&
+				descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
+				return nil, fmt.Errorf("%s, no object alias, and duplicate version label %s",
+					errorPrefix, descriptor.ObjectVersionLabel)
+			}
+
+			// Case 3
+			if descHasAlias && foundHasAlias && descHasVersionLabel && foundHasVersionLabel &&
+				descriptor.ObjectAlias == found.ObjectAlias &&
+				descriptor.ObjectVersionLabel == found.ObjectVersionLabel {
+				return nil, fmt.Errorf("%s, duplicate object alias %s, and duplicate version label %s",
+					errorPrefix, descriptor.ObjectAlias, descriptor.ObjectVersionLabel)
+			}
+
+			// Case 4
+			if !descHasAlias && !foundHasAlias && !descHasVersionLabel && !foundHasVersionLabel {
+				return nil, fmt.Errorf("%s, no object alias, and no version label", errorPrefix)
+			}
+		}
+		// Add the descriptor to the seenNames map after validation
+		seenNames[descriptor.ObjectName] = SecretDescriptorSlice{
+			ObjectAlias:        descriptor.ObjectAlias,
+			ObjectVersionLabel: descriptor.ObjectVersionLabel,
+		}
+
+		if seenAliases[descriptor.ObjectAlias] {
+			return nil, fmt.Errorf("found duplicate object alias %s", descriptor.ObjectAlias)
+		}
+		// Add the object alias to the seenAliases map for use in JMES path validation below
+		if descriptor.ObjectAlias != "" {
+			seenAliases[descriptor.ObjectAlias] = true
 		}
 
 		if len(descriptor.JMESPath) == 0 { //jmesPath not used. No more checks
@@ -355,11 +472,10 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 		}
 
 		for _, jmesPathEntry := range descriptor.JMESPath {
-			if names[jmesPathEntry.ObjectAlias] {
-				return nil, fmt.Errorf("Name already in use for objectAlias: %s", jmesPathEntry.ObjectAlias)
+			if seenAliases[jmesPathEntry.ObjectAlias] {
+				return nil, fmt.Errorf("Name already in use for objectAlias: found duplicate object alias %s in JMES path entry %s", jmesPathEntry.ObjectAlias, jmesPathEntry.Path)
 			}
-
-			names[jmesPathEntry.ObjectAlias] = true
+			seenAliases[jmesPathEntry.ObjectAlias] = true
 		}
 
 	}

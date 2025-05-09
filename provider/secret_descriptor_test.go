@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -141,7 +142,8 @@ func TestSSMBothVersionandLabel(t *testing.T) {
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
-func TestConflictingName(t *testing.T) {
+// Conflicting name; alias and version label not present -- should throw (case 4)
+func TestConflictingNameWoAliasAndVersionLabel(t *testing.T) {
 	objects :=
 		`
         - objectName: secret1
@@ -150,10 +152,166 @@ func TestConflictingName(t *testing.T) {
           objectType: ssmparameter`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectName: %s", "secret1")
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, no object alias, and no version label", "secret1")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name and alias; version label not present -- should throw (case 1)
+func TestConflictingNameAndAliasWoVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, duplicate object alias %s, and no version label", "secret1", "aliasOne")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name and alias; version label present -- should throw
+func TestConflictingNameAndAliasWithVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found duplicate object alias %s", "aliasOne")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name; alias present, version label not present -- should not throw
+func TestConflictingNameAndNotAliasWoVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasTwo
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
+	}
+}
+
+// Conflicting name; alias and version label present -- should not throw
+func TestConflictingNameAndNotAliasWithVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasTwo
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
+	}
+}
+
+// Conflicting name and version label; alias not present -- should throw (case 2)
+func TestConflictingNameAndVersionLabelWoAlias(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, no object alias, and duplicate version label %s", "secret1", "AWSCURRENT")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name, alias, and version label -- should throw (case 3)
+func TestConflictingNameAndVersionLabelAndAlias(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := fmt.Sprintf("found descriptor with duplicate object name %s, duplicate object alias %s, and duplicate version label %s", "secret1", "aliasOne", "AWSCURRENT")
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
+// Conflicting name; version label present, alias not present -- should not throw
+func TestConflictingNameAndNotVersionLabelWoAlias(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
+	}
+}
+
+// Conflicting name; version label and alias present -- should not throw
+func TestConflictingNameWithAliasAndVersionLabel(t *testing.T) {
+	objects :=
+		`
+        - objectName: secret1
+          objectAlias: aliasOne
+          objectVersionLabel: AWSCURRENT
+          objectType: ssmparameter
+        - objectName: secret1
+          objectAlias: aliasTwo
+          objectVersionLabel: AWSPREVIOUS
+          objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+
+	if err != nil {
+		t.Fatalf("Expected no error, got error: %v", err)
 	}
 }
 
@@ -168,7 +326,7 @@ func TestConflictingAlias(t *testing.T) {
             objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: %s", "aliasOne")
+	expectedErrorMessage := fmt.Sprintf("found duplicate object alias %s", "aliasOne")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -188,7 +346,7 @@ func TestConflictingAliasJMES(t *testing.T) {
                 objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: %s", "aliasOne")
+	expectedErrorMessage := fmt.Sprintf("Name already in use for objectAlias: found duplicate object alias %s in JMES path entry %s", "aliasOne", ".username")
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -416,7 +574,7 @@ func TestNotTraversal(t *testing.T) {
 func TestFallbackObjectRequiresAlias(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: 
+      failoverObject:
         objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"`
 
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -429,7 +587,7 @@ func TestFallbackObjectRequiresAlias(t *testing.T) {
 func TestFallbackNonARNStillNeedsObjectType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "MySecret"}        
+      failoverObject: {objectName: "MySecret"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -444,7 +602,7 @@ func TestBackupArnMustBePairedWithObjectType(t *testing.T) {
 	objects := `
     - objectName: "MySecret"
       objectAlias: test
-      failoverObject: 
+      failoverObject:
          objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"`
 
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-2", "us-west-1"})
@@ -473,7 +631,7 @@ func TestBackupArnDoesNotMatchType(t *testing.T) {
 func TestBackupArnInvalidType(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "arn:aws:bad:us-west-2:123456789012:secret:secret1"}	  
+      failoverObject: {objectName: "arn:aws:bad:us-west-2:123456789012:secret:secret1"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -487,7 +645,7 @@ func TestBackupArnInvalidType(t *testing.T) {
 func TestBackupArnSuccess(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}	 
+      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1", "us-west-2"})
@@ -528,7 +686,7 @@ func TestBackupArnRequiresRegionMatch(t *testing.T) {
 func TestFallbackDataRequiresMultipleRegions(t *testing.T) {
 	objects := `
     - objectName: "arn:aws:secretsmanager:us-west-1:123456789012:secret:secret1"
-      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}	 
+      failoverObject: {objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:secret1"}
       objectAlias: test
     `
 	_, err := NewSecretDescriptorList("/mountpoint", "", objects, []string{"us-west-1"})
@@ -543,7 +701,7 @@ func TestObjectVersionAndLabelAreIncompatible(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
       objectType: ssmparameter
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
         objectVersion:      VersionId
         objectVersionLabel: MyLabel
@@ -561,7 +719,7 @@ func TestGetPathForMultiregion(t *testing.T) {
 	objects := `
     - objectName: "MySecret1"
       objectType: ssmparameter
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
       objectAlias: test
     `
@@ -584,7 +742,7 @@ func TestVersionIdsMustMatch(t *testing.T) {
     - objectName: "MySecret1"
       objectType: ssmparameter
       objectVersion:  OldVersionId
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
         objectVersion:      ADifferentVersionId
       objectAlias: test
@@ -603,7 +761,7 @@ func TestVersionidsMatch(t *testing.T) {
     - objectName: "MySecret1"
       objectType: ssmparameter
       objectVersion:  VersionId
-      failoverObject: 
+      failoverObject:
         objectName:         MySecretInAnotherRegion
         objectVersion:  VersionId
       objectAlias: test
@@ -619,4 +777,181 @@ func TestVersionidsMatch(t *testing.T) {
 		t.Errorf("Bad mount path for SSM parameter")
 	}
 
+}
+
+// Test GetFilePermission function
+func TestGetFilePermission(t *testing.T) {
+
+	TestDescriptor := func(filePermission string) SecretDescriptor {
+		return SecretDescriptor{
+			ObjectType:     "SecretsManager",
+			FilePermission: filePermission,
+		}
+	}
+
+	t.Run("DefaultFilePermission", func(t *testing.T) {
+		descriptor := TestDescriptor("")
+		got := descriptor.GetFilePermission()
+		want := os.FileMode(0644)
+		if got != want {
+			t.Errorf("got: %v != want: %v", got, want)
+		}
+	})
+
+	t.Run("CustomFilePermission", func(t *testing.T) {
+		descriptor := TestDescriptor("0600")
+		got := descriptor.GetFilePermission()
+		want := os.FileMode(0600)
+		if got != want {
+			t.Errorf("got: %v != want: %v", got, want)
+		}
+	})
+}
+
+// Test validateFilePermission function
+func TestValidateFilePermission(t *testing.T) {
+	descriptor := SecretDescriptor{}
+
+	checkNoError := func(t testing.TB, got error) {
+		t.Helper()
+
+		if got != nil {
+			t.Errorf("Unexpected error: %v", got)
+		}
+	}
+
+	checkErrorMessage := func(t testing.TB, got error, want string) {
+		t.Helper()
+
+		if got == nil {
+			t.Errorf("No error when expected error: %v ", want)
+		}
+
+		if got.Error() != want {
+			t.Errorf("got: %v want: %v", got, want)
+		}
+	}
+
+	expectedErrorMessage := func(filePermission string) string {
+		return fmt.Sprintf("Invalid File Permission: %s", filePermission)
+	}
+
+	t.Run("EmptyFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("")
+		checkNoError(t, got)
+	})
+
+	t.Run("CorrectOctalFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("0600")
+		checkNoError(t, got)
+	})
+
+	t.Run("InvalidFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("abc9")
+		checkErrorMessage(t, got, expectedErrorMessage("abc9"))
+	})
+
+	t.Run("ShortFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("000")
+		checkErrorMessage(t, got, expectedErrorMessage("000"))
+	})
+
+	t.Run("LongFilePermission", func(t *testing.T) {
+		got := descriptor.validateFilePermission("00000")
+		checkErrorMessage(t, got, expectedErrorMessage("00000"))
+	})
+}
+
+// Test getJmesSecretDescriptor function
+func TestGetJmesEntrySecretDescriptor(t *testing.T) {
+
+	TestDescriptor := func(filePermission string) SecretDescriptor {
+		return SecretDescriptor{
+			ObjectType:     "SecretsManager",
+			FilePermission: filePermission,
+		}
+	}
+
+	TestJmesPath := func(filePermission string) JMESPathEntry {
+		return JMESPathEntry{
+			FilePermission: filePermission,
+		}
+	}
+
+	checkPermissions := func(t testing.TB, got *SecretDescriptor, want string) {
+		t.Helper()
+		if got.FilePermission != want {
+			t.Errorf("got: %v want: %v", got.FilePermission, want)
+		}
+	}
+
+	t.Run("EmptyFilePermission", func(t *testing.T) {
+		descriptor := TestDescriptor("")
+		jmesPath := TestJmesPath("")
+		got := descriptor.getJmesEntrySecretDescriptor(&jmesPath)
+		checkPermissions(t, &got, "")
+	})
+
+	t.Run("InheritFromParent", func(t *testing.T) {
+		descriptor := TestDescriptor("0600")
+		jmesPath := TestJmesPath("")
+		got := descriptor.getJmesEntrySecretDescriptor(&jmesPath)
+		checkPermissions(t, &got, descriptor.FilePermission)
+	})
+
+	t.Run("OverrideParent", func(t *testing.T) {
+		descriptor := TestDescriptor("0600")
+		jmesPath := TestJmesPath("0777")
+		got := descriptor.getJmesEntrySecretDescriptor(&jmesPath)
+		checkPermissions(t, &got, jmesPath.FilePermission)
+	})
+}
+
+// Test the validatedescriptor function calls validate file permission
+func TestValidateDescriptorFilePermission(t *testing.T) {
+
+	TestDescriptor := func(descriptorPermission string, jmesPermission string) SecretDescriptor {
+		return SecretDescriptor{
+			ObjectName:     "foo",
+			ObjectType:     "secretsmanager",
+			FilePermission: descriptorPermission,
+			JMESPath: []JMESPathEntry{
+				{
+					Path:           "bar",
+					ObjectAlias:    "foobar",
+					FilePermission: jmesPermission,
+				},
+			},
+		}
+	}
+
+	expectedErrorMessage := func(filePermission string) string {
+		return fmt.Sprintf("Invalid File Permission: %s", filePermission)
+	}
+
+	t.Run("DescriptorValidPermission", func(t *testing.T) {
+		descriptor := TestDescriptor("0600", "0700")
+		got := descriptor.validateSecretDescriptor(singleRegion)
+		if got != nil {
+			t.Errorf("Unexpected Error %v", got)
+		}
+	})
+
+	t.Run("DescriptorInvalidPermission", func(t *testing.T) {
+		descriptor := TestDescriptor("abcd", "")
+		got := descriptor.validateSecretDescriptor(singleRegion)
+		want := expectedErrorMessage("abcd")
+		if got == nil || got.Error() != want {
+			t.Errorf("got: %v want: %v", got, want)
+		}
+	})
+
+	t.Run("DescriptorInvalidjmesPermission", func(t *testing.T) {
+		descriptor := TestDescriptor("", "efgh")
+		got := descriptor.validateSecretDescriptor(singleRegion)
+		want := expectedErrorMessage("efgh")
+		if got == nil || got.Error() != want {
+			t.Errorf("got: %v want: %v", got, want)
+		}
+	})
 }
