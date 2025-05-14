@@ -15,14 +15,14 @@ import (
 	"strconv"
 	"strings"
 
-	"k8s.io/klog/v2"
+	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"google.golang.org/grpc"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 )
@@ -108,6 +108,11 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
 	preferredAddressType := attrib[preferredAddressTypeAttrib]
 
+	// Validate preferred address type
+	if preferredAddressType != "ipv4" && preferredAddressType != "ipv6" && preferredAddressType != "auto" && preferredAddressType != "" {
+		return nil, fmt.Errorf("invalid preferred address type: %s", preferredAddressType)
+	}
+
 	// Make a map of the currently mounted versions (if any)
 	curVersions := req.GetCurrentObjectVersion()
 	curVerMap := make(map[string]*v1alpha1.ObjectVersion)
@@ -143,11 +148,11 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsSessions, err := s.getAwsSessions(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType)
+	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType)
 	if err != nil {
 		return nil, err
 	}
-	if len(awsSessions) > 2 {
+	if len(awsConfigs) > 2 {
 		klog.Errorf("Max number of region(s) exceeded: %s", strings.Join(regions, ", "))
 		return nil, err
 	}
@@ -161,7 +166,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		return nil, err
 	}
 
-	providerFactory := s.secretProviderFactory(awsSessions, regions)
+	providerFactory := s.secretProviderFactory(awsConfigs, regions)
 	var fetchedSecrets []*provider.SecretValue
 	for sType := range descriptors { // Iterate over each secret type.
 		// Fetch all the secrets and update the curVerMap
@@ -222,28 +227,28 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 	return lookupRegionList, nil
 }
 
-// Private helper to get the aws sessions for all the lookup regions for a given pod.
+// Private helper to get the aws configs for all the lookup regions for a given pod.
 //
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
-// If atleast one session is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsSessions(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []*session.Session, err error) {
+// If at least one config is not created, error will be thrown
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []aws.Config, err error) {
 	// Get the pod's AWS creds for each lookup region.
-	var awsSessionsList []*session.Session
+	var awsConfigsList []aws.Config
 
 	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(ctx, region, nameSpace, svcAcct, podName, preferredAddressType, usePodIdentity, s.k8sClient)
+		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, usePodIdentity, s.k8sClient)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsSession, err := awsAuth.GetAWSSession()
+		awsConfig, err := awsAuth.GetAWSConfig(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsSessionsList = append(awsSessionsList, awsSession)
+		awsConfigsList = append(awsConfigsList, awsConfig)
 	}
 
-	return awsSessionsList, nil
+	return awsConfigsList, nil
 }
 
 // Return the provider plugin version information to the driver.
