@@ -2,7 +2,7 @@ package credential_provider
 
 import (
 	"context"
-	"fmt"	
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -47,33 +47,33 @@ func setupMockPodIdentityAgent(t *testing.T, isIPv4, shouldFail bool) *httptest.
 
 func newPodIdentityCredentialWithMock(t *testing.T, isIPv4 bool, tstData podIdentityCredentialTest) (*PodIdentityCredentialProvider, chan<- struct{}) {
 	k8sClient := &mockK8sV1{
-        CoreV1Interface:  fake.NewSimpleClientset().CoreV1(),
+		CoreV1Interface:  fake.NewSimpleClientset().CoreV1(),
 		fake:             fake.NewSimpleClientset().CoreV1(),
-        k8CTOneShotError: tstData.k8CTOneShotError,
-    }
+		k8CTOneShotError: tstData.k8CTOneShotError,
+	}
 
-    mockServer := setupMockPodIdentityAgent(t, isIPv4, tstData.podIdentityError)
-    respChan := make(chan struct{})
-    go func(srv *httptest.Server) {
-        <-respChan
-        srv.Close()
-    }(mockServer)
+	mockServer := setupMockPodIdentityAgent(t, isIPv4, tstData.podIdentityError)
+	respChan := make(chan struct{})
+	go func(srv *httptest.Server) {
+		<-respChan
+		srv.Close()
+	}(mockServer)
 
-    var credentialEndpoint string
-    if isIPv4 {
-        credentialEndpoint = mockServer.URL
-        podIdentityAgentEndpointIPv4 = mockServer.URL
-    } else {
-        credentialEndpoint = mockServer.URL
-        podIdentityAgentEndpointIPv6 = mockServer.URL
-    }
+	var credentialEndpoint string
+	if isIPv4 {
+		credentialEndpoint = mockServer.URL
+		podIdentityAgentEndpointIPv4 = mockServer.URL
+	} else {
+		credentialEndpoint = mockServer.URL
+		podIdentityAgentEndpointIPv6 = mockServer.URL
+	}
 
-    return &PodIdentityCredentialProvider{
-        region:             testRegion,
-        credentialEndpoint: credentialEndpoint,
-        fetcher:            newPodIdentityTokenFetcher(testNamespace, testServiceAccount, testPodName, k8sClient),
-        httpClient:         http.DefaultClient,
-    }, respChan
+	return &PodIdentityCredentialProvider{
+		region:             testRegion,
+		credentialEndpoint: credentialEndpoint,
+		fetcher:            newPodIdentityTokenFetcher(testNamespace, testServiceAccount, testPodName, k8sClient),
+		httpClient:         http.DefaultClient,
+	}, respChan
 }
 
 type podIdentityCredentialTest struct {
@@ -87,41 +87,41 @@ type podIdentityCredentialTest struct {
 
 var podIdentityCredentialTests []podIdentityCredentialTest = []podIdentityCredentialTest{
 	{"Pod Identity Success via IPv4", false, false, false, "ipv4", ""},
-    {"Pod Identity Success via IPv6", false, false, false, "ipv6", ""},
-    {"Pod Identity Success via auto selection", false, false, false, "auto", ""},
-    {"Pod identity Failure via IPv4", false, false, true, "ipv4", "failed to refresh cached credentials, failed to load credentials, exceeded maximum number of attempts, 3, : "},
-    {"Pod identity Failure via IPv6", false, false, true, "ipv6", "failed to refresh cached credentials, failed to load credentials, exceeded maximum number of attempts, 3, : "},
-    {"Pod identity Failure via auto selection", false, false, true, "auto", "failed to refresh cached credentials, failed to load credentials, exceeded maximum number of attempts, 3, : "},
+	{"Pod Identity Success via IPv6", false, false, false, "ipv6", ""},
+	{"Pod Identity Success via auto selection", false, false, false, "auto", ""},
+	{"Pod identity Failure via IPv4", false, false, true, "ipv4", "failed to refresh cached credentials, failed to load credentials, exceeded maximum number of attempts, 3, : "},
+	{"Pod identity Failure via IPv6", false, false, true, "ipv6", "failed to refresh cached credentials, failed to load credentials, exceeded maximum number of attempts, 3, : "},
+	{"Pod identity Failure via auto selection", false, false, true, "auto", "failed to refresh cached credentials, failed to load credentials, exceeded maximum number of attempts, 3, : "},
 }
 
 func TestPodIdentityCredentialProvider(t *testing.T) {
 	for _, tstData := range podIdentityCredentialTests {
-        t.Run(tstData.testName, func(t *testing.T) {
-            provider, closer := newPodIdentityCredentialWithMock(t, tstData.preferredEndpoint == "ipv4", tstData)
-            defer func() { closer <- struct{}{} }()
+		t.Run(tstData.testName, func(t *testing.T) {
+			provider, closer := newPodIdentityCredentialWithMock(t, tstData.preferredEndpoint == "ipv4", tstData)
+			defer func() { closer <- struct{}{} }()
 
-            cfg, _ := provider.GetAWSConfig(context.Background())
-            _, err := cfg.Credentials.Retrieve(context.Background())
+			cfg, _ := provider.GetAWSConfig(context.Background())
+			_, err := cfg.Credentials.Retrieve(context.Background())
 
-            if len(tstData.expError) == 0 && err != nil {
-                t.Errorf("%s case: got unexpected cred provider error: %s", tstData.testName, err)
-            }
-            if len(tstData.expError) == 0 && cfg.Credentials == nil {
-                t.Errorf("%s case: got empty credential provider", tstData.testName)
-            }
-            if len(tstData.expError) != 0 && err == nil {
-                t.Fatalf("%s case: expected error but got none", tstData.testName)
-            }
-            if len(tstData.expError) != 0 && !strings.Contains(err.Error(), tstData.expError) {
-                t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
-            }
-        })
-    }
+			if len(tstData.expError) == 0 && err != nil {
+				t.Errorf("%s case: got unexpected cred provider error: %s", tstData.testName, err)
+			}
+			if len(tstData.expError) == 0 && cfg.Credentials == nil {
+				t.Errorf("%s case: got empty credential provider", tstData.testName)
+			}
+			if len(tstData.expError) != 0 && err == nil {
+				t.Fatalf("%s case: expected error but got none", tstData.testName)
+			}
+			if len(tstData.expError) != 0 && !strings.Contains(err.Error(), tstData.expError) {
+				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
+			}
+		})
+	}
 }
 
 var podIdentityTokenTests = []podIdentityCredentialTest{
-    {"Pod Identity Token Success", false, true, false, "auto", ""},
-    {"Pod Identity Fetch JWT fail", true, true, false, "auto", "Fake create token"},
+	{"Pod Identity Token Success", false, true, false, "auto", ""},
+	{"Pod Identity Fetch JWT fail", true, true, false, "auto", "Fake create token"},
 }
 
 func TestPodIdentityToken(t *testing.T) {

@@ -230,7 +230,7 @@ type testCase struct {
 	perms       string
 }
 
-func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.ObjectVersion) *v1alpha1.MountRequest {	
+func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.ObjectVersion) *v1alpha1.MountRequest {
 	t.Helper()
 
 	attrMap := make(map[string]string)
@@ -1179,7 +1179,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
 		reqErr: &secretsmanagertypes.InternalServiceError{
-			Message: aws.String("An error occurred on the server side"),
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
@@ -1203,7 +1203,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			},
 		},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("An error occurred on the server side"), 
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		brSsmRsp: []*ssm.GetParametersOutput{
 			{
@@ -1227,11 +1227,11 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		ssmRsp: []*ssm.GetParametersOutput{nil},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("..."), 
+			Message:           aws.String("..."),
 			ErrorCodeOverride: aws.String("500")},
 		gsvRsp: []*secretsmanager.GetSecretValueOutput{nil},
 		reqErr: &secretsmanagertypes.InternalServiceError{
-			Message: aws.String("..."), 
+			Message:           aws.String("..."),
 			ErrorCodeOverride: aws.String("500")},
 		descRsp: []*secretsmanager.DescribeSecretOutput{},
 		brSsmRsp: []*ssm.GetParametersOutput{
@@ -1299,13 +1299,13 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
 		reqErr: &secretsmanagertypes.InternalServiceError{
-			Message: aws.String("..."),
+			Message:           aws.String("..."),
 			ErrorCodeOverride: aws.String("500")},
 
 		brGsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
 		brReqErr: &secretsmanagertypes.InternalServiceError{
-			Message: aws.String("..."),
+			Message:           aws.String("..."),
 			ErrorCodeOverride: aws.String("500")},
 		expErr:     "Failed to fetch secret from all regions. Verify secret exists and required permissions are granted for",
 		brExpErr:   "Failed to fetch secret from all regions. Verify secret exists and required permissions are granted for:",
@@ -1320,11 +1320,11 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		ssmRsp: []*ssm.GetParametersOutput{nil},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("..."),
+			Message:           aws.String("..."),
 			ErrorCodeOverride: aws.String("500")},
 		brSsmRsp: []*ssm.GetParametersOutput{nil},
 		ssmBrReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("..."),
+			Message:           aws.String("..."),
 			ErrorCodeOverride: aws.String("500")},
 		expErr:     "Failed to fetch parameters from all regions.",
 		brExpErr:   "Failed to fetch parameters from all regions.",
@@ -1410,8 +1410,8 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
-		reqErr:  &secretsmanagertypes.ResourceNotFoundException{
-			Message: aws.String("Secrets Manager can't find the specified secret"), 
+		reqErr: &secretsmanagertypes.ResourceNotFoundException{
+			Message:           aws.String("Secrets Manager can't find the specified secret"),
 			ErrorCodeOverride: aws.String("400")},
 		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
@@ -1429,8 +1429,8 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
-		reqErr:  &secretsmanagertypes.InternalServiceError{
-			Message: aws.String("An error occurred on the server side"),
+		reqErr: &secretsmanagertypes.InternalServiceError{
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
@@ -1451,12 +1451,12 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
 		reqErr: &secretsmanagertypes.InternalServiceError{
-			Message: aws.String("An error occurred on the server side"), 
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		brGsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
 		brReqErr: &secretsmanagertypes.ResourceNotFoundException{
-			Message: aws.String("Secrets Manager can't find the specified secret"),
+			Message:           aws.String("Secrets Manager can't find the specified secret"),
 			ErrorCodeOverride: aws.String("400")},
 		expErr:     "fakeBackupRegion: Failed fetching secret TestSecret1: 400: Secrets Manager can't find the specified secret",
 		expSecrets: map[string]string{},
@@ -1476,7 +1476,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			},
 		},
 		ssmReqErr: &ssmtypes.InvalidKeyId{
-			Message: aws.String("The query key ID isn't valid"), 
+			Message:           aws.String("The query key ID isn't valid"),
 			ErrorCodeOverride: aws.String("400")},
 		brSsmRsp: []*ssm.GetParametersOutput{
 			{
@@ -1497,7 +1497,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		ssmRsp: []*ssm.GetParametersOutput{nil},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("An error occurred on the server side"), 
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		brSsmRsp: []*ssm.GetParametersOutput{
 			{
@@ -1519,12 +1519,12 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			{"objectName": "TestParm1", "objectType": "ssmparameter"},
 		},
 		ssmRsp: []*ssm.GetParametersOutput{nil},
-		ssmReqErr:   &ssmtypes.InternalServerError{
-			Message: aws.String("An error occurred on the server side"), 
+		ssmReqErr: &ssmtypes.InternalServerError{
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		brSsmRsp: []*ssm.GetParametersOutput{nil},
 		ssmBrReqErr: &ssmtypes.InvalidKeyId{
-			Message: aws.String("The query key ID isn't valid."), 
+			Message:           aws.String("The query key ID isn't valid."),
 			ErrorCodeOverride: aws.String("400")},
 		expErr:     "fakeBackupRegion: Failed fetching parameters: 400: The query key ID isn't valid.",
 		expSecrets: map[string]string{},
@@ -1571,7 +1571,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		brSsmRsp: []*ssm.GetParametersOutput{nil},
 		ssmBrReqErr: &ssmtypes.InvalidKeyId{
-			Message: aws.String("Failed due to Invalid KeyId"), 
+			Message:           aws.String("Failed due to Invalid KeyId"),
 			ErrorCodeOverride: aws.String("400")},
 		expErr:     "Failed fetching parameters: 400: Failed due to Invalid KeyId",
 		expSecrets: map[string]string{},
@@ -1591,8 +1591,8 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		descRsp:   []*secretsmanager.DescribeSecretOutput{nil},
 		brGsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		brDescRsp: []*secretsmanager.DescribeSecretOutput{nil},
-		brReqErr:   &secretsmanagertypes.ResourceNotFoundException{
-			Message: aws.String("Secrets Manager can't find the specified secret"), 
+		brReqErr: &secretsmanagertypes.ResourceNotFoundException{
+			Message:           aws.String("Secrets Manager can't find the specified secret"),
 			ErrorCodeOverride: aws.String("400")},
 		expErr:     "Failed to describe secret",
 		expSecrets: map[string]string{},
@@ -1611,8 +1611,8 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		gsvRsp:  []*secretsmanager.GetSecretValueOutput{nil},
 		descRsp: []*secretsmanager.DescribeSecretOutput{nil},
-		reqErr:  &secretsmanagertypes.InternalServiceError{
-			Message: aws.String("An error occurred on the server side"), 
+		reqErr: &secretsmanagertypes.InternalServiceError{
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		brGsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
@@ -1664,7 +1664,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			},
 		},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("An error occurred on the server side"), 
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		gsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
@@ -1725,7 +1725,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			},
 		},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("An error occurred on the server side"), 
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		gsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
@@ -1870,7 +1870,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		ssmRsp: []*ssm.GetParametersOutput{nil},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("An error occurred on the server side"), 
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		gsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
@@ -2026,7 +2026,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		},
 		ssmRsp: []*ssm.GetParametersOutput{nil, nil},
 		ssmReqErr: &ssmtypes.InternalServerError{
-			Message: aws.String("An error occurred on the server side"), 
+			Message:           aws.String("An error occurred on the server side"),
 			ErrorCodeOverride: aws.String("500")},
 		gsvRsp: []*secretsmanager.GetSecretValueOutput{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},

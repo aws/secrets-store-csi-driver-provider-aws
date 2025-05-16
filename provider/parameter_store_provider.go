@@ -142,13 +142,13 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 
 	if len(rsp.InvalidParameters) != 0 {
 		uniqueParams := make(map[string]bool)
-        var uniqueList []string
-        for _, param := range rsp.InvalidParameters {
-            if !uniqueParams[param] {
-                uniqueParams[param] = true
-                uniqueList = append(uniqueList, param)
-            }
-        }
+		var uniqueList []string
+		for _, param := range rsp.InvalidParameters {
+			if !uniqueParams[param] {
+				uniqueParams[param] = true
+				uniqueList = append(uniqueList, param)
+			}
+		}
 		err = &types.InvalidParameters{Message: aws.String(fmt.Sprintf("%s: invalid parameters: %s", client.Region, strings.Join(uniqueList, ", "))), ErrorCodeOverride: aws.String("400")}
 		return nil, err
 	}

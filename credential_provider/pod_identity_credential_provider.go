@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-    "github.com/aws/aws-sdk-go-v2/config"
-    "github.com/aws/aws-sdk-go-v2/credentials/endpointcreds"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/endpointcreds"
 
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	podIdentityAudience   = "pods.eks.amazonaws.com"
-	defaultIPv4Endpoint   = "http://169.254.170.23/v1/credentials"
-	defaultIPv6Endpoint   = "http://[fd00:ec2::23]/v1/credentials"
-	httpTimeout           = 100 * time.Millisecond
+	podIdentityAudience = "pods.eks.amazonaws.com"
+	defaultIPv4Endpoint = "http://169.254.170.23/v1/credentials"
+	defaultIPv6Endpoint = "http://[fd00:ec2::23]/v1/credentials"
+	httpTimeout         = 100 * time.Millisecond
 )
 
 var (
@@ -44,63 +44,63 @@ func newPodIdentityTokenFetcher(
 }
 
 func (p *podIdentityTokenFetcher) GetToken() (string, error) {
-    tokenSpec := authv1.TokenRequestSpec{
-        Audiences: []string{podIdentityAudience},
-        BoundObjectRef: &authv1.BoundObjectReference{
-            Kind: "Pod",
-            Name: p.podName,
-        },
-    }
+	tokenSpec := authv1.TokenRequestSpec{
+		Audiences: []string{podIdentityAudience},
+		BoundObjectRef: &authv1.BoundObjectReference{
+			Kind: "Pod",
+			Name: p.podName,
+		},
+	}
 
 	// Use the K8s API to fetch the token associated with service account
-    tokRsp, err := p.k8sClient.ServiceAccounts(p.nameSpace).CreateToken(
-        context.Background(),
-        p.svcAcc,
-        &authv1.TokenRequest{Spec: tokenSpec},
-        metav1.CreateOptions{})
-    if err != nil {
-        return "", err
-    }
+	tokRsp, err := p.k8sClient.ServiceAccounts(p.nameSpace).CreateToken(
+		context.Background(),
+		p.svcAcc,
+		&authv1.TokenRequest{Spec: tokenSpec},
+		metav1.CreateOptions{})
+	if err != nil {
+		return "", err
+	}
 
-    return tokRsp.Status.Token, nil
+	return tokRsp.Status.Token, nil
 }
 
 // PodIdentityCredentialProvider implements CredentialProvider using pod identity
 type PodIdentityCredentialProvider struct {
-    region             string
-    credentialEndpoint string
-    fetcher            endpointcreds.AuthTokenProvider
-    httpClient         *http.Client
+	region             string
+	credentialEndpoint string
+	fetcher            endpointcreds.AuthTokenProvider
+	httpClient         *http.Client
 }
 
 func NewPodIdentityCredentialProvider(
-    region, nameSpace, svcAcc, podName, preferredAddressType string,
-    k8sClient k8sv1.CoreV1Interface,
+	region, nameSpace, svcAcc, podName, preferredAddressType string,
+	k8sClient k8sv1.CoreV1Interface,
 ) (ConfigProvider, error) {
-    endpoint := podIdentityAgentEndpointIPv4
-    if preferredAddressType == "ipv6" {
-        endpoint = podIdentityAgentEndpointIPv6
-    }
+	endpoint := podIdentityAgentEndpointIPv4
+	if preferredAddressType == "ipv6" {
+		endpoint = podIdentityAgentEndpointIPv6
+	}
 
-    return &PodIdentityCredentialProvider{
-        region:             region,
-        credentialEndpoint: endpoint,
-        fetcher:            newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
-        httpClient: &http.Client{
-            Timeout: httpTimeout,
-        },
-    }, nil
+	return &PodIdentityCredentialProvider{
+		region:             region,
+		credentialEndpoint: endpoint,
+		fetcher:            newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
+		httpClient: &http.Client{
+			Timeout: httpTimeout,
+		},
+	}, nil
 }
 
 func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, error) {
-    provider := endpointcreds.New(p.credentialEndpoint,
-        func(opts *endpointcreds.Options) {
-            opts.AuthorizationTokenProvider = p.fetcher
-            opts.HTTPClient = p.httpClient
-        },
-    )
-    return config.LoadDefaultConfig(ctx,
-        config.WithCredentialsProvider(provider),
-        config.WithRegion(p.region),
-    )
+	provider := endpointcreds.New(p.credentialEndpoint,
+		func(opts *endpointcreds.Options) {
+			opts.AuthorizationTokenProvider = p.fetcher
+			opts.HTTPClient = p.httpClient
+		},
+	)
+	return config.LoadDefaultConfig(ctx,
+		config.WithCredentialsProvider(provider),
+		config.WithRegion(p.region),
+	)
 }

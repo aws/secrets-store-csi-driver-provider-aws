@@ -30,8 +30,8 @@ type SecretsManagerProvider struct {
 }
 
 type SecretsManagerGetDescriber interface {
-    GetSecretValue(ctx context.Context, params *secretsmanager.GetSecretValueInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
-    DescribeSecret(ctx context.Context, params *secretsmanager.DescribeSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error)
+	GetSecretValue(ctx context.Context, params *secretsmanager.GetSecretValueInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
+	DescribeSecret(ctx context.Context, params *secretsmanager.DescribeSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error)
 }
 
 // SecretsManager client with region
@@ -254,7 +254,6 @@ func (p *SecretsManagerProvider) reloadSecret(descriptor *SecretDescriptor) (val
 	}
 	return &SecretValue{Value: sValue, Descriptor: *descriptor}, nil
 }
-
 
 // Factory methods to build a new SecretsManagerProvider
 func NewSecretsManagerProviderWithClients(clients ...SecretsManagerClient) *SecretsManagerProvider {

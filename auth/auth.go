@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
-	"github.com/aws/smithy-go/middleware" 
+	"github.com/aws/smithy-go/middleware"
 
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"

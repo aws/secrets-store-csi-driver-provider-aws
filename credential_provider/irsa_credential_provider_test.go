@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	
 )
 
 const (
@@ -24,21 +23,21 @@ func newIRSACredentialProviderWithMock(tstData irsaCredentialTest) *IRSACredenti
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-            Name:      testServiceAccount,
-            Namespace: testNamespace,
-        },
-	}	
+			Name:      testServiceAccount,
+			Namespace: testNamespace,
+		},
+	}
 	if !tstData.k8SAGetOneShotError {
 		if !tstData.testToken {
-            sa.Annotations = map[string]string{roleArnAnnotationKey: tstData.roleARN}
-        }
+			sa.Annotations = map[string]string{roleArnAnnotationKey: tstData.roleARN}
+		}
 	}
 	clientset := fake.NewSimpleClientset(sa)
 	if tstData.testToken {
 		k8sClient = &mockK8sV1{
 			CoreV1Interface:  clientset.CoreV1(),
-        	fake:             clientset.CoreV1(),
-        	k8CTOneShotError: tstData.k8CTOneShotError,		
+			fake:             clientset.CoreV1(),
+			k8CTOneShotError: tstData.k8CTOneShotError,
 		}
 	} else {
 		k8sClient = clientset.CoreV1()
@@ -79,11 +78,11 @@ func TestIRSACredentialProvider(t *testing.T) {
 			provider := newIRSACredentialProviderWithMock(tstData)
 			cfg, err := provider.GetAWSConfig(context.Background())
 			if err != nil {
-                if len(tstData.expError) > 0 && !strings.Contains(err.Error(), tstData.expError) {
-                    t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
-                }
-                return
-            }
+				if len(tstData.expError) > 0 && !strings.Contains(err.Error(), tstData.expError) {
+					t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
+				}
+				return
+			}
 
 			_, err = cfg.Credentials.Retrieve(context.Background())
 			if len(tstData.expError) == 0 && err != nil {

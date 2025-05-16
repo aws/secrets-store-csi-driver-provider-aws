@@ -7,7 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/aws-sdk-go-v2/service/sts/types"
-	
+
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -37,14 +37,14 @@ func (m *mockSTS) AssumeRoleWithWebIdentity(ctx context.Context, params *sts.Ass
 // Mock K8s client for creating tokens
 type mockK8sV1 struct {
 	k8sv1.CoreV1Interface
-	fake k8sv1.CoreV1Interface
+	fake             k8sv1.CoreV1Interface
 	k8CTOneShotError bool
 }
 
 func (m *mockK8sV1) ServiceAccounts(namespace string) k8sv1.ServiceAccountInterface {
 	return &mockK8sV1SA{
-        ServiceAccountInterface: m.fake.ServiceAccounts(namespace),
-        oneShotGetTokenError:    m.k8CTOneShotError,
+		ServiceAccountInterface: m.fake.ServiceAccounts(namespace),
+		oneShotGetTokenError:    m.k8CTOneShotError,
 	}
 }
 
