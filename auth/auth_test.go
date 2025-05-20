@@ -16,7 +16,7 @@ type mockSTS struct {
 }
 
 func (m *mockSTS) AssumeRoleWithWebIdentity(ctx context.Context, params *sts.AssumeRoleWithWebIdentityInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error) {
-	return nil, fmt.Errorf("fake error for serviceaccounst")
+	return nil, fmt.Errorf("fake error for serviceaccount")
 }
 
 type sessionTest struct {
