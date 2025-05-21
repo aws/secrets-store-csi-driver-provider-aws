@@ -24,6 +24,7 @@ import (
 
 const (
 	ProviderName = "secrets-store-csi-driver-provider-aws"
+	ProviderVersion = "1.0.0"
 )
 
 // Auth is the main entry point to retrieve an AWS config. The caller
@@ -117,6 +118,6 @@ func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.Bui
 	if !ok {
 		return next.HandleBuild(ctx, in)
 	}
-	req.Header.Set("User-Agent", m.providerName+" "+req.Header.Get("User-Agent"))
+	req.Header.Set("User-Agent", m.providerName + "/" + ProviderVersion + " " + req.Header.Get("User-Agent"))
 	return next.HandleBuild(ctx, in)
 }
