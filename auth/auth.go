@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	ProviderName    = "secrets-store-csi-driver-provider-aws"
+	ProviderName = "secrets-store-csi-driver-provider-aws"
 )
+
 // ProviderVersion is injected at build time from the Makefile
 var ProviderVersion = "unknown"
 
