@@ -24,8 +24,9 @@ import (
 
 const (
 	ProviderName    = "secrets-store-csi-driver-provider-aws"
-	ProviderVersion = "1.0.0"
 )
+// ProviderVersion is injected at build time from the Makefile
+var ProviderVersion = "unknown"
 
 // Auth is the main entry point to retrieve an AWS config. The caller
 // initializes a new Auth object with NewAuth passing the region, namespace, pod name,
@@ -118,6 +119,6 @@ func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.Bui
 	if !ok {
 		return next.HandleBuild(ctx, in)
 	}
-	req.Header.Set("User-Agent", m.providerName+"/"+ProviderVersion+" "+req.Header.Get("User-Agent"))
+	req.Header.Add("User-Agent", m.providerName+"/"+ProviderVersion)
 	return next.HandleBuild(ctx, in)
 }
