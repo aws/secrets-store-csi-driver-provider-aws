@@ -15,6 +15,10 @@ FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 .PHONY: all clean docker-login docker-buildx
 
+LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
+          -X github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=$(FULL_REV) \
+          -extldflags "-static""
+
 CHART_RELEASER_PATH ?= cr
 
 # Build docker image and push to AWS registry
