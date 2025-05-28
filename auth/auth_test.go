@@ -2,16 +2,21 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/service/sts/stsiface"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
 // Mock STS client
 type mockSTS struct {
-	stsiface.STSAPI
+	sts.Client
+}
+
+func (m *mockSTS) AssumeRoleWithWebIdentity(ctx context.Context, params *sts.AssumeRoleWithWebIdentityInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error) {
+	return nil, fmt.Errorf("fake error for serviceaccount")
 }
 
 type sessionTest struct {
@@ -29,11 +34,11 @@ var sessionTests []sessionTest = []sessionTest{
 	{
 		testName:        "Pod Identity",
 		testPodIdentity: true,
-		expError:        "failed to fetch token", // Pod Identity path will fail fetching token since using fake client
+		expError:        "", // Pod Identity path succeeds since token is lazy loaded
 	},
 }
 
-func TestGetAWSSession(t *testing.T) {
+func TestGetAWSConfig(t *testing.T) {
 	for _, tstData := range sessionTests {
 		t.Run(tstData.testName, func(t *testing.T) {
 
@@ -45,21 +50,20 @@ func TestGetAWSSession(t *testing.T) {
 				usePodIdentity: tstData.testPodIdentity,
 				k8sClient:      fake.NewSimpleClientset().CoreV1(),
 				stsClient:      &mockSTS{},
-				ctx:            context.Background(),
 			}
 
-			sess, err := auth.GetAWSSession()
+			cfg, err := auth.GetAWSConfig(context.Background())
 
 			if len(tstData.expError) == 0 && err != nil {
 				t.Errorf("%s case: got unexpected auth error: %s", tstData.testName, err)
 			}
-			if len(tstData.expError) == 0 && sess == nil {
+			if len(tstData.expError) == 0 && cfg.Credentials == nil {
 				t.Errorf("%s case: got empty session", tstData.testName)
 			}
 			if len(tstData.expError) != 0 && err == nil {
 				t.Errorf("%s case: expected error but got none", tstData.testName)
 			}
-			if len(tstData.expError) != 0 && !strings.Contains(err.Error(), tstData.expError) {
+			if len(tstData.expError) != 0 && err != nil && !strings.Contains(err.Error(), tstData.expError) {
 				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
 			}
 		})

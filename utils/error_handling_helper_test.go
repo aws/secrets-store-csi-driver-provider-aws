@@ -3,43 +3,48 @@ package utils
 import (
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/stretchr/testify/assert"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	secretsmanagertypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 )
 
-type awsError awserr.Error
+func TestIsFatalError(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		isFatal bool
+	}{
+		{
+			name: "asm ResourceNotFoundException",
+			err: &secretsmanagertypes.ResourceNotFoundException{
+				Message:           aws.String("Secret not found"),
+				ErrorCodeOverride: aws.String("400"),
+			},
+			isFatal: true,
+		},
+		{
+			name: "ssm InternalServerError",
+			err: &ssmtypes.InternalServerError{
+				Message:           aws.String("Internal server error occurred"),
+				ErrorCodeOverride: aws.String("500"),
+			},
+			isFatal: false,
+		},
+		{
+			name: "ssm InvalidParameterException",
+			err: &ssmtypes.InvalidParameters{
+				Message:           aws.String("Invalid parameter value"),
+				ErrorCodeOverride: aws.String("400"),
+			},
+			isFatal: true,
+		},
+	}
 
-type WrapAwsError struct {
-	awsError
-	code string
-
-	message string
-
-	err error
-}
-
-func (w WrapAwsError) Error() string {
-	return awserr.SprintError(w.code, w.message, "", w.OrigErr())
-}
-
-func (w WrapAwsError) OrigErr() error {
-	return w.err
-}
-
-func TestIsFatalError_CannotAssumeRoleWithWebIdentity_isFatal(t *testing.T) {
-	innerErr := WrapAwsError{code: "AccessDenied", message: "Not authorized to perform sts:AssumeRoleWithWebIdentity", err: nil}
-	awsRequestError := awserr.NewRequestFailure(innerErr, 403, "someId")
-	returnedErr := WrapAwsError{code: "WebIdentityErr", message: "failed to retrieve credentials", err: awsRequestError}
-
-	fatalError := IsFatalError(returnedErr)
-
-	assert.Equal(t, true, fatalError)
-}
-
-func TestIsFatalError_WrapperWithoutOriginError_nonFatal(t *testing.T) {
-	returnedErr := WrapAwsError{code: "WebIdentityErr", message: "failed to retrieve credentials", err: nil}
-
-	fatalError := IsFatalError(returnedErr)
-
-	assert.Equal(t, false, fatalError)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if IsFatalError(c.err) != c.isFatal {
+				t.Errorf("Expected IsFatalError(%v) to be %v", c.err, c.isFatal)
+			}
+		})
+	}
 }

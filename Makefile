@@ -20,7 +20,9 @@ $(eval PATCH_REV=$(shell git describe --always))
 $(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
 
-LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) -extldflags "-static""
+LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
+          -X github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=$(FULL_REV) \
+          -extldflags "-static""
 
 CHART_RELEASER_PATH ?= cr
 
