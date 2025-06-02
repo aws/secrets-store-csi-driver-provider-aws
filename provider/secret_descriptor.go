@@ -40,6 +40,9 @@ type SecretDescriptor struct {
 	// One of secretsmanager or ssmparameter (not required when using full secrets manager ARN).
 	ObjectType string `json:"objectType"`
 
+	// Optional encoding type of the secret value (e.g., "base64")
+	ObjectEncoding string `json:"objectEncoding"`
+
 	// Optional file permission (default to driver file permission).
 	FilePermission string `json:"filePermission"`
 
@@ -73,6 +76,9 @@ type JMESPathEntry struct {
 
 	// Optional file permission (default to driver file permission).
 	FilePermission string `json:"filePermission"`
+
+	// Optional encoding type of the secret value (e.g., "base64")
+	ObjectEncoding string `json:"objectEncoding"`
 }
 
 // An individual json key value pair to mount
@@ -181,6 +187,7 @@ func (p *SecretDescriptor) getJmesEntrySecretDescriptor(j *JMESPathEntry) (d Sec
 		translate:      p.translate,
 		mountDir:       p.mountDir,
 		FilePermission: permission,
+		ObjectEncoding: j.ObjectEncoding,
 	}
 }
 

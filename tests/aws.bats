@@ -43,7 +43,7 @@ setup_file() {
    
    #Install csi secret driver
    helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-   helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
+   #helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
  
    #Create test secrets
    aws secretsmanager create-secret --name SecretsManagerTest1 --secret-string SecretsManagerTest1Value --region $REGION
@@ -52,7 +52,11 @@ setup_file() {
    aws secretsmanager create-secret --name SecretsManagerTest1 --secret-string SecretsManagerTest1Value --region $FAILOVERREGION
    aws secretsmanager create-secret --name SecretsManagerTest2 --secret-string SecretsManagerTest2Value --region $FAILOVERREGION
    aws secretsmanager create-secret --name SecretsManagerSync --secret-string SecretUser --region $FAILOVERREGION
- 
+
+   #Create a JSON secret with a base64 encoded value ("Hello, World!" encoded as base64)
+   aws secretsmanager create-secret --name secretsManagerJsonBase64  --secret-string '{"usernameBase64": "SGVsbG8sIFdvcmxkIQ=="}' --region $REGION
+   aws secretsmanager create-secret --name secretsManagerJsonBase64 --secret-string '{"usernameBase64": "SGVsbG8sIFdvcmxkIQ=="}' --region $FAILOVERREGION
+
    aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $REGION
    aws ssm put-parameter --name ParameterStoreTestWithLongName --value ParameterStoreTest2Value --type SecureString --region $REGION
    aws ssm put-parameter --name ParameterStoreTest1 --value ParameterStoreTest1Value --type SecureString --region $FAILOVERREGION
@@ -81,7 +85,9 @@ teardown_file() {
     aws secretsmanager delete-secret --secret-id SecretsManagerTest1 --force-delete-without-recovery --region $FAILOVERREGION
     aws secretsmanager delete-secret --secret-id SecretsManagerTest2 --force-delete-without-recovery --region $FAILOVERREGION
     aws secretsmanager delete-secret --secret-id SecretsManagerSync --force-delete-without-recovery --region $FAILOVERREGION
- 
+    aws secretsmanager delete-secret --secret-id secretsManagerJsonBase64 --force-delete-without-recovery --region $REGION
+    aws secretsmanager delete-secret --secret-id secretsManagerJsonBase64 --force-delete-without-recovery --region $FAILOVERREGION
+
     aws ssm delete-parameter --name ParameterStoreTest1 --region $REGION
     aws ssm delete-parameter --name ParameterStoreTestWithLongName --region $REGION 
     aws ssm delete-parameter --name ParameterStoreTest1 --region $FAILOVERREGION
@@ -218,6 +224,12 @@ validate_jsme_mount() {
     USERNAME_ALIAS=secretsManagerUsername USERNAME=SecretsManagerUserUpdated PASSWORD_ALIAS=secretsManagerPassword \
     PASSWORD=PasswordForSecretsManagerUpdated SECRET_FILE_NAME=secretsManagerJson SECRET_FILE_CONTENT=$UPDATED_JSON_CONTENT
     K8_SECRET_NAME=secrets-manager-json validate_jsme_mount
+}
+
+@test "CSI inline volume test - base64 decoding of secret value" {
+
+    result=$(kubectl --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/secretsManagerUsernameBase64)
+    [[ "${result//$'\r'}" == "Hello, World!" ]]
 }
 
 @test "Sync with Kubernetes Secret" {

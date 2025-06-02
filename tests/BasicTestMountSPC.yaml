@@ -60,3 +60,9 @@ spec:
                 ObjectAlias: "secretsManagerUsername"
               - Path: "password"
                 ObjectAlias: "secretsManagerPassword"
+        - objectName: "secretsManagerJsonBase64"
+          objectType: "secretsmanager"
+          jmesPath:
+              - Path: "usernameBase64"
+                ObjectAlias: "secretsManagerUsernameBase64"
+                ObjectEncoding: "base64"
