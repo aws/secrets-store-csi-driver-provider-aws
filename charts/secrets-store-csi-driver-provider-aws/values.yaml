@@ -44,3 +44,6 @@ securityContext:
   allowPrivilegeEscalation: false
 
 useFipsEndpoint: false
+
+dnsConfig: {}
+#dnsPolicy: ClusterFirst
