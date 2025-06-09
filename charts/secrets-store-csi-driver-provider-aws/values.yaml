@@ -46,4 +46,3 @@ securityContext:
 useFipsEndpoint: false
 
 dnsConfig: {}
-#dnsPolicy: ClusterFirst
