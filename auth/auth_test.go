@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"k8s.io/client-go/kubernetes/fake"
@@ -48,6 +49,7 @@ func TestGetAWSConfig(t *testing.T) {
 				svcAcc:         "someSvcAcc",
 				podName:        "somepod",
 				usePodIdentity: tstData.testPodIdentity,
+				httpTimeout:    100 * time.Millisecond,
 				k8sClient:      fake.NewSimpleClientset().CoreV1(),
 				stsClient:      &mockSTS{},
 			}

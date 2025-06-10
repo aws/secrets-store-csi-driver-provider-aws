@@ -258,6 +258,11 @@ func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.
 		attrMap["usePodIdentity"] = usePodIdentity
 	}
 
+	httpTimeout := tst.attributes["httpTimeout"]
+	if len(httpTimeout) > 0 {
+		attrMap["httpTimeout"] = httpTimeout
+	}
+
 	objs, err := yaml.Marshal(tst.mountObjs)
 	if err != nil {
 		panic(err)
@@ -605,7 +610,7 @@ var mountTests []testCase = []testCase{
 		testName: "New Mount Success with usePodIdentity provided",
 		attributes: map[string]string{
 			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "200ms",
 		},
 		mountObjs: []map[string]interface{}{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
@@ -915,7 +920,7 @@ var mountTests []testCase = []testCase{
 		testName: "Fail Pod Identity Session",
 		attributes: map[string]string{
 			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "usePodIdentity": "yes",
+			"nodeName": "fakeNode", "region": "", "usePodIdentity": "yes", "httpTimeout": "200ms",
 		},
 		mountObjs: []map[string]interface{}{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
@@ -1161,6 +1166,94 @@ var mountTests []testCase = []testCase{
 			"TestParm1":   "parm1",
 		},
 		perms: "420",
+	},
+	{ // Test valid httpTimeout values
+		testName: "Valid httpTimeout 50ms",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "50ms",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		expErr:  "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
+	{ // Test valid httpTimeout values
+		testName: "Valid httpTimeout 2s",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "2s",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+		expErr:  "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
+	{ // Test invalid httpTimeout value
+		testName: "Invalid httpTimeout",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "invalid",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp:     []*ssm.GetParametersOutput{},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "failed to parse httpTimeout value",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Test negative httpTimeout value
+		testName: "Negative httpTimeout",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "-100ms",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp:     []*ssm.GetParametersOutput{},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "httpTimeout must be positive",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Test zero httpTimeout value
+		testName: "Zero httpTimeout",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "0ms",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp:     []*ssm.GetParametersOutput{},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "httpTimeout must be positive",
+		expSecrets: map[string]string{},
+		perms:      "420",
 	},
 }
 
