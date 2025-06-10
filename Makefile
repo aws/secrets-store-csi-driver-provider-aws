@@ -39,7 +39,7 @@ clean:
     -docker system prune --all --force
 
 docker-login:
-    # Logging into ecr-public is to pull the Amazon Linux 2 image used for the build
+    # Logging into ecr-public is required to pull the Amazon Linux 2 image used for the build
     aws --region us-east-1 ecr-public get-login-password | docker login -u AWS --password-stdin public.ecr.aws
     ifneq ($(REPOBASE), public.ecr.aws)
         aws --region $(AWS_REGION) ecr get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
