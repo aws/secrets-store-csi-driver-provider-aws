@@ -48,7 +48,7 @@ docker-buildx:
                 -t $(REGISTRY_NAME):latest-linux-arm64 \
                 -t $(REGISTRY_NAME):$(FULL_REV)-linux-amd64 \
                 -t $(REGISTRY_NAME):$(FULL_REV)-linux-arm64 \
-				. ;
+                . ;
 
 # Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
 upload-helm:
