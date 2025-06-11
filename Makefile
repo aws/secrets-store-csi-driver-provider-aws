@@ -10,16 +10,17 @@ endif
 
 MAJOR_REV=1
 MINOR_REV=1
-PATCH_REV=0
-FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
-
-.PHONY: all clean docker-login docker-buildx
+$(eval PATCH_REV=$(shell git describe --always))
+$(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
+FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
           -X github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=$(FULL_REV) \
           -extldflags "-static""
 
 CHART_RELEASER_PATH ?= cr
+
+.PHONY: all clean docker-login docker-buildx
 
 # Build docker image and push to AWS registry
 all: clean docker-login docker-buildx
@@ -39,7 +40,10 @@ docker-login:
 docker-buildx:
     @!(docker manifest inspect $(REGISTRY_NAME):$(FULL_REV) > /dev/null) || (echo "Version already exists"; exit 1)
 
-    docker buildx build --platform linux/arm64,linux/amd64 --push \
+    docker buildx build \
+                --platform linux/arm64,linux/amd64 \
+                --build-arg LDFLAGS=$(LDFLAGS) \
+                --push \
                 -t $(REGISTRY_NAME):latest \
                 -t $(REGISTRY_NAME):$(FULL_REV) \
                 -t $(REGISTRY_NAME):$(MAJOR_REV) \
