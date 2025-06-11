@@ -22,9 +22,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           build-args: >
-            LDFLAGS=-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion 
+            LDFLAGS='-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion 
             -X github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=fakeversion 
-            -extldflags "-static"
+            -extldflags "-static"'
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
