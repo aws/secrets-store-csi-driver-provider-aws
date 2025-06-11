@@ -32,18 +32,22 @@ CHART_RELEASER_PATH ?= cr
 all: build docker-login docker-buildx docker-manifest
 
 build: clean
-	$(foreach ARCH,$(ARCHITECTURES),CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(ARCH) go build -a -ldflags $(LDFLAGS) -o _output/$(IMAGE_NAME)-$(ARCH) ;)
+    $(foreach ARCH,$(ARCHITECTURES),CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(ARCH) go build -a -ldflags $(LDFLAGS) -o _output/$(IMAGE_NAME)-$(ARCH) ;)
 
 clean:
-	-rm -rf _output
-	-docker system prune --all --force
+    -rm -rf _output
+    -docker system prune --all --force
 
 docker-login:
-	aws --region $(AWS_REGION) $(ECRCMD) get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
+    # Logging into ecr-public is required to pull the Amazon Linux 2 image used for the build
+    aws --region us-east-1 ecr-public get-login-password | docker login -u AWS --password-stdin public.ecr.aws
+    ifneq ($(REPOBASE), public.ecr.aws)
+        aws --region $(AWS_REGION) ecr get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
+    endif
 
 # Build, tag, and push image for architecture
 docker-buildx:
-	$(foreach ARCH,$(ARCHITECTURES),docker buildx build \
+    $(foreach ARCH,$(ARCHITECTURES),docker buildx build \
                 --platform $(GOOS)/$(ARCH) \
                 --no-cache \
                 --push \
@@ -54,12 +58,12 @@ docker-buildx:
 
 # Create and push manifest list for images
 docker-manifest:
-	docker buildx imagetools create --tag $(REGISTRY_NAME):latest $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
-	docker buildx imagetools create --tag $(REGISTRY_NAME):$(FULL_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
-	docker buildx imagetools create --tag $(REGISTRY_NAME):$(MAJOR_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
+    docker buildx imagetools create --tag $(REGISTRY_NAME):latest $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
+    docker buildx imagetools create --tag $(REGISTRY_NAME):$(FULL_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
+    docker buildx imagetools create --tag $(REGISTRY_NAME):$(MAJOR_REV) $(foreach ARCH, $(ARCHITECTURES), $(REGISTRY_NAME):latest-$(ARCH))
 
 # Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
 upload-helm:
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} package
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
+    cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} package
+    cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
+    cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
