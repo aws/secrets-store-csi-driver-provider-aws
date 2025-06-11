@@ -37,17 +37,17 @@ docker-login:
 
 # Build, tag, and push multi-architecture image.
 docker-buildx:
-	@!(docker manifest inspect $(REGISTRY_NAME):$(FULL_REV) > /dev/null) || (echo "Version already exists"; exit 1)
+    @!(docker manifest inspect $(REGISTRY_NAME):$(FULL_REV) > /dev/null) || (echo "Version already exists"; exit 1)
 
-	docker buildx build --platform linux/arm64,linux/amd64 --push \
-				-t $(REGISTRY_NAME):latest \
-				-t $(REGISTRY_NAME):$(FULL_REV) \
-				-t $(REGISTRY_NAME):$(MAJOR_REV) \
-				-t $(REGISTRY_NAME):latest-linux \
-				-t $(REGISTRY_NAME):latest-linux-amd64 \
-				-t $(REGISTRY_NAME):latest-linux-arm64 \
-				-t $(REGISTRY_NAME):$(FULL_REV)-linux-amd64 \
-				-t $(REGISTRY_NAME):$(FULL_REV)-linux-arm64 \
+    docker buildx build --platform linux/arm64,linux/amd64 --push \
+                -t $(REGISTRY_NAME):latest \
+                -t $(REGISTRY_NAME):$(FULL_REV) \
+                -t $(REGISTRY_NAME):$(MAJOR_REV) \
+                -t $(REGISTRY_NAME):latest-linux \
+                -t $(REGISTRY_NAME):latest-linux-amd64 \
+                -t $(REGISTRY_NAME):latest-linux-arm64 \
+                -t $(REGISTRY_NAME):$(FULL_REV)-linux-amd64 \
+                -t $(REGISTRY_NAME):$(FULL_REV)-linux-arm64 \
 				. ;
 
 # Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
