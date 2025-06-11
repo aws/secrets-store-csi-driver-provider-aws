@@ -25,11 +25,15 @@ CHART_RELEASER_PATH ?= cr
 all: clean docker-login docker-buildx
 
 clean:
-	-rm -rf _output
-	-docker system prune --all --force
+    -rm -rf _output
+    -docker system prune --all --force
 
 docker-login:
-	aws --region $(AWS_REGION) $(ECRCMD) get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
+    # Logging into ecr-public is required to pull the Amazon Linux 2 image used for the build
+    aws --region us-east-1 ecr-public get-login-password | docker login -u AWS --password-stdin public.ecr.aws
+    ifneq ($(REPOBASE), public.ecr.aws)
+        aws --region $(AWS_REGION) ecr get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
+    endif
 
 # Build, tag, and push multi-architecture image.
 docker-buildx:
@@ -48,6 +52,6 @@ docker-buildx:
 
 # Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
 upload-helm:
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} package
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
+    cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} package
+    cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
+    cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .
