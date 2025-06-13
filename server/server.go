@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
@@ -41,6 +42,7 @@ const (
 	failoverRegionAttrib       = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
 	usePodIdentityAttrib       = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
 	preferredAddressTypeAttrib = "preferredAddressType"          // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
+	httpTimeoutAttrib          = "httpTimeout"                   // The attribute used to specify HTTP timeout for Pod Identity Agent communication
 )
 
 // A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
@@ -107,10 +109,30 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	failoverRegion := attrib[failoverRegionAttrib]
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
 	preferredAddressType := attrib[preferredAddressTypeAttrib]
+	httpTimeoutStr := attrib[httpTimeoutAttrib]
 
 	// Validate preferred address type
 	if preferredAddressType != "ipv4" && preferredAddressType != "ipv6" && preferredAddressType != "auto" && preferredAddressType != "" {
 		return nil, fmt.Errorf("invalid preferred address type: %s", preferredAddressType)
+	}
+
+	// Parse and validate HTTP timeout
+	var httpTimeoutDuration time.Duration
+	if httpTimeoutStr != "" {
+		var err error
+		httpTimeoutDuration, err = time.ParseDuration(httpTimeoutStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse httpTimeout value '%s': %v", httpTimeoutStr, err)
+		}
+		if httpTimeoutDuration <= 0 {
+			return nil, fmt.Errorf("httpTimeout must be positive, got: %v", httpTimeoutDuration)
+		}
+		if httpTimeoutDuration > 30*time.Second {
+			klog.Warningf("httpTimeout value %v is unusually high, consider using a smaller value", httpTimeoutDuration)
+		}
+	} else {
+		// Default to 100ms for backward compatibility
+		httpTimeoutDuration = 100 * time.Millisecond
 	}
 
 	// Make a map of the currently mounted versions (if any)
@@ -148,7 +170,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType)
+	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType, httpTimeoutDuration)
 	if err != nil {
 		return nil, err
 	}
@@ -232,12 +254,12 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []aws.Config, err error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, httpTimeout time.Duration) (response []aws.Config, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsConfigsList []aws.Config
 
 	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, usePodIdentity, s.k8sClient)
+		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, usePodIdentity, httpTimeout, s.k8sClient)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
