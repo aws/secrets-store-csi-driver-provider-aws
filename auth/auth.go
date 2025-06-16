@@ -29,66 +29,95 @@ const (
 // ProviderVersion is injected at build time from the Makefile
 var ProviderVersion = "unknown"
 
-// Auth is the main entry point to retrieve an AWS config. The caller
-// initializes a new Auth object with NewAuth passing the region, namespace, pod name,
-// K8s service account and usePodIdentity flag  (and request context). The caller can then obtain AWS
-// config by calling GetAWSConfig.
-type Auth struct {
-	region, nameSpace, svcAcc, podName, preferredAddressType string
-	usePodIdentity                                           bool
-	k8sClient                                                k8sv1.CoreV1Interface
-	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
+// irsaAuth implements credential_provider.ConfigProvider using IAM Roles for Service Accounts
+type irsaAuth struct {
+	region, namespace, serviceAccount string
+	k8sClient                         k8sv1.CoreV1Interface
+	stsClient                         stscreds.AssumeRoleWithWebIdentityAPIClient
+	tokenFetcher                      credential_provider.TokenFetcher
 }
 
-// NewAuth creates an Auth object for an incoming mount request.
-func NewAuth(
-	region, nameSpace, svcAcc, podName, preferredAddressType string,
-	usePodIdentity bool,
+// NewIRSAAuth creates a ConfigProvider that uses IAM Roles for Service Accounts authentication.
+func NewIRSAAuth(
+	region, namespace, serviceAccount string,
 	k8sClient k8sv1.CoreV1Interface,
-) (auth *Auth, e error) {
-	var stsClient *sts.Client
+	tokenFetcher credential_provider.TokenFetcher,
+) (credential_provider.ConfigProvider, error) {
+	klog.Infof("Using IAM Roles for Service Accounts for authentication in namespace: %s, service account: %s", namespace, serviceAccount)
 
-	if !usePodIdentity {
-		// Get an initial config to use for STS calls when using IRSA
-		cfg, err := config.LoadDefaultConfig(context.Background(),
-			config.WithRegion(region),
-			config.WithDefaultsMode(aws.DefaultsModeStandard),
-		)
-		if err != nil {
-			return nil, err
-		}
-		stsClient = sts.NewFromConfig(cfg)
+	// Get an initial config to use for STS calls when using IRSA
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithRegion(region),
+		config.WithDefaultsMode(aws.DefaultsModeStandard),
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	return &Auth{
-		region:               region,
-		nameSpace:            nameSpace,
-		svcAcc:               svcAcc,
-		podName:              podName,
-		preferredAddressType: preferredAddressType,
-		usePodIdentity:       usePodIdentity,
-		k8sClient:            k8sClient,
-		stsClient:            stsClient,
-	}, nil
+	stsClient := sts.NewFromConfig(cfg)
 
+	return &irsaAuth{
+		region:         region,
+		namespace:      namespace,
+		serviceAccount: serviceAccount,
+		k8sClient:      k8sClient,
+		stsClient:      stsClient,
+		tokenFetcher:   tokenFetcher,
+	}, nil
 }
 
-// Get the AWS config associated with a given pod's service account.
-// The returned config is capable of automatically refreshing creds as needed
-// by using a private TokenFetcher helper.
-func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
-	var credProvider credential_provider.ConfigProvider
+// GetAWSConfig for IRSA auth
+func (p *irsaAuth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
+	credProvider := credential_provider.NewIRSACredentialProvider(
+		p.region,
+		p.namespace,
+		p.serviceAccount,
+		p.stsClient,
+		p.k8sClient,
+		p.tokenFetcher,
+	)
 
-	if p.usePodIdentity {
-		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
-		var err error
-		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.k8sClient)
-		if err != nil {
-			return aws.Config{}, err
-		}
-	} else {
-		klog.Infof("Using IAM Roles for Service Accounts for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
-		credProvider = credential_provider.NewIRSACredentialProvider(p.stsClient, p.region, p.nameSpace, p.svcAcc, p.k8sClient)
+	cfg, err := credProvider.GetAWSConfig(ctx)
+	if err != nil {
+		return aws.Config{}, err
+	}
+
+	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
+		return stack.Build.Add(&userAgentMiddleware{
+			providerName: ProviderName,
+		}, middleware.After)
+	})
+
+	return cfg, nil
+}
+
+// podIdentityAuth implements credential_provider.ConfigProvider using Pod Identity
+type podIdentityAuth struct {
+	region, preferredAddressType string
+	tokenFetcher                 credential_provider.TokenFetcher
+}
+
+// NewPodIdentityAuth creates a ConfigProvider that uses Pod Identity authentication.
+func NewPodIdentityAuth(
+	region, preferredAddressType string,
+	tokenFetcher credential_provider.TokenFetcher,
+) (credential_provider.ConfigProvider, error) {
+	return &podIdentityAuth{
+		region:               region,
+		preferredAddressType: preferredAddressType,
+		tokenFetcher:         tokenFetcher,
+	}, nil
+}
+
+// GetAWSConfig for Pod Identity auth
+func (p *podIdentityAuth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
+	credProvider, err := credential_provider.NewPodIdentityCredentialProvider(
+		p.region,
+		p.preferredAddressType,
+		p.tokenFetcher,
+	)
+	if err != nil {
+		return aws.Config{}, err
 	}
 
 	cfg, err := credProvider.GetAWSConfig(ctx)
@@ -96,7 +125,6 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 		return aws.Config{}, err
 	}
 
-	// Add the user agent to the config
 	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
 		return stack.Build.Add(&userAgentMiddleware{
 			providerName: ProviderName,

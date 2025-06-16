@@ -12,6 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.49.3
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.19
 	github.com/aws/smithy-go v1.22.2
+	github.com/jellydator/ttlcache/v3 v3.3.0
 	github.com/jmespath/go-jmespath v0.4.0
 	google.golang.org/grpc v1.71.1
 	k8s.io/api v0.32.3
@@ -54,6 +55,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.28.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/term v0.30.0 // indirect
 	golang.org/x/text v0.23.0 // indirect

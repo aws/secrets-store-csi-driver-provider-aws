@@ -14,9 +14,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-
+	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
+	"github.com/jellydator/ttlcache/v3"
 	"google.golang.org/grpc"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -34,18 +36,20 @@ const (
 	namespaceAttrib            = "csi.storage.k8s.io/pod.namespace"
 	acctAttrib                 = "csi.storage.k8s.io/serviceAccount.name"
 	podnameAttrib              = "csi.storage.k8s.io/pod.name"
-	regionAttrib               = "region"                        // The attribute name for the region in the SecretProviderClass
-	transAttrib                = "pathTranslation"               // Path translation char
-	regionLabel                = "topology.kubernetes.io/region" // The node label giving the region
-	secProvAttrib              = "objects"                       // The attribute used to pass the SecretProviderClass definition (with what to mount)
-	failoverRegionAttrib       = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
-	usePodIdentityAttrib       = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
-	preferredAddressTypeAttrib = "preferredAddressType"          // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
+	regionAttrib               = "region"                                         // The attribute name for the region in the SecretProviderClass
+	transAttrib                = "pathTranslation"                                // Path translation char
+	regionLabel                = "topology.kubernetes.io/region"                  // The node label giving the region
+	secProvAttrib              = "objects"                                        // The attribute used to pass the SecretProviderClass definition (with what to mount)
+	failoverRegionAttrib       = "failoverRegion"                                 // The attribute name for the failover region in the SecretProviderClass
+	usePodIdentityAttrib       = "usePodIdentity"                                 // The attribute used to indicate use Pod Identity for auth
+	preferredAddressTypeAttrib = "preferredAddressType"                           // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
+	volumeIdAttrib             = "secrets-store-csi-driver.sigs.k8s.io/volume.id" // The attribute name for the volume ID in the mount request
+	svcAccTokensAttrib         = "csi.storage.k8s.io/serviceAccount.tokens"       // The attribute name for CSI tokens in the mount request
+	irsaAudience               = "sts.amazonaws.com"                              // Audience string for IRSA
+	podIdentityAudience        = "pods.eks.amazonaws.com"                         // Audience string for Pod Identity
 )
 
-// A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
-//
-// This server receives mount requests and then retreives and stores the secrets
+// CSIDriverProviderServer receives mount requests and then retreives and stores the secrets
 // from that request. The details of what secrets are required and where to
 // store them are in the request. The secrets will be retrieved using the AWS
 // credentials of the IAM role associated with the pod. If there is a failure
@@ -55,9 +59,15 @@ type CSIDriverProviderServer struct {
 	secretProviderFactory provider.ProviderFactoryFactory
 	k8sClient             k8sv1.CoreV1Interface
 	driverWriteSecrets    bool
+	tokenCache            *ttlcache.Cache[string, credential_provider.TokenCacheValue]
 }
 
-// Factory function to create the server to handle incoming mount requests.
+type CSIToken struct {
+	Token               string `json:"token"`
+	ExpirationTimestamp string `json:"expirationTimestamp"`
+}
+
+// NewServer creates the server to handle incoming mount requests.
 func NewServer(
 	secretProviderFact provider.ProviderFactoryFactory,
 	k8client k8sv1.CoreV1Interface,
@@ -68,6 +78,7 @@ func NewServer(
 		secretProviderFactory: secretProviderFact,
 		k8sClient:             k8client,
 		driverWriteSecrets:    driverWriteSecrets,
+		tokenCache:            ttlcache.New[string, credential_provider.TokenCacheValue](),
 	}, nil
 
 }
@@ -80,14 +91,14 @@ func NewServer(
 func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.MountRequest) (response *v1alpha1.MountResponse, e error) {
 	// Log out the write mode
 	if s.driverWriteSecrets {
-		klog.Infof("Driver is configured to write secrets")
+		klog.Infof("driver is configured to write secrets")
 	} else {
-		klog.Infof("Provider is configured to write secrets")
+		klog.Infof("provider is configured to write secrets")
 	}
 
 	// Basic sanity check
 	if len(req.GetTargetPath()) == 0 {
-		return nil, fmt.Errorf("Missing mount path")
+		return nil, fmt.Errorf("missing mount path")
 	}
 	mountDir := req.GetTargetPath()
 
@@ -107,6 +118,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	failoverRegion := attrib[failoverRegionAttrib]
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
 	preferredAddressType := attrib[preferredAddressTypeAttrib]
+	volumeId := attrib[volumeIdAttrib]
 
 	// Validate preferred address type
 	if preferredAddressType != "ipv4" && preferredAddressType != "ipv6" && preferredAddressType != "auto" && preferredAddressType != "" {
@@ -148,7 +160,38 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType)
+	tokens, ok := attrib[svcAccTokensAttrib]
+	if ok {
+		tokenMap := make(map[string]CSIToken)
+
+		err = json.Unmarshal([]byte(tokens), &tokenMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal tokens, error: %+v", err)
+		}
+
+		var tok CSIToken
+		var ok bool
+		if usePodIdentity {
+			tok, ok = tokenMap[podIdentityAudience]
+			if !ok {
+				return nil, fmt.Errorf("token not found for %s", podIdentityAudience)
+			}
+		} else {
+			tok, ok = tokenMap[irsaAudience]
+			if !ok {
+				return nil, fmt.Errorf("token not found for %s", irsaAudience)
+			}
+		}
+
+		exp, err := time.Parse(time.RFC3339, tok.ExpirationTimestamp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse token expiration timestamp, error: %+v", err)
+		}
+
+		credential_provider.SetTokenCacheValue(s.tokenCache, volumeId, region, tok.Token, exp)
+	}
+
+	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, preferredAddressType, volumeId, regions, usePodIdentity)
 	if err != nil {
 		return nil, err
 	}
@@ -170,10 +213,10 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	var fetchedSecrets []*provider.SecretValue
 	for sType := range descriptors { // Iterate over each secret type.
 		// Fetch all the secrets and update the curVerMap
-		provider := providerFactory.GetSecretProvider(sType)
-		secrets, err := provider.GetSecretValues(ctx, descriptors[sType], curVerMap)
+		secretProvider := providerFactory.GetSecretProvider(sType)
+		secrets, err := secretProvider.GetSecretValues(ctx, descriptors[sType], curVerMap)
 		if err != nil {
-			klog.Errorf("Failure getting secret values from provider type %s: %s", sType, err)
+			klog.Errorf("failure getting secret values from provider type %s: %s", sType, err)
 			return nil, err
 		}
 		fetchedSecrets = append(fetchedSecrets, secrets...) // Build up the list of all secrets
@@ -232,34 +275,43 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []aws.Config, err error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, preferredAddressType, volumeId string, lookupRegionList []string, usePodIdentity bool) (response []aws.Config, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsConfigsList []aws.Config
 
 	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, usePodIdentity, s.k8sClient)
+		var cfgProvider credential_provider.ConfigProvider
+		var err error
+
+		tokenFetcher := credential_provider.NewTokenFetcher(s.tokenCache, volumeId, region)
+		if usePodIdentity {
+			cfgProvider, err = auth.NewPodIdentityAuth(region, preferredAddressType, tokenFetcher)
+		} else {
+			cfgProvider, err = auth.NewIRSAAuth(region, nameSpace, svcAcct, s.k8sClient, tokenFetcher)
+		}
+
+		if err != nil || cfgProvider == nil {
+			return nil, fmt.Errorf("%s: %s", region, err)
+		}
+
+		awsConfig, err := cfgProvider.GetAWSConfig(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsConfig, err := awsAuth.GetAWSConfig(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %s", region, err)
-		}
+
 		awsConfigsList = append(awsConfigsList, awsConfig)
 	}
 
 	return awsConfigsList, nil
 }
 
-// Return the provider plugin version information to the driver.
-func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.VersionRequest) (*v1alpha1.VersionResponse, error) {
-
+// Version returns the provider plugin version information to the driver.
+func (s *CSIDriverProviderServer) Version(context.Context, *v1alpha1.VersionRequest) (*v1alpha1.VersionResponse, error) {
 	return &v1alpha1.VersionResponse{
 		Version:        "v1alpha1",
 		RuntimeName:    auth.ProviderName,
 		RuntimeVersion: Version,
 	}, nil
-
 }
 
 // Private helper to get the region information for a given pod.
@@ -293,7 +345,7 @@ func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespa
 	region := labels[regionLabel]
 
 	if len(region) == 0 {
-		return "", fmt.Errorf("Region not found")
+		return "", fmt.Errorf("region not found")
 	}
 
 	return region, nil
@@ -324,8 +376,20 @@ func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode o
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(tmpFile.Name()) // Cleanup on fail
-	defer tmpFile.Close()           // Don't leak file descriptors
+
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+			klog.Errorf("failed to remove tempfile %s: %s", name, err)
+		}
+	}(tmpFile.Name()) // Cleanup on fail
+
+	defer func(tmpFile *os.File) {
+		err := tmpFile.Close()
+		if err != nil {
+			klog.Errorf("failed to close tempfile %s: %s", tmpFile.Name(), err)
+		}
+	}(tmpFile) // Don't leak file descriptors
 
 	err = tmpFile.Chmod(mode) // Set correct permissions
 	if err != nil {
