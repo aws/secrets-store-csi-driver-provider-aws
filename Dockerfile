@@ -16,7 +16,7 @@ RUN go mod download -x
 COPY . .
 ENV CGO_ENABLED=0
 
-RUN go build -v -ldflags ${LDFLAGS} -o _output/secrets-store-csi-driver-provider-aws
+RUN go build -v -ldflags "${LDFLAGS}" -o _output/secrets-store-csi-driver-provider-aws
 
 FROM public.ecr.aws/amazonlinux/amazonlinux:2 AS al2
 
