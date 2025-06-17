@@ -1,10 +1,10 @@
 FROM golang:1.23-alpine AS go
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
-ARG LDFLAGS
+RUN echo "Running on ${BUILDPLATFORM}, building for ${TARGETPLATFORM}."
+
 WORKDIR /workdir
 
-RUN echo "Running on ${BUILDPLATFORM}, building for ${TARGETPLATFORM}."
 RUN apk add git build-base
 RUN go env -w GOPROXY=direct
 
@@ -14,8 +14,9 @@ COPY go.sum .
 RUN go mod download -x
 
 COPY . .
-ENV CGO_ENABLED=0
 
+ENV CGO_ENABLED=0
+ARG LDFLAGS
 RUN go build -v -ldflags "${LDFLAGS}" -o _output/secrets-store-csi-driver-provider-aws
 
 FROM public.ecr.aws/amazonlinux/amazonlinux:2 AS al2
