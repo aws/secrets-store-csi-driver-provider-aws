@@ -42,7 +42,6 @@ const (
 	failoverRegionAttrib       = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
 	usePodIdentityAttrib       = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
 	preferredAddressTypeAttrib = "preferredAddressType"          // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
-	httpTimeoutAttrib          = "httpTimeout"                   // The attribute used to specify HTTP timeout for Pod Identity Agent communication
 )
 
 // A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
@@ -57,6 +56,7 @@ type CSIDriverProviderServer struct {
 	secretProviderFactory provider.ProviderFactoryFactory
 	k8sClient             k8sv1.CoreV1Interface
 	driverWriteSecrets    bool
+	httpTimeout           time.Duration
 }
 
 // Factory function to create the server to handle incoming mount requests.
@@ -64,12 +64,14 @@ func NewServer(
 	secretProviderFact provider.ProviderFactoryFactory,
 	k8client k8sv1.CoreV1Interface,
 	driverWriteSecrets bool,
+	httpTimeout time.Duration,
 ) (srv *CSIDriverProviderServer, e error) {
 
 	return &CSIDriverProviderServer{
 		secretProviderFactory: secretProviderFact,
 		k8sClient:             k8client,
 		driverWriteSecrets:    driverWriteSecrets,
+		httpTimeout:           httpTimeout,
 	}, nil
 
 }
@@ -109,30 +111,10 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	failoverRegion := attrib[failoverRegionAttrib]
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
 	preferredAddressType := attrib[preferredAddressTypeAttrib]
-	httpTimeoutStr := attrib[httpTimeoutAttrib]
 
 	// Validate preferred address type
 	if preferredAddressType != "ipv4" && preferredAddressType != "ipv6" && preferredAddressType != "auto" && preferredAddressType != "" {
 		return nil, fmt.Errorf("invalid preferred address type: %s", preferredAddressType)
-	}
-
-	// Parse and validate HTTP timeout
-	var httpTimeoutDuration time.Duration
-	if httpTimeoutStr != "" {
-		var err error
-		httpTimeoutDuration, err = time.ParseDuration(httpTimeoutStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse httpTimeout value '%s': %v", httpTimeoutStr, err)
-		}
-		if httpTimeoutDuration <= 0 {
-			return nil, fmt.Errorf("httpTimeout must be positive, got: %v", httpTimeoutDuration)
-		}
-		if httpTimeoutDuration > 30*time.Second {
-			klog.Warningf("httpTimeout value %v is unusually high, consider using a smaller value", httpTimeoutDuration)
-		}
-	} else {
-		// Default to 100ms for backward compatibility
-		httpTimeoutDuration = 100 * time.Millisecond
 	}
 
 	// Make a map of the currently mounted versions (if any)
@@ -170,7 +152,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType, httpTimeoutDuration)
+	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType, s.httpTimeout)
 	if err != nil {
 		return nil, err
 	}

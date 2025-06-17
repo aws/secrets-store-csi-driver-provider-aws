@@ -187,7 +187,6 @@ The parameters section contains the details of the mount request and contain one
   - "ipv4", "IPv4", or "IPV4" - Force the use of Pod Identity Agent IPv4 endpoint
   - "ipv6", "IPv6", or "IPV6" - Force the use of Pod Identity Agent IPv6 endpoint
   - not specified - Use auto endpoint selection, trying IPv4 endpoint first and falling back to IPv6 endpoint if IPv4 fails
-* httpTimeout: An optional field that specifies the HTTP timeout duration for Pod Identity Agent communication. This field is only applicable when using EKS Pod Identity feature and will be ignored when using IAM Roles for Service Accounts. The value must be a valid Go duration string (e.g., "100ms", "1s", "500ms"). If not specified, defaults to "100ms". Values are case-sensitive and must be positive. Example values: "50ms", "200ms", "1s", "2s".
 
 The primary objects field of the SecretProviderClass can contain the following sub-fields:
 * objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this is the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can be either the name or full ARN of the parameter.
@@ -315,6 +314,14 @@ helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-sto
 To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server.
 
 If you use Helm chart to install the provider, append the `--set-json 'k8sThrottlingParams={"qps": "<custom qps>", "burst": "<custom qps>"}'` flag in the install step.
+
+### HTTP timeout for Pod Identity
+
+In order to configure the HTTP timeout for Pod Identity authentication, pass the `http-timeout` flag during the install step:
+```shell
+helm install ... --http-timeout=250ms
+```
+The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value is `100ms` by default.
 
 ### Security Considerations
 

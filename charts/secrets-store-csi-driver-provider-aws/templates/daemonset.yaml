@@ -42,6 +42,9 @@ spec:
             - --burst={{ .Values.k8sThrottlingParams.burst }}
             {{- end }}
             {{- end }}
+            {{- if .Values.httpTimeout }}
+            - --http-timeout={{ .Values.httpTimeout }}
+            {{- end }}
           resources:
 {{ toYaml .Values.resources | indent 12 }}
           securityContext:

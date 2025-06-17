@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -97,7 +98,7 @@ func (m *MockSecretsManagerClient) DescribeSecret(ctx context.Context, input *se
 	return rsp, nil
 }
 
-func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProviderServer {
+func newServerWithMocks(tstData *testCase, driverWrites bool, httpTimeout time.Duration) *CSIDriverProviderServer {
 
 	var ssmRsp, backupRegionSsmRsp []*ssm.GetParametersOutput
 	var gsvRsp, backupRegionGsvRsp []*secretsmanager.GetSecretValueOutput
@@ -206,6 +207,7 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 		secretProviderFactory: factory,
 		k8sClient:             clientset.CoreV1(),
 		driverWriteSecrets:    driverWrites,
+		httpTimeout:           httpTimeout,
 	}
 
 }
@@ -256,11 +258,6 @@ func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.
 	usePodIdentity := tst.attributes["usePodIdentity"]
 	if len(usePodIdentity) > 0 {
 		attrMap["usePodIdentity"] = usePodIdentity
-	}
-
-	httpTimeout := tst.attributes["httpTimeout"]
-	if len(httpTimeout) > 0 {
-		attrMap["httpTimeout"] = httpTimeout
 	}
 
 	objs, err := yaml.Marshal(tst.mountObjs)
@@ -610,7 +607,7 @@ var mountTests []testCase = []testCase{
 		testName: "New Mount Success with usePodIdentity provided",
 		attributes: map[string]string{
 			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "200ms",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false",
 		},
 		mountObjs: []map[string]interface{}{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
@@ -920,7 +917,7 @@ var mountTests []testCase = []testCase{
 		testName: "Fail Pod Identity Session",
 		attributes: map[string]string{
 			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "usePodIdentity": "yes", "httpTimeout": "200ms",
+			"nodeName": "fakeNode", "region": "", "usePodIdentity": "yes",
 		},
 		mountObjs: []map[string]interface{}{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
@@ -1166,94 +1163,6 @@ var mountTests []testCase = []testCase{
 			"TestParm1":   "parm1",
 		},
 		perms: "420",
-	},
-	{ // Test valid httpTimeout values
-		testName: "Valid httpTimeout 50ms",
-		attributes: map[string]string{
-			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "50ms",
-		},
-		mountObjs: []map[string]interface{}{
-			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
-		},
-		ssmRsp: []*ssm.GetParametersOutput{},
-		gsvRsp: []*secretsmanager.GetSecretValueOutput{
-			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
-		},
-		descRsp: []*secretsmanager.DescribeSecretOutput{},
-		expErr:  "",
-		expSecrets: map[string]string{
-			"TestSecret1": "secret1",
-		},
-		perms: "420",
-	},
-	{ // Test valid httpTimeout values
-		testName: "Valid httpTimeout 2s",
-		attributes: map[string]string{
-			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "2s",
-		},
-		mountObjs: []map[string]interface{}{
-			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
-		},
-		ssmRsp: []*ssm.GetParametersOutput{},
-		gsvRsp: []*secretsmanager.GetSecretValueOutput{
-			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
-		},
-		descRsp: []*secretsmanager.DescribeSecretOutput{},
-		expErr:  "",
-		expSecrets: map[string]string{
-			"TestSecret1": "secret1",
-		},
-		perms: "420",
-	},
-	{ // Test invalid httpTimeout value
-		testName: "Invalid httpTimeout",
-		attributes: map[string]string{
-			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "invalid",
-		},
-		mountObjs: []map[string]interface{}{
-			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
-		},
-		ssmRsp:     []*ssm.GetParametersOutput{},
-		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
-		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "failed to parse httpTimeout value",
-		expSecrets: map[string]string{},
-		perms:      "420",
-	},
-	{ // Test negative httpTimeout value
-		testName: "Negative httpTimeout",
-		attributes: map[string]string{
-			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "-100ms",
-		},
-		mountObjs: []map[string]interface{}{
-			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
-		},
-		ssmRsp:     []*ssm.GetParametersOutput{},
-		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
-		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "httpTimeout must be positive",
-		expSecrets: map[string]string{},
-		perms:      "420",
-	},
-	{ // Test zero httpTimeout value
-		testName: "Zero httpTimeout",
-		attributes: map[string]string{
-			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
-			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole", "usePodIdentity": "false", "httpTimeout": "0ms",
-		},
-		mountObjs: []map[string]interface{}{
-			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
-		},
-		ssmRsp:     []*ssm.GetParametersOutput{},
-		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
-		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "httpTimeout must be positive",
-		expSecrets: map[string]string{},
-		perms:      "420",
 	},
 }
 
@@ -2303,7 +2212,7 @@ func TestMounts(t *testing.T) {
 		t.Run(tst.testName, func(t *testing.T) {
 
 			dir := t.TempDir() // t.TempDir() handles cleanup automatically
-			svr := newServerWithMocks(&tst, false)
+			svr := newServerWithMocks(&tst, false, 100*time.Millisecond)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, []*v1alpha1.ObjectVersion{})
@@ -2340,7 +2249,7 @@ func TestMountsNoWrite(t *testing.T) {
 
 			dir := t.TempDir() // t.TempDir() handles cleanup automatically
 
-			svr := newServerWithMocks(&tst, true)
+			svr := newServerWithMocks(&tst, true, 100*time.Millisecond)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, []*v1alpha1.ObjectVersion{})
@@ -2759,7 +2668,7 @@ func TestReMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			svr := newServerWithMocks(&tst, false)
+			svr := newServerWithMocks(&tst, false, 100*time.Millisecond)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, curState)
@@ -2797,7 +2706,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			svr := newServerWithMocks(&tst, true)
+			svr := newServerWithMocks(&tst, true, 100*time.Millisecond)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, curState)
@@ -2831,7 +2740,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 func TestEmptyAttributes(t *testing.T) {
 
-	svr := newServerWithMocks(nil, false)
+	svr := newServerWithMocks(nil, false, 100*time.Millisecond)
 	req := &v1alpha1.MountRequest{
 		Attributes:           "", // Should error
 		TargetPath:           "/tmp",
@@ -2852,7 +2761,7 @@ func TestEmptyAttributes(t *testing.T) {
 
 func TestNoPath(t *testing.T) {
 
-	svr := newServerWithMocks(nil, false)
+	svr := newServerWithMocks(nil, false, 100*time.Millisecond)
 	req := &v1alpha1.MountRequest{ // Missing TargetPath
 		Attributes:           "{}",
 		Permission:           "420",
@@ -2882,7 +2791,7 @@ func TestGetRegionFromNodeWithAWSRegionEnvVar(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "fakeNode",
 		},
-	}, false)
+	}, false, 100*time.Millisecond)
 
 	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 
@@ -2905,7 +2814,7 @@ func TestGetRegionFromNodeWithNodeLabels(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "fakeNode",
 		},
-	}, false)
+	}, false, 100*time.Millisecond)
 
 	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 	if err != nil {
@@ -2927,7 +2836,7 @@ func TestGetRegionFromNodeError(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "FailNode",
 		},
-	}, false)
+	}, false, 100*time.Millisecond)
 
 	_, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 	if err == nil {
@@ -2938,7 +2847,7 @@ func TestGetRegionFromNodeError(t *testing.T) {
 // Make sure the Version call works
 func TestDriverVersion(t *testing.T) {
 
-	svr, err := NewServer(nil, nil, true)
+	svr, err := NewServer(nil, nil, true, 100*time.Millisecond)
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected server error %s", err.Error())
 	}
