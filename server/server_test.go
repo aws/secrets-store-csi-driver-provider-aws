@@ -10,12 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	secretsmanagertypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
+	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
+	"github.com/jellydator/ttlcache/v3"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -33,7 +36,7 @@ type MockParameterStoreClient struct {
 	reqErr error
 }
 
-func (m *MockParameterStoreClient) GetParameters(ctx context.Context, input *ssm.GetParametersInput, optFns ...func(*ssm.Options)) (*ssm.GetParametersOutput, error) {
+func (m *MockParameterStoreClient) GetParameters(_ context.Context, input *ssm.GetParametersInput, _ ...func(*ssm.Options)) (*ssm.GetParametersOutput, error) {
 	if m.rspCnt >= len(m.rsp) {
 		panic(fmt.Sprintf("Got unexpected request: %+v", input))
 	}
@@ -43,7 +46,7 @@ func (m *MockParameterStoreClient) GetParameters(ctx context.Context, input *ssm
 		return nil, m.reqErr
 	}
 	if rsp == nil {
-		return nil, fmt.Errorf("Error in GetParameters")
+		return nil, fmt.Errorf("error in GetParameters")
 	}
 
 	failed := make([]string, 0)
@@ -66,7 +69,7 @@ type MockSecretsManagerClient struct {
 	reqErr  error
 }
 
-func (m *MockSecretsManagerClient) GetSecretValue(ctx context.Context, input *secretsmanager.GetSecretValueInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error) {
+func (m *MockSecretsManagerClient) GetSecretValue(_ context.Context, input *secretsmanager.GetSecretValueInput, _ ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error) {
 	if m.getCnt >= len(m.getRsp) {
 		panic(fmt.Sprintf("Got unexpected request: %+v", input))
 	}
@@ -77,12 +80,12 @@ func (m *MockSecretsManagerClient) GetSecretValue(ctx context.Context, input *se
 		return nil, m.reqErr
 	}
 	if rsp == nil {
-		return nil, fmt.Errorf("Error in GetSecretValue")
+		return nil, fmt.Errorf("error in GetSecretValue")
 	}
 	return rsp, nil
 }
 
-func (m *MockSecretsManagerClient) DescribeSecret(ctx context.Context, input *secretsmanager.DescribeSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error) {
+func (m *MockSecretsManagerClient) DescribeSecret(_ context.Context, input *secretsmanager.DescribeSecretInput, _ ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error) {
 	if m.descCnt >= len(m.descRsp) {
 		panic(fmt.Sprintf("Got unexpected request: %+v", input))
 	}
@@ -92,7 +95,7 @@ func (m *MockSecretsManagerClient) DescribeSecret(ctx context.Context, input *se
 		return nil, m.reqErr
 	}
 	if rsp == nil {
-		return nil, fmt.Errorf("Error in DescribeSecret")
+		return nil, fmt.Errorf("error in DescribeSecret")
 	}
 	return rsp, nil
 }
@@ -200,12 +203,13 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 		node.ObjectMeta.Labels = map[string]string{"topology.kubernetes.io/region": nodeRegion}
 	}
 
-	clientset := fake.NewSimpleClientset(sa, pod, node)
+	clientset := fake.NewClientset(sa, pod, node)
 
 	return &CSIDriverProviderServer{
 		secretProviderFactory: factory,
 		k8sClient:             clientset.CoreV1(),
 		driverWriteSecrets:    driverWrites,
+		tokenCache:            ttlcache.New[string, credential_provider.TokenCacheValue](ttlcache.WithTTL[string, credential_provider.TokenCacheValue](time.Hour)),
 	}
 
 }
@@ -237,6 +241,9 @@ func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.
 	attrMap["csi.storage.k8s.io/pod.name"] = tst.attributes["podName"]
 	attrMap["csi.storage.k8s.io/pod.namespace"] = tst.attributes["namespace"]
 	attrMap["csi.storage.k8s.io/serviceAccount.name"] = tst.attributes["accName"]
+	if tst.attributes["tokens"] != "" {
+		attrMap["csi.storage.k8s.io/serviceAccount.tokens"] = tst.attributes["tokens"]
+	}
 
 	region := tst.attributes["region"]
 	if len(region) > 0 && !strings.Contains(region, "Fail") {
@@ -907,7 +914,7 @@ var mountTests []testCase = []testCase{
 		ssmRsp:     []*ssm.GetParametersOutput{},
 		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "An IAM role must be associated",
+		expErr:     "an IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1162,6 +1169,47 @@ var mountTests []testCase = []testCase{
 		},
 		perms: "420",
 	},
+	{
+		testName: "IRSA with token",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "us-west-2", "roleARN": "fakeRole",
+			"tokens": fmt.Sprintf(`{"sts.amazonaws.com": {"token": "testToken", "expirationTimestamp": "%s"}}`, time.Now().Add(time.Hour).Format(time.RFC3339)),
+			"secret-store-csi.amazonaws.com/volume-id": "testVolumeId",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		expErr: "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
+	{
+		testName: "Pod Identity with token",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "us-west-2", "roleARN": "fakeRole",
+			"usePodIdentity": "true",
+			"tokens":         fmt.Sprintf(`{"pods.eks.amazonaws.com": {"token": "testToken", "expirationTimestamp": "%s"}}`, time.Now().Add(time.Hour).Format(time.RFC3339)),
+			"secret-store-csi.amazonaws.com/volume-id": "testVolumeId",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		expErr: "",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
 }
 
 var stdAttributesWithBackupRegion map[string]string = map[string]string{
@@ -1199,7 +1247,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 		ssmRsp: []*ssm.GetParametersOutput{
 			{
 				Parameters:        []ssmtypes.Parameter{},
-				InvalidParameters: []string{("TestParm1")},
+				InvalidParameters: []string{"TestParm1"},
 			},
 		},
 		ssmReqErr: &ssmtypes.InternalServerError{
@@ -1371,7 +1419,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestParm1", "objectType": "ssmparameter"},
 		},
-		expErr:     "fakeRegion: An IAM role must be associated",
+		expErr:     "fakeRegion: an IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -2190,6 +2238,46 @@ var noWriteMountTests []testCase = []testCase{
 		},
 		perms: "420",
 	},
+	{
+		testName: "IRSA missing sts token",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole",
+			"usePodIdentity": "false",
+			"tokens":         `{"sts2.amazonaws.com": {"token": "testToken", "expirationTimestamp": "2021-01-01T00:00:00Z"}}`,
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		expErr: "token not found for sts.amazonaws.com",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
+	{
+		testName: "Pod Identity missing token",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole",
+			"usePodIdentity": "true",
+			"tokens":         `{"sts.amazonaws.com": {"token": "testToken", "expirationTimestamp": "2021-01-01T00:00:00Z"}}`,
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
+		},
+		expErr: "token not found for pods.eks.amazonaws.com",
+		expSecrets: map[string]string{
+			"TestSecret1": "secret1",
+		},
+		perms: "420",
+	},
 }
 
 // Map test name for use as a directory
@@ -2771,7 +2859,7 @@ func TestNoPath(t *testing.T) {
 		t.Fatalf("TestNoPath: got unexpected response")
 	} else if err == nil {
 		t.Fatalf("TestNoPath: did not get error")
-	} else if !strings.Contains(err.Error(), "Missing mount path") {
+	} else if !strings.Contains(err.Error(), "missing mount path") {
 		t.Fatalf("TestNoPath: Unexpected error %s", err.Error())
 	}
 

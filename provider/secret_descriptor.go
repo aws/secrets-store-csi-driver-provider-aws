@@ -88,8 +88,8 @@ type FailoverObjectEntry struct {
 }
 
 // Helper function to set the default file permission
-func SetDefaultFilePermission(defaultFilePermission os.FileMode) {
-	defaultFilePermission = defaultFilePermission
+func SetDefaultFilePermission(perm os.FileMode) {
+	defaultFilePermission = perm
 }
 
 // Enum of supported secret types
