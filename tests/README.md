@@ -1,4 +1,4 @@
-## Running prod tests
+## Running prow tests
 
 1. Complete the [Private Builds](https://github.com/aws/secrets-store-csi-driver-provider-aws/tree/main#private-builds) section of the README.
 2. Install [bats](https://github.com/bats-core/bats-core).
