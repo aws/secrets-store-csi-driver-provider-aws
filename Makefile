@@ -21,8 +21,8 @@ $(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
-          -X github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=$(FULL_REV) \
-          -extldflags "-static""
+		  -X github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=$(FULL_REV) \
+		  -extldflags "-static""
 
 CHART_RELEASER_PATH ?= cr
 
@@ -39,18 +39,22 @@ clean:
 	-docker system prune --all --force
 
 docker-login:
-	aws --region $(AWS_REGION) $(ECRCMD) get-login-password | docker login -u AWS --password-stdin $(REPOBASE)
+	# Logging into ecr-public is required to pull the Amazon Linux 2 image used for the build
+	aws --region us-east-1 ecr-public get-login-password | docker login -u AWS --password-stdin public.ecr.aws
+	@if [[ "$(REPOBASE)" != "public.ecr.aws" ]]; then\
+		aws --region $(AWS_REGION) ecr get-login-password | docker login -u AWS --password-stdin $(REPOBASE);\
+	fi
 
 # Build, tag, and push image for architecture
 docker-buildx:
 	$(foreach ARCH,$(ARCHITECTURES),docker buildx build \
-                --platform $(GOOS)/$(ARCH) \
-                --no-cache \
-                --push \
-                -t $(REGISTRY_NAME):latest-$(ARCH) \
-                -t $(REGISTRY_NAME):latest-$(GOOS)-$(ARCH) \
-                -t $(REGISTRY_NAME):$(FULL_REV)-$(GOOS)-$(ARCH) \
-                . ;)
+				--platform $(GOOS)/$(ARCH) \
+				--no-cache \
+				--push \
+				-t $(REGISTRY_NAME):latest-$(ARCH) \
+				-t $(REGISTRY_NAME):latest-$(GOOS)-$(ARCH) \
+				-t $(REGISTRY_NAME):$(FULL_REV)-$(GOOS)-$(ARCH) \
+				. ;)
 
 # Create and push manifest list for images
 docker-manifest:
