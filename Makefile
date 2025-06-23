@@ -47,7 +47,8 @@ docker-buildx:
 				-t $(REGISTRY_NAME):latest \
 				-t $(REGISTRY_NAME):$(FULL_REV) \
 				-t $(REGISTRY_NAME):$(MAJOR_REV) \
-				-t $(REGISTRY_NAME):latest-linux \
+				-t $(REGISTRY_NAME):latest-amd64 \
+				-t $(REGISTRY_NAME):latest-arm64 \
 				-t $(REGISTRY_NAME):latest-linux-amd64 \
 				-t $(REGISTRY_NAME):latest-linux-arm64 \
 				-t $(REGISTRY_NAME):$(FULL_REV)-linux-amd64 \
