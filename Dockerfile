@@ -19,7 +19,7 @@ ENV CGO_ENABLED=0
 ARG LDFLAGS
 RUN go build -v -ldflags "${LDFLAGS}" -o _output/secrets-store-csi-driver-provider-aws
 
-FROM public.ecr.aws/amazonlinux/amazonlinux:2 AS al2
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023023 AS al2
 
 FROM scratch
 
