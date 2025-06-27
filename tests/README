@@ -1,5 +1,0 @@
-Running prow tests
-`
-1. Complete the private build section of the README - "Private Builds" - https://github.com/aws/secrets-store-csi-driver-provider-aws
-2. Install bats - https://github.com/bats-core/bats-core
-3. Once bats is installed, you can run "bats aws.bats" to run the e2e tests. Make sure to have the PRIVREPO environmental variable set to your private registry

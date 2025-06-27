@@ -1,0 +1,28 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the Docker image
+        uses: docker/build-push-action@v6
+        with:
+          build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=fakeversion' -extldflags '-static'
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: test-build:latest
