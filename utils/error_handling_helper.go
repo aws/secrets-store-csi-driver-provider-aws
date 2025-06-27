@@ -3,22 +3,16 @@ package utils
 import (
 	"errors"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/smithy-go"
 )
 
-//Helper method to check if the request is fatal/4XX status
+// Helper method to check if the request is fatal/4XX status
 func IsFatalError(errMsg error) bool {
 
-	if reqErr, ok := errMsg.(awserr.RequestFailure); ok {
+	var ae smithy.APIError
+	if errors.As(errMsg, &ae) {
 		// check if client side error occurred
-		if reqErr.StatusCode() >= 400 && reqErr.StatusCode() < 500 {
-			return true
-		}
-	}
-	if reqErr, ok := errMsg.(awserr.Error); ok {
-		if reqErr.OrigErr() != nil {
-			return IsFatalError(reqErr.OrigErr())
-		}
+		return ae.ErrorFault() == smithy.FaultClient
 	}
 	if errors.Unwrap(errMsg) != nil {
 		return IsFatalError(errors.Unwrap(errMsg))

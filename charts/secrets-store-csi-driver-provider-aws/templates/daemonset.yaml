@@ -31,6 +31,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --provider-volume={{ .Values.providerVolume }}
+            {{- if .Values.driverWritesSecrets }}
+            - --driver-writes-secrets=true
+            {{- end }}
             {{- if .Values.k8sThrottlingParams }}
             {{- if .Values.k8sThrottlingParams.qps }}
             - --qps={{ .Values.k8sThrottlingParams.qps }}
@@ -49,10 +52,16 @@ spec:
             - name: mountpoint-dir
               mountPath: {{ .Values.kubeletPath }}/pods
               mountPropagation: HostToContainer
-          {{- if .Values.useFipsEndpoint }}
+          {{- if or .Values.useFipsEndpoint .Values.awsRegion }}
           env:
+            {{- if .Values.useFipsEndpoint }}
             - name: AWS_USE_FIPS_ENDPOINT
               value: {{ .Values.useFipsEndpoint | quote }}
+            {{- end }}
+            {{- if .Values.awsRegion }}
+            - name: AWS_REGION
+              value: {{ .Values.awsRegion | quote }}
+            {{- end }}
           {{- end }}
       volumes:
         - name: providervol

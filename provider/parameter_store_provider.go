@@ -6,11 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ssm"
-	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 	"k8s.io/klog/v2"
 
@@ -29,16 +27,19 @@ const (
 //
 // This implementation reduces API calls by batching multiple parameter requests
 // together using the GetParameters call.
-//
 type ParameterStoreProvider struct {
 	clients []ParameterStoreClient
 }
 
-//Parameterstore client with region
+type ParameterStoreGetter interface {
+	GetParameters(ctx context.Context, params *ssm.GetParametersInput, optFns ...func(*ssm.Options)) (*ssm.GetParametersOutput, error)
+}
+
+// Parameterstore client with region
 type ParameterStoreClient struct {
 	IsFailover bool
 	Region     string
-	Client     ssmiface.SSMAPI
+	Client     ParameterStoreGetter
 }
 
 // Get the secret from Parameter Store.
@@ -46,7 +47,6 @@ type ParameterStoreClient struct {
 // This method iterates over the requested secrets build up batches of requests
 // and fetching them. As each batch is fetched, the results are saved and the
 // current version map (curMap) is updated with the current version information.
-//
 func (p *ParameterStoreProvider) GetSecretValues(
 	ctx context.Context,
 	descriptors []*SecretDescriptor,
@@ -74,7 +74,6 @@ func (p *ParameterStoreProvider) GetSecretValues(
 // This method iterates over all available clients in the ParameterProvider.
 // It requests a fetch from each of them.  Once a fetch succeeds it returns the
 // value. If a fetch fails in all clients it returns all errors.
-//
 func (p *ParameterStoreProvider) fetchParameterStoreValue(
 	ctx context.Context,
 	batchDescriptors []*SecretDescriptor,
@@ -82,7 +81,7 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 ) (values []*SecretValue, err error) {
 
 	for _, client := range p.clients {
-		batchValues, err := p.fetchParameterStoreBatch(client, ctx, batchDescriptors, curMap)
+		batchValues, err := p.fetchParameterStoreBatch(ctx, client, batchDescriptors, curMap)
 
 		if utils.IsFatalError(err) {
 			return nil, err
@@ -106,10 +105,9 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 // This method builds batch of parameters and fetches the values.
 // if any parameter is failed to fetch, the parameter is returned as invalid parameter
 // and the version information is updated in the current version map.
-//
 func (p *ParameterStoreProvider) fetchParameterStoreBatch(
-	client ParameterStoreClient,
 	ctx context.Context,
+	client ParameterStoreClient,
 	batchDescriptors []*SecretDescriptor,
 	curMap map[string]*v1alpha1.ObjectVersion,
 ) (v []*SecretValue, err error) {
@@ -117,7 +115,7 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 	var values []*SecretValue
 
 	// Build up the batch of parameter names.
-	var names []*string
+	var names []string
 	batchDesc := make(map[string]*SecretDescriptor)
 	for _, descriptor := range batchDescriptors {
 
@@ -129,12 +127,12 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 			parameterName = fmt.Sprintf("%s:%s", parameterName, descriptor.GetObjectVersionLabel(client.IsFailover))
 		}
 
-		names = append(names, aws.String(parameterName))
+		names = append(names, parameterName)
 		batchDesc[descriptor.GetSecretName(client.IsFailover)] = descriptor // Needed for response
 	}
 
 	// Fetch the batch of secrets
-	rsp, err := client.Client.GetParametersWithContext(ctx, &ssm.GetParametersInput{
+	rsp, err := client.Client.GetParameters(ctx, &ssm.GetParametersInput{
 		Names:          names,
 		WithDecryption: aws.Bool(true),
 	})
@@ -143,17 +141,29 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 	}
 
 	if len(rsp.InvalidParameters) != 0 {
-		err = awserr.NewRequestFailure(awserr.New("", fmt.Sprintf("%s: Invalid parameters: %s", client.Region, strings.Join(aws.StringValueSlice(rsp.InvalidParameters), ", ")), err), 400, "")
+		uniqueParams := make(map[string]bool)
+		var uniqueList []string
+		for _, param := range rsp.InvalidParameters {
+			if !uniqueParams[param] {
+				uniqueParams[param] = true
+				uniqueList = append(uniqueList, param)
+			}
+		}
+		err = &types.InvalidParameters{Message: aws.String(fmt.Sprintf("%s: invalid parameters: %s", client.Region, strings.Join(uniqueList, ", "))), ErrorCodeOverride: aws.String("400")}
 		return nil, err
 	}
 
 	// Build up the results from the batch
 	for _, parm := range rsp.Parameters {
 
-		descriptor := batchDesc[*(parm.Name)]
+		// SecretDescriptor key is either Name or ARN.
+		descriptor := batchDesc[aws.ToString(parm.Name)]
+		if descriptor == nil {
+			descriptor = batchDesc[aws.ToString(parm.ARN)]
+		}
 
 		secretValue := &SecretValue{
-			Value:      []byte(*(parm.Value)),
+			Value:      []byte(aws.ToString(parm.Value)),
 			Descriptor: *descriptor,
 		}
 		values = append(values, secretValue)
@@ -171,13 +181,13 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 			jsonDescriptor := jsonSecret.Descriptor
 			curMap[jsonDescriptor.GetFileName()] = &v1alpha1.ObjectVersion{
 				Id:      jsonDescriptor.GetFileName(),
-				Version: strconv.Itoa(int(*(parm.Version))),
+				Version: strconv.Itoa(int(parm.Version)),
 			}
 		}
 
 		curMap[descriptor.GetFileName()] = &v1alpha1.ObjectVersion{
 			Id:      descriptor.GetFileName(),
-			Version: strconv.Itoa(int(*(parm.Version))),
+			Version: strconv.Itoa(int(parm.Version)),
 		}
 	}
 
@@ -185,19 +195,18 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 }
 
 // Factory methods to build a new ParameterStoreProvider
-//
 func NewParameterStoreProviderWithClients(clients ...ParameterStoreClient) *ParameterStoreProvider {
 	return &ParameterStoreProvider{
 		clients: clients,
 	}
 }
 
-func NewParameterStoreProvider(awsSessions []*session.Session, regions []string) *ParameterStoreProvider {
+func NewParameterStoreProvider(configs []aws.Config, regions []string) *ParameterStoreProvider {
 	var parameterStoreClients []ParameterStoreClient
-	for i, awsSession := range awsSessions {
+	for i, cfg := range configs {
 		client := ParameterStoreClient{
-			Region:     *awsSession.Config.Region,
-			Client:     ssm.New(awsSession, aws.NewConfig().WithRegion(regions[i])),
+			Region:     regions[i],
+			Client:     ssm.NewFromConfig(cfg),
 			IsFailover: i > 0,
 		}
 		parameterStoreClients = append(parameterStoreClients, client)
