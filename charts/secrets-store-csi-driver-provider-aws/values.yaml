@@ -44,3 +44,5 @@ securityContext:
   allowPrivilegeEscalation: false
 
 useFipsEndpoint: false
+
+httpTimeout: 100ms
