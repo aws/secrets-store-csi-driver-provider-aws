@@ -31,7 +31,8 @@ To send us a pull request, please:
 
 1. Fork the repository.
 2. Modify the source; please focus on the specific change you are contributing. 
-3. Run `gofmt` to ensure consistent formatting.
+3. Run `gofmt -w ./..` to ensure consistent formatting.
+4. Install `goimports` (`brew install goimports` on MacOS) and run `goimports -w ./..` to tidy import statements.
 4. Ensure local tests pass.
 5. Commit to your fork using clear commit messages.
 6. Send us a pull request, answering any default questions in the pull request interface.
