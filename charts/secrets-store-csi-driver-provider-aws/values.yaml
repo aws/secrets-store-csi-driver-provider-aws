@@ -52,3 +52,5 @@ securityContext:
   allowPrivilegeEscalation: false
 
 useFipsEndpoint: false
+
+dnsConfig: {}
