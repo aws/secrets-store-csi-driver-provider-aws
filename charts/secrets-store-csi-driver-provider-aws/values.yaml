@@ -45,5 +45,7 @@ securityContext:
 
 useFipsEndpoint: false
 
+dnsConfig: {}
+
 secrets-store-csi-driver:
   install: true
