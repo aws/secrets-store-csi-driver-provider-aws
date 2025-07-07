@@ -8,19 +8,28 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 ## Installation
 
 ### Requirements
-* Amazon Elastic Kubernetes Service (EKS) 1.17+ running an EC2 node group (Fargate node groups are not supported **[^1]**)
+* Amazon Elastic Kubernetes Service (EKS) 1.17+ running an EC2 node group (Fargate node groups are not supported **[^1]**). If using EKS Pod Identity feature, EKS 1.24+ is required. 
 * [Secrets Store CSI driver installed](https://secrets-store-csi-driver.sigs.k8s.io/getting-started/installation.html):
     ```shell
     helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
     helm install -n kube-system csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver
     ```
   **Note** that older versions of the driver may require the ```--set grpcSupportedProviders="aws"``` flag on the install step.
-* IAM Roles for Service Accounts ([IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)) as described in the usage section below.
+* IAM Roles for Service Accounts ([IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)) or [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) as described in the usage section below.
 
-[^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate. 
+[^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate.
 
-### Installing the AWS Provider
-To install the Secrets Manager and Config Provider use the YAML file in the deployment directory:
+### Installing the AWS Provider and Config Provider (ASCP)
+
+#### Option 1: Using helm
+
+```shell
+helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver-provider-aws
+helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws
+```
+
+#### Option 2: Using kubectl
+
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 ```
@@ -34,10 +43,11 @@ CLUSTERNAME=<CLUSTERNAME>
 ```
 Where **&lt;REGION&gt;** is the region in which your Kubernetes cluster is running and **&lt;CLUSTERNAME&gt;** is the name of your cluster.
 
-Now create a test secret:
+Create a test secret:
 ```shell
 aws --region "$REGION" secretsmanager  create-secret --name MySecret --secret-string '{"username":"memeuser", "password":"hunter2"}'
 ```
+
 Create an access policy for the pod scoped down to just the secrets it should have and save the policy ARN in a shell variable:
 ```shell
 POLICY_ARN=$(aws --region "$REGION" --query Policy.Arn --output text iam create-policy --policy-name nginx-deployment-policy --policy-document '{
@@ -51,30 +61,87 @@ POLICY_ARN=$(aws --region "$REGION" --query Policy.Arn --output text iam create-
 ```
 **Note**, when using SSM parameters the permission "ssm:GetParameters" is needed in the policy. To simplify this example we use wild card matches above but you could lock this down further using the full ARN from the output of create-secret above.
 
-Create the IAM OIDC provider for the cluster if you have not already done so:
+#### Option 1: Using IAM Roles For Service Accounts (IRSA)
+
+1. Create the IAM OIDC provider for the cluster if you have not already done so:
 ```shell
 eksctl utils associate-iam-oidc-provider --region="$REGION" --cluster="$CLUSTERNAME" --approve # Only run this once
 ```
-Next create the service account to be used by the pod and associate the above IAM policy with that service account. For this example we use *nginx-deployment-sa* for the service account name:
+2. Next, create the service account to be used by the pod and associate the above IAM policy with that service account. For this example we use *nginx-irsa-deployment-sa* for the service account name:
 ```shell
-eksctl create iamserviceaccount --name nginx-deployment-sa --region="$REGION" --cluster "$CLUSTERNAME" --attach-policy-arn "$POLICY_ARN" --approve --override-existing-serviceaccounts
+eksctl create iamserviceaccount --name nginx-irsa-deployment-sa --region="$REGION" --cluster "$CLUSTERNAME" --attach-policy-arn "$POLICY_ARN" --approve --override-existing-serviceaccounts
 ```
 For a private cluster, ensure that the VPC the cluster is in has an AWS STS endpoint. For more information, see [Interface VPC endpoints](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_interface_vpc_endpoints.html) in the AWS IAM User Guide.
 
-Now create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. The ExampleSecretProviderClass.yaml in the [examples](./examples) directory will mount "MySecret" created above:
+3. Create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. The ExampleSecretProviderClass-IRSA.yaml in the [examples](./examples) directory will mount "MySecret" created above:
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleSecretProviderClass.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleSecretProviderClass-IRSA.yaml
 ```
-Finally we can deploy our pod. The ExampleDeployment.yaml in the examples directory contains a sample nginx deployment that mounts the secrets under /mnt/secrets-store in the pod:
+4. Finally, we can deploy our pod. The ExampleDeployment-IRSA.yaml in the examples directory contains a sample nginx deployment that mounts the secrets under /mnt/secrets-store in the pod:
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment-IRSA.yaml
 ```
 
 To verify the secret has been mounted properly, See the example below:
 
 ```shell
-kubectl exec -it $(kubectl get pods | awk '/nginx-deployment/{print $1}' | head -1) cat /mnt/secrets-store/MySecret; echo
+kubectl exec -it $(kubectl get pods | awk '/nginx-irsa-deployment/{print $1}' | head -1) -- cat /mnt/secrets-store/MySecret; echo
 ```
+
+#### Option 2: Using EKS Pod Identity
+*Note: EKS Pod Identity option is only supported for EKS in the Cloud. It's not supported for [Amazon EKS Anywhere](https://aws.amazon.com/eks/eks-anywhere/), [Red Hat Openshift Service on AWS (ROSA)](https://aws.amazon.com/rosa/) and self-managed Kubernetes clusters on Amazon Elastic Compute Cloud (Amazon EC2) instances.*
+1. Install Amazon EKS Pod Identity Agent Add-on on the cluster.
+```shell
+eksctl create addon --name eks-pod-identity-agent --cluster "$CLUSTERNAME" --region "$REGION"
+```
+2. Create an IAM role that can be assumed by the Amazon EKS service principal for Pod Identity and attach the above IAM policy to grant access to the test secret. 
+```shell
+ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name nginx-deployment-role --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "pods.eks.amazonaws.com"
+            },
+            "Action": [
+                "sts:AssumeRole",
+                "sts:TagSession"
+            ]
+        }
+    ]
+}')
+```
+```shell
+aws iam attach-role-policy \
+    --role-name nginx-deployment-role \
+    --policy-arn $POLICY_ARN
+```
+3. Next create the service account to be used by the pod and associate the service account with the IAM role created above. For this example we use *nginx-pod-identity-deployment-sa* for the service account name:
+```shell
+eksctl create podidentityassociation \
+    --cluster "$CLUSTERNAME" \
+    --namespace default \
+    --region "$REGION" \
+    --service-account-name nginx-pod-identity-deployment-sa \
+    --role-arn $ROLE_ARN \
+    --create-service-account true
+```
+4. Now create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. The ExampleSecretProviderClass-PodIdentity.yaml in the [examples](./examples) directory will mount "MySecret" created above:
+```shell
+kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleSecretProviderClass-PodIdentity.yaml
+```
+5. Finally, we can deploy our pod. The ExampleDeployment-PodIdentity.yaml in the examples directory contains a sample nginx deployment that mounts the secrets under /mnt/secrets-store in the pod:
+```shell
+kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment-PodIdentity.yaml
+```
+
+To verify the secret has been mounted properly, See the example below:
+
+```shell
+kubectl exec -it $(kubectl get pods | awk '/nginx-pod-identity-deployment/{print $1}' | head -1) -- cat /mnt/secrets-store/MySecret; echo
+```
+
 ### Troubleshooting
 Most errors can be viewed by describing the pod deployment. For the deployment, find the pod names using get pods (use -n **&lt;NAMESPACE&gt;** if you are not using the default namespace):
 ```shell
@@ -110,14 +177,22 @@ The parameters section contains the details of the mount request and contain one
             - objectName: "MySecret"
               objectType: "secretsmanager"
     ```
-* region: An optional field to specify the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the region from the annotation on the node. This lookup adds overhead to mount requests so clusters using large numbers of pods will benefit from providing the region here.
+* region: An optional field to specify the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the region from the `topology.kubernetes.io/region` label on the node. This lookup adds overhead to mount requests so clusters using large numbers of pods will benefit from providing the region here.
 * failoverRegion: An optional field to specify a secondary AWS region to use when retrieving secrets. See the Automated Failover Regions section in this readme for more information.
 * pathTranslation: An optional field to specify a substitution character to use when the path separator character (slash on Linux) is used in the file name. If a Secret or parameter name contains the path separator failures will occur when the provider tries to create a mounted file using the name. When not specified the underscore character is used, thus My/Path/Secret will be mounted as My_Path_Secret. This pathTranslation value can either be the string "False" or a single character string. When set to "False", no character substitution is performed.
+* usePodIdentity: An optional field that determines the authentication approach. When not specified, it defaults to using IAM Roles for Service Accounts (IRSA). 
+  - To use EKS Pod Identity, use any of these values: "true", "True", "TRUE", "t", "T".
+  - To explicitly use IRSA, set to any of these values: "false", "False", "FALSE", "f", or "F".
+* preferredAddressType: An optional field that specifies the preferred IP address type for Pod Identity Agent endpoint communication. The field is only applicable when using EKS Pod Identity feature and will be ignored when using IAM Roles for Service Accounts.Values are case-insensitive. Valid values are:
+  - "ipv4", "IPv4", or "IPV4" - Force the use of Pod Identity Agent IPv4 endpoint
+  - "ipv6", "IPv6", or "IPV6" - Force the use of Pod Identity Agent IPv6 endpoint
+  - not specified - Use auto endpoint selection, trying IPv4 endpoint first and falling back to IPv6 endpoint if IPv4 fails
 
 The primary objects field of the SecretProviderClass can contain the following sub-fields:
-* objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this must be the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can not be a full ARN.
+* objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this is the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can be either the name or full ARN of the parameter.
 * objectType: This field is optional when using a Secrets Manager ARN for objectName, otherwise it is required. This field can be either "secretsmanager" or "ssmparameter".
 * objectAlias: This optional field specifies the file name under which the secret will be mounted. When not specified the file name defaults to objectName.
+* filePermission: This optional field expects a 4 digit string which specifies the file permission for the secret that will be mounted. When not specified this will default to "0644" permisions. Ensure the 4 digit string is a valid octal file permission.
 * objectVersion: This field is optional, and generally not recommended since updates to the secret require updating this field. For Secrets Manager this is the [VersionId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store, this is the optional [version number](https://docs.aws.amazon.com/systems-manager/latest/userguide/sysman-paramstore-versions.html#reference-parameter-version).
 * objectVersionLabel: This optional field specifies the alias used for the version. Most applications should not use this field since the most recent version of the secret is used by default. For Secrets Manager this is the [VersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store this is the optional [Parameter Label](https://docs.amazonaws.cn/en_us/systems-manager/latest/userguide/sysman-paramstore-labels.html).
 
@@ -157,6 +232,9 @@ The primary objects field of the SecretProviderClass can contain the following s
   * path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
   * objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted. 
 
+  You may pass an additional sub-field to specify the file permission:
+  * filePermission: This optional field expects a 4 digit string which specifies the file permission for the secret that will be mounted. When not specified this will default to the parent object's file permission.
+
 ## Additional Considerations
 
 ### Rotation
@@ -191,6 +269,12 @@ When the failoverRegion is defined, the driver will attempt to get the secret va
 ```
 If 'failoverObject' is defined, then objectAlias is required.
 
+### Using EKS Pod Identity to Access Cross-Account AWS Resources
+
+EKS Pod Identity [CreatePodIdentityAssociation](https://docs.aws.amazon.com/eks/latest/APIReference/API_CreatePodIdentityAssociation.html) requires the IAM role to reside in the same AWS account as the EKS cluster. 
+
+To mount AWS Secrets Manager secrets from a different AWS account than your EKS cluster, follow [cross-account access](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_examples_cross.html) to set up resource policy for the secret, key policy for the KMS key, and IAM role used in Pod Identity association.
+Fetching cross-account parameters from SSM Parameter Store is only supported for parameters in the advanced parameter tier. See [Working with Shared Parameters](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-store-shared-parameters.html) for details. 
 
 ### Private Builds
 You can pull down this git repository and build and install this plugin into your account's [AWS ECR](https://aws.amazon.com/ecr/) registry using the following steps. First clone the repository:

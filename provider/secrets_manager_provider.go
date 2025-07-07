@@ -3,12 +3,10 @@ package provider
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/secretsmanager"
-	"github.com/aws/aws-sdk-go/service/secretsmanager/secretsmanageriface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 	"k8s.io/klog/v2"
 
@@ -27,15 +25,19 @@ import (
 // versions (rotation reconciler case), this implementation will use the lower
 // latency DescribeSecret call to first determine if the secret has been
 // updated.
-//
 type SecretsManagerProvider struct {
 	clients []SecretsManagerClient
 }
 
-//SecretsManager client with region
+type SecretsManagerGetDescriber interface {
+	GetSecretValue(ctx context.Context, params *secretsmanager.GetSecretValueInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.GetSecretValueOutput, error)
+	DescribeSecret(ctx context.Context, params *secretsmanager.DescribeSecretInput, optFns ...func(*secretsmanager.Options)) (*secretsmanager.DescribeSecretOutput, error)
+}
+
+// SecretsManager client with region
 type SecretsManagerClient struct {
 	Region     string
-	Client     secretsmanageriface.SecretsManagerAPI
+	Client     SecretsManagerGetDescriber
 	IsFailover bool
 }
 
@@ -44,7 +46,6 @@ type SecretsManagerClient struct {
 // This method iterates over all descriptors and requests a fetch. When
 // sucessfully fetched, then it continues until all descriptors have been fetched.
 // Once an error happens, it immediately returns the error.
-//
 func (p *SecretsManagerProvider) GetSecretValues(
 	ctx context.Context,
 	descriptors []*SecretDescriptor,
@@ -66,8 +67,8 @@ func (p *SecretsManagerProvider) GetSecretValues(
 //
 // This method iterates over all available clients in the SecretsManagerProvider.
 // It requests a fetch from each of them.  Once a fetch succeeds it returns the
-//  value. If a fetch fails all clients it returns all errors.
 //
+//	value. If a fetch fails all clients it returns all errors.
 func (p *SecretsManagerProvider) fetchSecretManagerValue(
 	ctx context.Context,
 	descriptor *SecretDescriptor,
@@ -89,7 +90,7 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 		}
 	}
 	if len(value) == 0 {
-		return nil, fmt.Errorf("Failed to fetch secret from all regions: %s", descriptor.ObjectName)
+		return nil, fmt.Errorf("Failed to fetch secret from all regions. Verify secret exists and required permissions are granted for: %s", descriptor.ObjectName)
 	}
 
 	return value, nil
@@ -100,7 +101,6 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 // This method checks if the secret is current. If a secret is not current
 // (or this is the first time), the secret is fetched, added to the list of
 // secrets, and the version information is updated in the current version map.
-//
 func (p *SecretsManagerProvider) fetchSecretManagerValueWithClient(
 	ctx context.Context,
 	client SecretsManagerClient,
@@ -166,7 +166,6 @@ func (p *SecretsManagerProvider) fetchSecretManagerValueWithClient(
 // information is fetched using DescribeSecret and this method checks if the
 // current version is labeled as current (AWSCURRENT) or has the label
 // sepecified via objectVersionLable (if any).
-//
 func (p *SecretsManagerProvider) isCurrent(
 	ctx context.Context,
 	client SecretsManagerClient,
@@ -186,7 +185,7 @@ func (p *SecretsManagerProvider) isCurrent(
 	}
 
 	// Lookup the current version information.
-	rsp, err := client.Client.DescribeSecretWithContext(ctx, &secretsmanager.DescribeSecretInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))})
+	rsp, err := client.Client.DescribeSecret(ctx, &secretsmanager.DescribeSecretInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))})
 	if err != nil {
 		return false, curVer.Version, fmt.Errorf("%s: Failed to describe secret %s: %w", client.Region, descriptor.ObjectName, err)
 	}
@@ -201,7 +200,7 @@ func (p *SecretsManagerProvider) isCurrent(
 	stages := rsp.VersionIdsToStages[curVer.Version]
 	hasLabel := false
 	for i := 0; i < len(stages) && !hasLabel; i++ {
-		hasLabel = *(stages[i]) == label
+		hasLabel = stages[i] == label
 	}
 
 	return hasLabel, curVer.Version, nil // If the current version has the desired label, it is current.
@@ -211,26 +210,25 @@ func (p *SecretsManagerProvider) isCurrent(
 //
 // This method builds up the GetSecretValue request using the objectName from
 // the request and any objectVersion or objectVersionLabel parameters.
-//
 func (p *SecretsManagerProvider) fetchSecret(
 	ctx context.Context,
 	client SecretsManagerClient,
 	descriptor *SecretDescriptor,
 ) (ver string, val *SecretValue, err error) {
 
-	req := secretsmanager.GetSecretValueInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))}
+	input := &secretsmanager.GetSecretValueInput{SecretId: aws.String(descriptor.GetSecretName(client.IsFailover))}
 
 	// Use explicit version if specified
 	if len(descriptor.GetObjectVersion(client.IsFailover)) != 0 {
-		req.SetVersionId(descriptor.GetObjectVersion(client.IsFailover))
+		input.VersionId = aws.String(descriptor.GetObjectVersion(client.IsFailover))
 	}
 
 	// Use stage label if specified
 	if len(descriptor.GetObjectVersionLabel(client.IsFailover)) != 0 {
-		req.SetVersionStage(descriptor.GetObjectVersionLabel(client.IsFailover))
+		input.VersionStage = aws.String(descriptor.GetObjectVersionLabel(client.IsFailover))
 	}
 
-	rsp, err := client.Client.GetSecretValueWithContext(ctx, &req)
+	rsp, err := client.Client.GetSecretValue(ctx, input)
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: Failed fetching secret %s: %w", client.Region, descriptor.ObjectName, err)
 	}
@@ -249,31 +247,27 @@ func (p *SecretsManagerProvider) fetchSecret(
 // Private helper to refesh a secret from its previously stored value.
 //
 // Reads a secret back in from the file system.
-//
 func (p *SecretsManagerProvider) reloadSecret(descriptor *SecretDescriptor) (val *SecretValue, e error) {
-
-	sValue, err := ioutil.ReadFile(descriptor.GetMountPath())
+	sValue, err := os.ReadFile(descriptor.GetMountPath())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read secret %s: %w", descriptor.ObjectName, err)
 	}
-
 	return &SecretValue{Value: sValue, Descriptor: *descriptor}, nil
 }
 
 // Factory methods to build a new SecretsManagerProvider
-//
 func NewSecretsManagerProviderWithClients(clients ...SecretsManagerClient) *SecretsManagerProvider {
 	return &SecretsManagerProvider{
 		clients: clients,
 	}
 }
 
-func NewSecretsManagerProvider(awsSessions []*session.Session, regions []string) *SecretsManagerProvider {
+func NewSecretsManagerProvider(configs []aws.Config, regions []string) *SecretsManagerProvider {
 	var clients []SecretsManagerClient
-	for i, awsSession := range awsSessions {
+	for i, cfg := range configs {
 		client := SecretsManagerClient{
-			Region:     *awsSession.Config.Region,
-			Client:     secretsmanager.New(awsSession, aws.NewConfig().WithRegion(regions[i])),
+			Region:     regions[i],
+			Client:     secretsmanager.NewFromConfig(cfg),
 			IsFailover: i > 0,
 		}
 		clients = append(clients, client)

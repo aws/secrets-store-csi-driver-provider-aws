@@ -27,12 +27,14 @@ rules:
   - apiGroups: [""]
     resources: ["serviceaccounts"]
     verbs: ["get"]
+  {{- if not .Values.awsRegion }}
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get"]
+  {{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount

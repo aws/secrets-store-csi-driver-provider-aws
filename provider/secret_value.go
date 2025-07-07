@@ -14,7 +14,7 @@ type SecretValue struct {
 }
 
 func (p *SecretValue) String() string { return "<REDACTED>" } // Do not log secrets
-//parse out and return specified key value pairs from the secret
+// parse out and return specified key value pairs from the secret
 func (p *SecretValue) getJsonSecrets() (s []*SecretValue, e error) {
 
 	jsonValues := make([]*SecretValue, 0)
