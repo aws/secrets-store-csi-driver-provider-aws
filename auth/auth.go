@@ -115,7 +115,7 @@ type userAgentMiddleware struct {
 }
 
 func (m *userAgentMiddleware) ID() string {
-	return "UserAgent"
+	return "AppendCSIDriverVersionToUserAgent"
 }
 
 func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.BuildInput, next middleware.BuildHandler) (

@@ -71,3 +71,16 @@ func TestGetAWSConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestUserAgentMiddleware_ID(t *testing.T) {
+	middleware := &userAgentMiddleware{
+		providerName: "test-provider",
+	}
+
+	expectedID := "AppendCSIDriverVersionToUserAgent"
+	actualID := middleware.ID()
+
+	if actualID != expectedID {
+		t.Errorf("Expected ID() to return '%s', but got '%s'", expectedID, actualID)
+	}
+}
