@@ -45,4 +45,6 @@ securityContext:
 
 useFipsEndpoint: false
 
+httpTimeout: 100ms
+
 dnsConfig: {}
