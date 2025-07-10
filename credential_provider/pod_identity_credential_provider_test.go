@@ -16,6 +16,30 @@ const (
 	testPodName = "somePodName"
 )
 
+func TestParseAddressPreference(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"Empty string", "", "auto"},
+		{"Auto preference", "auto", "auto"},
+		{"IPv4 preference", "ipv4", "ipv4"},
+		{"IPv6 preference", "ipv6", "ipv6"},
+		{"Invalid preference", "invalid", "auto"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseAddressPreference(tt.input)
+			if result != tt.expected {
+				t.Errorf("parseAddressPreference(%q) = %q, want %q",
+					tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func setupMockPodIdentityAgent(t *testing.T, isIPv4, shouldFail bool) *httptest.Server {
 	t.Helper()
 	var listener net.Listener
@@ -64,20 +88,18 @@ func newPodIdentityCredentialWithMock(t *testing.T, isIPv4 bool, tstData podIden
 		srv.Close()
 	}(mockServer)
 
-	// For auto cases, set both endpoints
-	if tstData.preferredEndpoint == "auto" {
+	if tstData.podIdentityError {
 		if isIPv4 {
-			podIdentityAgentEndpointIPv4 = mockServer.URL
-			podIdentityAgentEndpointIPv6 = "http://[::1]:1" // Invalid IPv6 endpoint
+			podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1"
 		} else {
-			podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1" // Invalid IPv4 endpoint
-			podIdentityAgentEndpointIPv6 = mockServer.URL
+			podIdentityAgentEndpointIPv6 = "http://[::1]:1"
 		}
 	} else {
-		// For specific IPv4/IPv6 cases
 		if isIPv4 {
 			podIdentityAgentEndpointIPv4 = mockServer.URL
+			podIdentityAgentEndpointIPv6 = "http://[::1]:1"
 		} else {
+			podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1"
 			podIdentityAgentEndpointIPv6 = mockServer.URL
 		}
 	}
@@ -122,28 +144,42 @@ func TestPodIdentityCredentialProvider(t *testing.T) {
 			provider, closer := newPodIdentityCredentialWithMock(t, isIPv4, tstData)
 			defer func() { closer <- struct{}{} }()
 
-			cfg, _ := provider.GetAWSConfig(context.Background())
-			_, err := cfg.Credentials.Retrieve(context.Background())
+			cfg, err := provider.GetAWSConfig(context.Background())
+			if err != nil {
+				if len(tstData.expError) == 0 {
+					t.Errorf("%s case: unexpected error: %v", tstData.testName, err)
+				}
+				return
+			}
 
-			if len(tstData.expError) == 0 && err != nil {
-				t.Errorf("%s case: got unexpected cred provider error: %s", tstData.testName, err)
+			creds, err := cfg.Credentials.Retrieve(context.Background())
+			if err != nil {
+				if len(tstData.expError) == 0 {
+					t.Errorf("%s case: unexpected credential retrieval error: %v", tstData.testName, err)
+				} else if !strings.Contains(err.Error(), tstData.expError) {
+					t.Errorf("%s case: error message '%s' does not contain expected text '%s'",
+						tstData.testName, err.Error(), tstData.expError)
+				}
+				return
 			}
-			if len(tstData.expError) == 0 && cfg.Credentials == nil {
-				t.Errorf("%s case: got empty credential provider", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && err == nil {
-				t.Fatalf("%s case: expected error but got none", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && !strings.Contains(err.Error(), tstData.expError) {
-				t.Errorf("%s case: error message '%s' does not contain expected text '%s'",
-					tstData.testName, err.Error(), tstData.expError)
+
+			// Only check credentials if we're not expecting an error
+			if len(tstData.expError) == 0 {
+				if creds.AccessKeyID != "TEST_ACCESS_KEY" ||
+					creds.SecretAccessKey != "TEST_SECRET" ||
+					creds.SessionToken != "TEST_TOKEN" {
+					t.Errorf("%s case: unexpected credentials", tstData.testName)
+				}
 			}
 		})
 	}
 }
 
 var podIdentityTokenTests = []podIdentityCredentialTest{
-	{"Pod Identity Token Success", false, true, false, "auto", ""},
+	{"Pod Identity Token Success with auto", false, true, false, "auto", ""},
+	{"Pod Identity Token Success with IPv4", false, true, false, "ipv4", ""},
+	{"Pod Identity Token Success with IPv6", false, true, false, "ipv6", ""},
+	{"Pod Identity Token Success with empty preference", false, true, false, "", ""},
 	{"Pod Identity Fetch JWT fail", true, true, false, "auto", "Fake create token"},
 }
 

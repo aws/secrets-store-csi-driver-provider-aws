@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -99,10 +100,16 @@ func NewPodIdentityCredentialProvider(
 }
 
 func parseAddressPreference(preferredAddressType string) string {
-	if preferredAddressType == "" {
+	switch strings.ToLower(preferredAddressType) {
+	case "", "auto":
 		return "auto"
+	case "ipv4":
+		return "ipv4"
+	case "ipv6":
+		return "ipv6"
+	default:
+		return "auto" // Default to auto for invalid preferences
 	}
-	return preferredAddressType
 }
 
 func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, error) {
