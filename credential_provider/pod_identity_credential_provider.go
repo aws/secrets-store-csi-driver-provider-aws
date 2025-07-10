@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"fmt"
+    "k8s.io/klog/v2"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -68,39 +70,73 @@ func (p *podIdentityTokenFetcher) GetToken() (string, error) {
 // PodIdentityCredentialProvider implements CredentialProvider using pod identity
 type PodIdentityCredentialProvider struct {
 	region             string
-	credentialEndpoint string
+	preferredAddressType string
 	fetcher            endpointcreds.AuthTokenProvider
 	httpClient         *http.Client
 }
 
 func NewPodIdentityCredentialProvider(
-	region, nameSpace, svcAcc, podName, preferredAddressType string,
-	k8sClient k8sv1.CoreV1Interface,
+    region, nameSpace, svcAcc, podName, preferredAddressType string,
+    k8sClient k8sv1.CoreV1Interface,
 ) (ConfigProvider, error) {
-	endpoint := podIdentityAgentEndpointIPv4
-	if preferredAddressType == "ipv6" {
-		endpoint = podIdentityAgentEndpointIPv6
-	}
+    // Add validation if needed
+    if region == "" {
+        return nil, fmt.Errorf("region cannot be empty")
+    }
+    if k8sClient == nil {
+        return nil, fmt.Errorf("k8s client cannot be nil")
+    }
+    
+    return &PodIdentityCredentialProvider{
+        region:               region,
+        preferredAddressType: preferredAddressType,
+        fetcher:             newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
+        httpClient:          &http.Client{
+            Timeout: httpTimeout,
+        },
+    }, nil
+}
 
-	return &PodIdentityCredentialProvider{
-		region:             region,
-		credentialEndpoint: endpoint,
-		fetcher:            newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
-		httpClient: &http.Client{
-			Timeout: httpTimeout,
-		},
-	}, nil
+func parseAddressPreference(preferredAddressType string) string {
+    if preferredAddressType == "" {
+        return "auto"
+    }
+    return preferredAddressType
 }
 
 func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, error) {
-	provider := endpointcreds.New(p.credentialEndpoint,
-		func(opts *endpointcreds.Options) {
-			opts.AuthorizationTokenProvider = p.fetcher
-			opts.HTTPClient = p.httpClient
-		},
-	)
-	return config.LoadDefaultConfig(ctx,
-		config.WithCredentialsProvider(provider),
-		config.WithRegion(p.region),
-	)
+	preference := parseAddressPreference(p.preferredAddressType)
+    if preference == "auto" || preference == "ipv4" {
+        config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv4)
+        if err != nil {
+			klog.Warningf("IPv4 endpoint attempt failed: %v", err)
+        } else {
+			return config, nil
+		}        
+    }
+
+    if preference == "ipv6" || preference == "auto" {
+        config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv6)
+
+		if err != nil {
+			klog.Warningf("IPv4 endpoint attempt failed: %v", err)
+        } else {
+			return config, nil
+		}
+    }
+
+    return aws.Config{}, fmt.Errorf("invalid preferred address type: %s", p.preferredAddressType)
+}
+
+func (p *PodIdentityCredentialProvider) getConfigWithEndpoint(ctx context.Context, endpoint string) (aws.Config, error) {
+    provider := endpointcreds.New(endpoint,
+        func(opts *endpointcreds.Options) {
+            opts.AuthorizationTokenProvider = p.fetcher
+            opts.HTTPClient = p.httpClient
+        },
+    )
+    return config.LoadDefaultConfig(ctx,
+        config.WithCredentialsProvider(provider),
+        config.WithRegion(p.region),
+    )
 }
