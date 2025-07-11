@@ -133,7 +133,7 @@ func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.C
 		}
 	}
 
-	return aws.Config{}, fmt.Errorf("invalid preferred address type: %s", p.preferredAddressType)
+	return aws.Config{}, fmt.Errorf("failed to get AWS config %s", p.preferredAddressType)
 }
 
 func (p *PodIdentityCredentialProvider) getConfigWithEndpoint(ctx context.Context, endpoint string) (aws.Config, error) {
