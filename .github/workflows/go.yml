@@ -32,6 +32,15 @@ jobs:
             exit 1
           fi
 
+      - name: Go import lint
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          if [ "$(goimports -d . | wc -l)" -gt 0 ]; then
+            goimports -d .
+            echo "Please format Go code by running: goimports -w ./.."
+            exit 1
+          fi
+
       - name: Build
         run: go build -v ./...
 

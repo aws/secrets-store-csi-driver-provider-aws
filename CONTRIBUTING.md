@@ -31,10 +31,11 @@ To send us a pull request, please:
 1. Fork the repository.
 2. Modify the source; please focus on the specific change you are contributing.
 3. Run `go fmt` to ensure consistent formatting for `.go` files, and Prettier for `.md`, `.yml`, and `.yaml` files (see [Formatting instructions](#formatting-instructions)).
-4. Ensure local tests pass.
-5. Commit to your fork using clear commit messages.
-6. Send us a pull request, answering any default questions in the pull request interface.
-7. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
+4. Install `goimports` (`brew install goimports` on MacOS) and run `goimports -w ./..` to tidy import statements.
+5. Ensure local tests pass.
+6. Commit to your fork using clear commit messages.
+7. Send us a pull request, answering any default questions in the pull request interface.
+8. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
 
 GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
