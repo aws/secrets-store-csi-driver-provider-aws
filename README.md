@@ -234,7 +234,6 @@ The primary objects field of the SecretProviderClass can contain the following s
 - objectVersionLabel: This optional field specifies the alias used for the version. Most applications should not use this field since the most recent version of the secret is used by default. For Secrets Manager this is the [VersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters). For SSM Parameter Store this is the optional [Parameter Label](https://docs.amazonaws.cn/en_us/systems-manager/latest/userguide/sysman-paramstore-labels.html).
 
 - failoverObject: An optional field when using the failoverRegion feature. See the Automated Failover Regions section in this readme for more information. The failover object can contain the following sub-fields:
-
   - objectName: This field is required if failoverObject is present. Specifies the name of the secret or parameter to be fetched from the failover region. See the primary objectName field for more information.
   - objectVersion: This field is optional and defines the objectVersion for the failover region. If specified, it must match the primary region's objectVersion. See the primary objectVersion field for more information.
   - objectVersionLabel: This optional field specifies the alias used for the version of the failoverObject. See the primary objectVersionLabel field for more information.
@@ -269,12 +268,10 @@ The primary objects field of the SecretProviderClass can contain the following s
   ```
 
   If you use the jmesPath field, you must provide the following two sub-fields:
-
   - path: This required field is the [JMES path](https://jmespath.org/specification.html) to use for retrieval
   - objectAlias: This required field specifies the file name under which the key-value pair secret will be mounted.
 
   You may pass an additional sub-field to specify the file permission:
-
   - filePermission: This optional field expects a 4 digit string which specifies the file permission for the secret that will be mounted. When not specified this will default to the parent object's file permission.
 
 ## Additional Considerations

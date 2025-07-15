@@ -1,6 +1,8 @@
 name: Go
 
 on:
+  push:
+    branches: [main]
   pull_request:
     types: [opened, synchronize, ready_for_review]
 
@@ -15,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.24"
 
       - name: Prettier
         uses: rutajdash/prettier-cli-action@v1.0.2
