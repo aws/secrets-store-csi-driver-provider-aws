@@ -11,7 +11,7 @@ type: application
 dependencies:
 - name: secrets-store-csi-driver
   repository: https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-  version: "1.5.2"
+  version: "^1"
   condition: secrets-store-csi-driver.install
 
 keywords:
