@@ -30,3 +30,7 @@ updates:
         update-types:
           - minor
           - patch
+  - package-ecosystem: "helm"
+    directory: "/charts"
+    schedule:
+      interval: "weekly"
