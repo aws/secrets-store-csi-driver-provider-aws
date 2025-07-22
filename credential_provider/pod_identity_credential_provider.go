@@ -113,27 +113,30 @@ func parseAddressPreference(preferredAddressType string) string {
 }
 
 func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, error) {
+	var configErr error
 	preference := parseAddressPreference(p.preferredAddressType)
 	if preference == "auto" || preference == "ipv4" {
 		config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv4)
 		if err != nil {
 			klog.Warningf("IPv4 endpoint attempt failed: %v", err)
+			configErr = err
 		} else {
 			return config, nil
 		}
 	}
 
-	if preference == "ipv6" || preference == "auto" {
+	if preference == "auto" || preference == "ipv6" {
 		config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv6)
 
 		if err != nil {
-			klog.Warningf("IPv4 endpoint attempt failed: %v", err)
+			klog.Warningf("IPv6 endpoint attempt failed: %v", err)
+			configErr = err
 		} else {
 			return config, nil
 		}
 	}
 
-	return aws.Config{}, fmt.Errorf("failed to get AWS config %s", p.preferredAddressType)
+	return aws.Config{}, fmt.Errorf("failed to get AWS config from pod identity agent: %+v", configErr)
 }
 
 func (p *PodIdentityCredentialProvider) getConfigWithEndpoint(ctx context.Context, endpoint string) (aws.Config, error) {
