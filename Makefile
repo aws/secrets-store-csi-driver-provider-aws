@@ -8,11 +8,10 @@ else
 ECRCMD=ecr
 endif
 
-MAJOR_REV=1
-MINOR_REV=1
-$(eval PATCH_REV=$(shell git describe --always))
-$(eval BUILD_DATE=$(shell date -u +%Y.%m.%d.%H.%M))
-FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)-$(BUILD_DATE)
+MAJOR_REV=2
+MINOR_REV=0
+PATCH_REV=0
+FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
 		  -X github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=$(FULL_REV) \
