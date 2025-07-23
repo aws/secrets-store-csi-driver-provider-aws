@@ -45,3 +45,8 @@ securityContext:
   allowPrivilegeEscalation: false
 
 useFipsEndpoint: false
+
+dnsConfig: {}
+
+secrets-store-csi-driver:
+  install: true

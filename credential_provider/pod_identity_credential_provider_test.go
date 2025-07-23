@@ -1,47 +1,116 @@
 package credential_provider
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"k8s.io/client-go/kubernetes/fake"
+	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 const (
 	testPodName = "somePodName"
 )
 
-func setupMockPodIdentityAgent(shouldFail bool) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if shouldFail {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+func TestParseAddressPreference(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"Empty string", "", "auto"},
+		{"Auto preference", "auto", "auto"},
+		{"IPv4 preference", "ipv4", "ipv4"},
+		{"IPv6 preference", "ipv6", "ipv6"},
+		{"Invalid preference", "invalid", "auto"},
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{
-           "AccessKeyId": "TEST_ACCESS_KEY",
-           "SecretAccessKey": "TEST_SECRET",
-           "Token": "TEST_TOKEN"
-       }`)
-	}))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseAddressPreference(tt.input)
+			if result != tt.expected {
+				t.Errorf("parseAddressPreference(%q) = %q, want %q",
+					tt.input, result, tt.expected)
+			}
+		})
+	}
 }
 
-func newPodIdentityCredentialWithMock(tstData podIdentityCredentialTest) *PodIdentityCredentialProvider {
+func setupMockPodIdentityAgent(t *testing.T, isIPv4, shouldFail bool) *httptest.Server {
+	t.Helper()
+	var listener net.Listener
+	var err error
+	if isIPv4 {
+		listener, err = net.Listen("tcp4", "127.0.0.1:0")
+	} else {
+		listener, err = net.Listen("tcp6", "[::1]:0")
+	}
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+
+	srv := &httptest.Server{
+		Listener:    listener,
+		EnableHTTP2: true,
+		Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if shouldFail {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{
+               "AccessKeyId": "TEST_ACCESS_KEY",
+               "SecretAccessKey": "TEST_SECRET",
+               "Token": "TEST_TOKEN"
+           }`)
+		})},
+	}
+	srv.Start()
+	return srv
+}
+
+func newPodIdentityCredentialWithMock(t *testing.T, isIPv4 bool, tstData podIdentityCredentialTest) (*PodIdentityCredentialProvider, chan<- struct{}) {
 	k8sClient := &mockK8sV1{
+		CoreV1Interface:  fake.NewSimpleClientset().CoreV1(),
+		fake:             fake.NewSimpleClientset().CoreV1(),
 		k8CTOneShotError: tstData.k8CTOneShotError,
 	}
 
-	mockServer := setupMockPodIdentityAgent(tstData.podIdentityError)
-	podIdentityAgentEndpointIPv4 = mockServer.URL
-	podIdentityAgentEndpointIPv6 = mockServer.URL
+	mockServer := setupMockPodIdentityAgent(t, isIPv4, tstData.podIdentityError)
+	respChan := make(chan struct{})
+	go func(srv *httptest.Server) {
+		<-respChan
+		srv.Close()
+	}(mockServer)
+
+	if tstData.podIdentityError {
+		if isIPv4 {
+			podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1"
+		} else {
+			podIdentityAgentEndpointIPv6 = "http://[::1]:1"
+		}
+	} else {
+		if isIPv4 {
+			podIdentityAgentEndpointIPv4 = mockServer.URL
+			podIdentityAgentEndpointIPv6 = "http://[::1]:1"
+		} else {
+			podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1"
+			podIdentityAgentEndpointIPv6 = mockServer.URL
+		}
+	}
 
 	return &PodIdentityCredentialProvider{
-		region:     testRegion,
-		fetcher:    newPodIdentityTokenFetcher(testNamespace, testServiceAccount, testPodName, k8sClient),
-		httpClient: mockServer.Client(),
-	}
+		region:               testRegion,
+		preferredAddressType: tstData.preferredEndpoint,
+		fetcher:              newPodIdentityTokenFetcher(testNamespace, testServiceAccount, testPodName, k8sClient),
+		httpClient:           http.DefaultClient,
+	}, respChan
 }
 
 type podIdentityCredentialTest struct {
@@ -49,44 +118,207 @@ type podIdentityCredentialTest struct {
 	k8CTOneShotError  bool
 	testToken         bool
 	podIdentityError  bool
-	preferredEndpoint endpointPreference
+	preferredEndpoint string
 	expError          string
 }
 
-var podIdentityCredentialTests []podIdentityCredentialTest = []podIdentityCredentialTest{
-	{"Pod Identity Success via IPv4", false, false, false, preferenceIPv4, ""},
-	{"Pod Identity Success via IPv6", false, false, false, preferenceIPv6, ""},
-	{"Pod Identity Success via auto selection", false, false, false, preferenceAuto, ""},
-	{"Pod identity Failure via IPv4", false, false, true, preferenceIPv4, "pod identity agent returned error"},
-	{"Pod identity Failure via IPv6", false, false, true, preferenceIPv6, "pod identity agent returned error"},
-	{"Pod identity Failure via auto selection", false, false, true, preferenceAuto, "pod identity agent returned error"},
+func resetEndpoints() {
+	podIdentityAgentEndpointIPv4 = defaultIPv4Endpoint
+	podIdentityAgentEndpointIPv6 = defaultIPv6Endpoint
 }
 
-func TestPodIdentityCredentialProvider(t *testing.T) {
-	defer func() {
-		podIdentityAgentEndpointIPv4 = defaultIPv4Endpoint
-		podIdentityAgentEndpointIPv6 = defaultIPv6Endpoint
-	}()
+func TestPodIdentityCredentialProvider_IPv4Success(t *testing.T) {
+	defer resetEndpoints()
 
-	for _, tstData := range podIdentityCredentialTests {
-		t.Run(tstData.testName, func(t *testing.T) {
-			provider := newPodIdentityCredentialWithMock(tstData)
-			config, err := provider.GetAWSConfig()
-
-			if len(tstData.expError) == 0 && err != nil {
-				t.Errorf("%s case: got unexpected cred provider error: %s", tstData.testName, err)
-			}
-			if len(tstData.expError) == 0 && config == nil {
-				t.Errorf("%s case: got empty config", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && err == nil {
-				t.Errorf("%s case: expected error but got none", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && !strings.Contains(err.Error(), tstData.expError) {
-				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
-			}
-		})
+	testData := podIdentityCredentialTest{
+		testName:          "IPv4 Success",
+		k8CTOneShotError:  false,
+		podIdentityError:  false,
+		preferredEndpoint: "ipv4",
+		expError:          "",
 	}
+
+	provider, closer := newPodIdentityCredentialWithMock(t, true, testData)
+	defer func() { closer <- struct{}{} }()
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected credential retrieval error: %v", err)
+	}
+
+	if creds.AccessKeyID != "TEST_ACCESS_KEY" ||
+		creds.SecretAccessKey != "TEST_SECRET" ||
+		creds.SessionToken != "TEST_TOKEN" {
+		t.Errorf("Unexpected credentials values")
+	}
+}
+
+func TestPodIdentityCredentialProvider_IPv6Success(t *testing.T) {
+	defer resetEndpoints()
+
+	testData := podIdentityCredentialTest{
+		testName:          "IPv6 Success",
+		k8CTOneShotError:  false,
+		podIdentityError:  false,
+		preferredEndpoint: "ipv6",
+		expError:          "",
+	}
+
+	provider, closer := newPodIdentityCredentialWithMock(t, false, testData)
+	defer func() { closer <- struct{}{} }()
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected credential retrieval error: %v", err)
+	}
+
+	if creds.AccessKeyID != "TEST_ACCESS_KEY" ||
+		creds.SecretAccessKey != "TEST_SECRET" ||
+		creds.SessionToken != "TEST_TOKEN" {
+		t.Errorf("Unexpected credentials values")
+	}
+}
+
+func TestPodIdentityCredentialProvider_AutoSelectionSuccess(t *testing.T) {
+	defer resetEndpoints()
+
+	testData := podIdentityCredentialTest{
+		testName:          "Auto Selection Success",
+		k8CTOneShotError:  false,
+		podIdentityError:  false,
+		preferredEndpoint: "auto",
+		expError:          "",
+	}
+
+	provider, closer := newPodIdentityCredentialWithMock(t, true, testData)
+	defer func() { closer <- struct{}{} }()
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected credential retrieval error: %v", err)
+	}
+
+	if creds.AccessKeyID != "TEST_ACCESS_KEY" ||
+		creds.SecretAccessKey != "TEST_SECRET" ||
+		creds.SessionToken != "TEST_TOKEN" {
+		t.Errorf("Unexpected credentials values")
+	}
+}
+
+func TestPodIdentityCredentialProvider_IPv4Failure(t *testing.T) {
+	defer resetEndpoints()
+
+	testData := podIdentityCredentialTest{
+		testName:          "IPv4 Failure",
+		k8CTOneShotError:  false,
+		podIdentityError:  true,
+		preferredEndpoint: "ipv4",
+		expError:          "failed to refresh cached credentials",
+	}
+
+	provider, closer := newPodIdentityCredentialWithMock(t, true, testData)
+	defer func() { closer <- struct{}{} }()
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+
+	if err != nil {
+		t.Fatalf("Expected no error during config creation, got: %v", err)
+	}
+
+	_, err = cfg.Credentials.Retrieve(context.Background())
+	if err == nil {
+		t.Fatalf("Expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to refresh cached credentials") {
+		t.Errorf("Expected error containing 'failed to refresh cached credentials', got: %v", err)
+	}
+}
+
+func TestPodIdentityCredentialProvider_IPv6Failure(t *testing.T) {
+	defer resetEndpoints()
+
+	testData := podIdentityCredentialTest{
+		testName:          "IPv6 Failure",
+		k8CTOneShotError:  false,
+		podIdentityError:  true,
+		preferredEndpoint: "ipv6",
+		expError:          "failed to refresh cached credentials",
+	}
+
+	provider, closer := newPodIdentityCredentialWithMock(t, false, testData)
+	defer func() { closer <- struct{}{} }()
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+
+	if err != nil {
+		t.Fatalf("Expected no error during config creation, got: %v", err)
+	}
+
+	_, err = cfg.Credentials.Retrieve(context.Background())
+	if err == nil {
+		t.Fatalf("Expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to refresh cached credentials") {
+		t.Errorf("Expected error containing 'failed to refresh cached credentials', got: %v", err)
+	}
+}
+
+func TestPodIdentityCredentialProvider_AutoFailure(t *testing.T) {
+	defer resetEndpoints()
+
+	testData := podIdentityCredentialTest{
+		testName:          "Auto Selection Failure",
+		k8CTOneShotError:  false,
+		podIdentityError:  true,
+		preferredEndpoint: "auto",
+		expError:          "failed to refresh cached credentials",
+	}
+
+	provider, closer := newPodIdentityCredentialWithMock(t, true, testData)
+	defer func() { closer <- struct{}{} }()
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+
+	if err != nil {
+		t.Fatalf("Expected no error during config creation, got: %v", err)
+	}
+
+	_, err = cfg.Credentials.Retrieve(context.Background())
+	if err == nil {
+		t.Fatalf("Expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to refresh cached credentials") {
+		t.Errorf("Expected error containing 'failed to refresh cached credentials', got: %v", err)
+	}
+}
+
+var podIdentityTokenTests = []podIdentityCredentialTest{
+	{"Pod Identity Token Success with auto", false, true, false, "auto", ""},
+	{"Pod Identity Token Success with IPv4", false, true, false, "ipv4", ""},
+	{"Pod Identity Token Success with IPv6", false, true, false, "ipv6", ""},
+	{"Pod Identity Token Success with empty preference", false, true, false, "", ""},
+	{"Pod Identity Fetch JWT fail", true, true, false, "auto", "Fake create token"},
 }
 
 func TestPodIdentityToken(t *testing.T) {
@@ -99,10 +331,11 @@ func TestPodIdentityToken(t *testing.T) {
 
 		t.Run(tstData.testName, func(t *testing.T) {
 
-			tstAuth := newPodIdentityCredentialWithMock(tstData)
+			tstAuth, closer := newPodIdentityCredentialWithMock(t, tstData.preferredEndpoint == "ipv4", tstData)
+			defer func() { closer <- struct{}{} }()
 			fetcher := tstAuth.fetcher
 
-			tokenOut, err := fetcher.FetchToken(nil)
+			tokenOut, err := fetcher.GetToken()
 
 			if len(tstData.expError) == 0 && err != nil {
 				t.Errorf("%s case: got unexpected error: %s", tstData.testName, err)
@@ -125,47 +358,54 @@ func TestPodIdentityToken(t *testing.T) {
 	}
 }
 
-var podIdentityTokenTests []podIdentityCredentialTest = []podIdentityCredentialTest{
-	{"Pod Identity Token Success", false, true, false, preferenceAuto, ""},
-	{"Pod Identity Fetch JWT fail", true, true, false, preferenceAuto, "Fake create token"},
-}
+func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
+	tests := []struct {
+		name                string
+		region              string
+		k8sClient           k8sv1.CoreV1Interface
+		expectedErrorPrefix string
+	}{
+		{
+			name:                "Empty region",
+			region:              "",
+			k8sClient:           fake.NewSimpleClientset().CoreV1(),
+			expectedErrorPrefix: "region cannot be empty",
+		},
+		{
+			name:                "Nil k8s client",
+			region:              testRegion,
+			k8sClient:           nil,
+			expectedErrorPrefix: "k8s client cannot be nil",
+		},
+		{
+			name:                "Valid parameters",
+			region:              testRegion,
+			k8sClient:           fake.NewSimpleClientset().CoreV1(),
+			expectedErrorPrefix: "",
+		},
+	}
 
-type podIdentityAgentEndpointTest struct {
-	testName             string
-	preferredAddressType string
-	expected             endpointPreference
-	expError             string
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := NewPodIdentityCredentialProvider(
+				tt.region, testNamespace, testServiceAccount, testPodName, "", tt.k8sClient)
 
-var endpointTests []podIdentityAgentEndpointTest = []podIdentityAgentEndpointTest{
-	{"PreferredAddressType not provided", "", preferenceAuto, ""},
-	{"ipv4", "ipv4", preferenceIPv4, ""},
-	{"IPv4", "IPv4", preferenceIPv4, ""},
-	{"ipv6", "ipv6", preferenceIPv6, ""},
-	{"IPv6", "IPv6", preferenceIPv6, ""},
-	{"Invalid PreferredAddressType", "invalid", preferenceInvalid, "invalid preferred address type"},
-}
-
-func TestPodIdentityAgentEndpoint(t *testing.T) {
-
-	for _, tt := range endpointTests {
-		t.Run(tt.testName, func(t *testing.T) {
-			endpoint, err := parseAddressPreference(tt.preferredAddressType)
-
-			if len(tt.expError) == 0 && err != nil {
-				t.Errorf("%s case: got unexpected error: %s", tt.testName, err)
-			}
-			if len(tt.expError) != 0 && err == nil {
-				t.Errorf("%s case: expected error but got none", tt.testName)
-			}
-			if len(tt.expError) != 0 && endpoint != preferenceInvalid {
-				t.Errorf("%s case: expected preferenceInvalid but got %v", tt.testName, endpoint)
-			}
-			if len(tt.expError) != 0 && !strings.HasPrefix(err.Error(), tt.expError) {
-				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tt.testName, tt.expError, err.Error())
-			}
-			if len(tt.expError) == 0 && endpoint != tt.expected {
-				t.Errorf("defaultPodIdentityAgentEndpoint = %v, want %v", endpoint, tt.expected)
+			if tt.expectedErrorPrefix == "" {
+				if err != nil {
+					t.Errorf("Expected no error, got: %v", err)
+				}
+				if provider == nil {
+					t.Error("Expected provider to be non-nil")
+				}
+			} else {
+				if err == nil {
+					t.Errorf("Expected error for %s, got nil", tt.name)
+				} else if !strings.HasPrefix(err.Error(), tt.expectedErrorPrefix) {
+					t.Errorf("Expected error prefix '%s', got: '%s'", tt.expectedErrorPrefix, err.Error())
+				}
+				if provider != nil {
+					t.Error("Expected provider to be nil when error occurs")
+				}
 			}
 		})
 	}

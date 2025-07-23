@@ -8,6 +8,11 @@ sources:
   - "https://github.com/aws/secrets-store-csi-driver-provider-aws"
 home: "https://github.com/aws/secrets-store-csi-driver-provider-aws"
 type: application
+dependencies:
+- name: secrets-store-csi-driver
+  repository: https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+  version: "^1"
+  condition: secrets-store-csi-driver.install
 
 keywords:
   - "eks"
