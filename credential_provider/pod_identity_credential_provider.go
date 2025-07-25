@@ -22,7 +22,6 @@ const (
 	podIdentityAudience = "pods.eks.amazonaws.com"
 	defaultIPv4Endpoint = "http://169.254.170.23/v1/credentials"
 	defaultIPv6Endpoint = "http://[fd00:ec2::23]/v1/credentials"
-	httpTimeout         = 100 * time.Millisecond
 )
 
 var (
@@ -79,6 +78,7 @@ type PodIdentityCredentialProvider struct {
 
 func NewPodIdentityCredentialProvider(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
+	httpTimeout time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (ConfigProvider, error) {
 	// Add validation if needed
