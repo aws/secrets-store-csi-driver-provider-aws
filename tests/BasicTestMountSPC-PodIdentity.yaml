@@ -1,23 +1,23 @@
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
-  name: basic-test-mount-spc
+  name: basic-test-mount-spc-pod-identity
 spec:
   provider: aws   
   secretObjects:
-  - secretName: secret
+  - secretName: secret-pod-identity
     type: Opaque
     data:
     - objectName: SecretsManagerSync
       key: username
-  - secretName: json-ssm
+  - secretName: json-ssm-pod-identity
     type: Opaque
     data:
     - objectName: ssmUsername
       key: username
     - objectName: ssmPassword
       key: password
-  - secretName: secrets-manager-json
+  - secretName: secrets-manager-json-pod-identity
     type: Opaque
     data:
     - objectName: secretsManagerUsername
@@ -28,6 +28,7 @@ spec:
   parameters:
     region: ${REGION}
     failoverRegion: ${FAILOVERREGION}
+    usePodIdentity: "true"
     objects: | 
         - objectName: "ParameterStoreTest1"
           objectType: "ssmparameter"
