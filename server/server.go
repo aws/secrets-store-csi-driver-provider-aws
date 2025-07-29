@@ -152,10 +152,6 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	if err != nil {
 		return nil, err
 	}
-	if len(awsConfigs) > 2 {
-		klog.Errorf("Max number of region(s) exceeded: %s", strings.Join(regions, ", "))
-		return nil, err
-	}
 
 	// Get the list of secrets to mount. These will be grouped together by type
 	// in a map of slices (map[string][]*SecretDescriptor) keyed by secret type
