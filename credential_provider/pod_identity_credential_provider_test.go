@@ -359,6 +359,61 @@ func TestPodIdentityToken(t *testing.T) {
 	}
 }
 
+func TestNewPodIdentityCredentialProviderTimeout(t *testing.T) {
+	tests := []struct {
+		name                   string
+		podIdentityHttpTimeout time.Duration
+		expectError            bool
+	}{
+		{
+			name:                   "100ms timeout",
+			podIdentityHttpTimeout: 100 * time.Millisecond,
+			expectError:            false,
+		},
+		{
+			name:                   "1s timeout",
+			podIdentityHttpTimeout: 1 * time.Second,
+			expectError:            false,
+		},
+		{
+			name:                   "50ms timeout",
+			podIdentityHttpTimeout: 50 * time.Millisecond,
+			expectError:            false,
+		},
+		{
+			name:                   "5s timeout",
+			podIdentityHttpTimeout: 5 * time.Second,
+			expectError:            false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sClient := fake.NewSimpleClientset().CoreV1()
+
+			provider, err := NewPodIdentityCredentialProvider(
+				testRegion, testNamespace, testServiceAccount, testPodName, "", tt.podIdentityHttpTimeout, k8sClient)
+
+			if tt.expectError && err == nil {
+				t.Errorf("Expected error but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			if !tt.expectError && provider != nil {
+				// Verify the timeout is set correctly by checking the HTTP client
+				podProvider, ok := provider.(*PodIdentityCredentialProvider)
+				if !ok {
+					t.Error("Expected PodIdentityCredentialProvider type")
+				} else if podProvider.httpClient.Timeout != tt.podIdentityHttpTimeout {
+					t.Errorf("Expected HTTP client timeout %v, got %v", tt.podIdentityHttpTimeout, podProvider.httpClient.Timeout)
+				}
+			}
+		})
+	}
+}
+
 func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 	tests := []struct {
 		name                string

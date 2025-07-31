@@ -28,6 +28,30 @@ var (
 	podIdentityHttpTimeout = flag.String("pod-identity-http-timeout", "100ms", "The HTTP timeout threshold for Pod Identity authentication.")
 )
 
+// parsePodIdentityHttpTimeout parses and validates the HTTP timeout for Pod Identity authentication
+func parsePodIdentityHttpTimeout(timeoutStr string) time.Duration {
+	if timeoutStr == "" {
+		return 100 * time.Millisecond
+	}
+
+	duration, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		klog.Errorf("failed to parse podIdentityHttpTimeout value '%s': %v", timeoutStr, err)
+		return 100 * time.Millisecond
+	}
+
+	if duration <= 0 {
+		klog.Errorf("podIdentityHttpTimeout must be positive, got: %v", duration)
+		return 100 * time.Millisecond
+	}
+
+	if duration > 30*time.Second {
+		klog.Warningf("podIdentityHttpTimeout value %v is unusually high, consider using a smaller value", duration)
+	}
+
+	return duration
+}
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
@@ -76,22 +100,7 @@ func main() {
 	}()
 
 	// Parse and validate HTTP timeout
-	var podIdentityHttpTimeoutDuration time.Duration
-	if *podIdentityHttpTimeout != "" {
-		var err error
-		podIdentityHttpTimeoutDuration, err = time.ParseDuration(*podIdentityHttpTimeout)
-		if err != nil {
-			klog.Errorf("failed to parse podIdentityHttpTimeout value '%s': %v", *podIdentityHttpTimeout, err)
-		}
-		if podIdentityHttpTimeoutDuration <= 0 {
-			klog.Errorf("podIdentityHttpTimeout must be positive, got: %v", podIdentityHttpTimeoutDuration)
-		}
-		if podIdentityHttpTimeoutDuration > 30*time.Second {
-			klog.Warningf("podIdentityHttpTimeout value %v is unusually high, consider using a smaller value", podIdentityHttpTimeoutDuration)
-		}
-	} else { // Default to 100ms
-		podIdentityHttpTimeoutDuration = 100 * time.Millisecond
-	}
+	podIdentityHttpTimeoutDuration := parsePodIdentityHttpTimeout(*podIdentityHttpTimeout)
 
 	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration)
 	if err != nil {
