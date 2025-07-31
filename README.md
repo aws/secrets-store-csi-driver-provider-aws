@@ -318,9 +318,9 @@ If you use Helm chart to install the provider, append the `--set-json 'k8sThrott
 
 ### HTTP timeout for Pod Identity
 
-In order to configure the HTTP timeout for Pod Identity authentication, pass the `http-timeout` flag during the install step:
+In order to configure the HTTP timeout for Pod Identity authentication, pass the `pod-identity-http-timeout` flag during the install step:
 ```shell
-helm install ... --http-timeout=250ms
+helm install ... --pod-identity-http-timeout=250ms
 ```
 The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value is `100ms` by default.
 
