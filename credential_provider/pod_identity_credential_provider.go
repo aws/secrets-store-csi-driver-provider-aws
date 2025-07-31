@@ -78,7 +78,7 @@ type PodIdentityCredentialProvider struct {
 
 func NewPodIdentityCredentialProvider(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
-	httpTimeout time.Duration,
+	podIdentityHttpTimeout time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (ConfigProvider, error) {
 	// Add validation if needed
@@ -94,7 +94,7 @@ func NewPodIdentityCredentialProvider(
 		preferredAddressType: preferredAddressType,
 		fetcher:              newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
 		httpClient: &http.Client{
-			Timeout: httpTimeout,
+			Timeout: podIdentityHttpTimeout,
 		},
 	}, nil
 }

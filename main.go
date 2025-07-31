@@ -21,11 +21,11 @@ import (
 )
 
 var (
-	endpointDir        = flag.String("provider-volume", "/var/run/secrets-store-csi-providers", "Rendezvous directory for provider socket")
-	driverWriteSecrets = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
-	qps                = flag.Int("qps", 5, "Maximum query per second to the Kubernetes API server. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
-	burst              = flag.Int("burst", 10, "Maximum burst for throttle. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
-	httpTimeout        = flag.String("http-timeout", "100ms", "The HTTP timeout threshold for Pod Identity authentication.")
+	endpointDir            = flag.String("provider-volume", "/var/run/secrets-store-csi-providers", "Rendezvous directory for provider socket")
+	driverWriteSecrets     = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
+	qps                    = flag.Int("qps", 5, "Maximum query per second to the Kubernetes API server. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
+	burst                  = flag.Int("burst", 10, "Maximum burst for throttle. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
+	podIdentityHttpTimeout = flag.String("pod-identity-http-timeout", "100ms", "The HTTP timeout threshold for Pod Identity authentication.")
 )
 
 // Main entry point for the Secret Store CSI driver AWS provider. This main
@@ -76,24 +76,24 @@ func main() {
 	}()
 
 	// Parse and validate HTTP timeout
-	var httpTimeoutDuration time.Duration
-	if *httpTimeout != "" {
+	var podIdentityHttpTimeoutDuration time.Duration
+	if *podIdentityHttpTimeout != "" {
 		var err error
-		httpTimeoutDuration, err = time.ParseDuration(*httpTimeout)
+		podIdentityHttpTimeoutDuration, err = time.ParseDuration(*podIdentityHttpTimeout)
 		if err != nil {
-			klog.Errorf("failed to parse httpTimeout value '%s': %v", *httpTimeout, err)
+			klog.Errorf("failed to parse podIdentityHttpTimeout value '%s': %v", *podIdentityHttpTimeout, err)
 		}
-		if httpTimeoutDuration <= 0 {
-			klog.Errorf("httpTimeout must be positive, got: %v", httpTimeoutDuration)
+		if podIdentityHttpTimeoutDuration <= 0 {
+			klog.Errorf("podIdentityHttpTimeout must be positive, got: %v", podIdentityHttpTimeoutDuration)
 		}
-		if httpTimeoutDuration > 30*time.Second {
-			klog.Warningf("httpTimeout value %v is unusually high, consider using a smaller value", httpTimeoutDuration)
+		if podIdentityHttpTimeoutDuration > 30*time.Second {
+			klog.Warningf("podIdentityHttpTimeout value %v is unusually high, consider using a smaller value", podIdentityHttpTimeoutDuration)
 		}
 	} else { // Default to 100ms
-		httpTimeoutDuration = 100 * time.Millisecond
+		podIdentityHttpTimeoutDuration = 100 * time.Millisecond
 	}
 
-	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, httpTimeoutDuration)
+	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration)
 	if err != nil {
 		klog.Fatalf("Could not create server. error: %v", err)
 	}

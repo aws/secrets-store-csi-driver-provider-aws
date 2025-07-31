@@ -45,7 +45,7 @@ securityContext:
 
 useFipsEndpoint: false
 
-httpTimeout: 100ms
+podIdentityHttpTimeout: 100ms
 
 dnsConfig: {}
 

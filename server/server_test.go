@@ -98,7 +98,7 @@ func (m *MockSecretsManagerClient) DescribeSecret(ctx context.Context, input *se
 	return rsp, nil
 }
 
-func newServerWithMocks(tstData *testCase, driverWrites bool, httpTimeout time.Duration) *CSIDriverProviderServer {
+func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTimeout time.Duration) *CSIDriverProviderServer {
 
 	var ssmRsp, backupRegionSsmRsp []*ssm.GetParametersOutput
 	var gsvRsp, backupRegionGsvRsp []*secretsmanager.GetSecretValueOutput
@@ -204,10 +204,10 @@ func newServerWithMocks(tstData *testCase, driverWrites bool, httpTimeout time.D
 	clientset := fake.NewSimpleClientset(sa, pod, node)
 
 	return &CSIDriverProviderServer{
-		secretProviderFactory: factory,
-		k8sClient:             clientset.CoreV1(),
-		driverWriteSecrets:    driverWrites,
-		httpTimeout:           httpTimeout,
+		secretProviderFactory:  factory,
+		k8sClient:              clientset.CoreV1(),
+		driverWriteSecrets:     driverWrites,
+		podIdentityHttpTimeout: podIdentityHttpTimeout,
 	}
 
 }

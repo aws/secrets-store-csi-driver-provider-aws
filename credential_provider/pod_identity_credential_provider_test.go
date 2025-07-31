@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/client-go/kubernetes/fake"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -388,7 +389,7 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			provider, err := NewPodIdentityCredentialProvider(
-				tt.region, testNamespace, testServiceAccount, testPodName, "", tt.k8sClient)
+				tt.region, testNamespace, testServiceAccount, testPodName, "", time.Millisecond*100, tt.k8sClient)
 
 			if tt.expectedErrorPrefix == "" {
 				if err != nil {

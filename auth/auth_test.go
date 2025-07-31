@@ -44,14 +44,14 @@ func TestGetAWSConfig(t *testing.T) {
 		t.Run(tstData.testName, func(t *testing.T) {
 
 			auth := &Auth{
-				region:         "someRegion",
-				nameSpace:      "someNamespace",
-				svcAcc:         "someSvcAcc",
-				podName:        "somepod",
-				usePodIdentity: tstData.testPodIdentity,
-				httpTimeout:    100 * time.Millisecond,
-				k8sClient:      fake.NewSimpleClientset().CoreV1(),
-				stsClient:      &mockSTS{},
+				region:                 "someRegion",
+				nameSpace:              "someNamespace",
+				svcAcc:                 "someSvcAcc",
+				podName:                "somepod",
+				usePodIdentity:         tstData.testPodIdentity,
+				podIdentityHttpTimeout: 100 * time.Millisecond,
+				k8sClient:              fake.NewSimpleClientset().CoreV1(),
+				stsClient:              &mockSTS{},
 			}
 
 			cfg, err := auth.GetAWSConfig(context.Background())
