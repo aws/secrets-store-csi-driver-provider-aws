@@ -9,6 +9,7 @@ package auth
 
 import (
 	"context"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -36,6 +37,7 @@ var ProviderVersion = "unknown"
 type Auth struct {
 	region, nameSpace, svcAcc, podName, preferredAddressType string
 	usePodIdentity                                           bool
+	podIdentityHttpTimeout                                   time.Duration
 	k8sClient                                                k8sv1.CoreV1Interface
 	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
 }
@@ -44,6 +46,7 @@ type Auth struct {
 func NewAuth(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
 	usePodIdentity bool,
+	podIdentityHttpTimeout time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
 	var stsClient *sts.Client
@@ -61,14 +64,15 @@ func NewAuth(
 	}
 
 	return &Auth{
-		region:               region,
-		nameSpace:            nameSpace,
-		svcAcc:               svcAcc,
-		podName:              podName,
-		preferredAddressType: preferredAddressType,
-		usePodIdentity:       usePodIdentity,
-		k8sClient:            k8sClient,
-		stsClient:            stsClient,
+		region:                 region,
+		nameSpace:              nameSpace,
+		svcAcc:                 svcAcc,
+		podName:                podName,
+		preferredAddressType:   preferredAddressType,
+		usePodIdentity:         usePodIdentity,
+		podIdentityHttpTimeout: podIdentityHttpTimeout,
+		k8sClient:              k8sClient,
+		stsClient:              stsClient,
 	}, nil
 
 }
@@ -80,9 +84,9 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	var credProvider credential_provider.ConfigProvider
 
 	if p.usePodIdentity {
-		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
+		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s, podIdentityHttpTimeout: %v", p.nameSpace, p.svcAcc, p.podIdentityHttpTimeout)
 		var err error
-		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.k8sClient)
+		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, p.k8sClient)
 		if err != nil {
 			return aws.Config{}, err
 		}
