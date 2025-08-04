@@ -9,7 +9,7 @@
 7. Run `./run-tests.sh`
    - Running the script without any arguments will run all 4 test cases in parallel (x64 + IRSA, x64 + Pod Identity, ARM + IRSA, ARM + Pod Identity)
    - `./run-tests.sh x64` will run only x64 tests
-   - `./run-tests.sh ARM` will run only ARM tests
+   - `./run-tests.sh arm` will run only ARM tests
    - `./run-tests.sh x64-irsa` will run only x64 IRSA tests
    - `./run-tests.sh x64-pod-identity` will run only x64 Pod Identity tests
    - `./run-tests.sh arm-irsa` will run only ARM IRSA tests
