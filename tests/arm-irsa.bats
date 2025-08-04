@@ -27,8 +27,8 @@ if [[ -z "${PRIVREPO}" ]]; then
 	return 1
 fi
 
-if [[ -z "${NODE_TYPE}" ]]; then
-	NODE_TYPE=m6g.large
+if [[ -z "${NODE_TYPE_ARM_IRSA}" ]]; then
+	NODE_TYPE_ARM_IRSA=m6g.large
 fi
 
 setup_file() {
@@ -39,10 +39,10 @@ setup_file() {
 	export KUBECONFIG_FILE_ARM_IRSA
 	log "Created Kubeconfig at $KUBECONFIG_FILE_ARM_IRSA"
 
-	log "Creating EKS cluster with node type $NODE_TYPE"
+	log "Creating EKS cluster with node type $NODE_TYPE_ARM_IRSA"
 	eksctl create cluster \
 		--name $CLUSTER_NAME \
-		--node-type $NODE_TYPE \
+		--node-type $NODE_TYPE_ARM_IRSA \
 		--nodes 3 \
 		--region $REGION \
 		--kubeconfig=$KUBECONFIG_FILE_ARM_IRSA
