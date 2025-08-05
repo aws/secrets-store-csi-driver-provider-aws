@@ -1,9 +1,9 @@
 kind: Pod
 apiVersion: v1
 metadata:
-  name: basic-test-mount-arm-pod-identity
+  name: basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}
 spec:
-  serviceAccountName: basic-test-mount-sa-arm-pod-identity
+  serviceAccountName: basic-test-mount-sa-{{ARCH}}-{{AUTH_TYPE}}
   containers:
     - image: k8s.gcr.io/e2e-test-images/busybox:1.29
       name: busybox
@@ -21,4 +21,4 @@ spec:
         driver: secrets-store.csi.k8s.io
         readOnly: true
         volumeAttributes:
-          secretProviderClass: "basic-test-mount-spc-arm-pod-identity"
+          secretProviderClass: "basic-test-mount-spc-{{ARCH}}-{{AUTH_TYPE}}"
