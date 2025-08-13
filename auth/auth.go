@@ -9,6 +9,7 @@ package auth
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -37,7 +38,7 @@ var ProviderVersion = "unknown"
 // Pod Identity auth
 type Auth struct {
 	region, nameSpace, svcAcc, podName, preferredAddressType string
-	usePodIdentity                                           bool
+	usePodIdentity, isEKSAddon                               bool
 	podIdentityHttpTimeout                                   *time.Duration
 	k8sClient                                                k8sv1.CoreV1Interface
 	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
@@ -46,7 +47,7 @@ type Auth struct {
 // NewAuth creates an Auth object for an incoming mount request.
 func NewAuth(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
-	usePodIdentity bool,
+	usePodIdentity, isEKSAddon bool,
 	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
@@ -74,6 +75,7 @@ func NewAuth(
 		podIdentityHttpTimeout: podIdentityHttpTimeout,
 		k8sClient:              k8sClient,
 		stsClient:              stsClient,
+		isEKSAddon:             isEKSAddon,
 	}, nil
 
 }
@@ -108,6 +110,7 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
 		return stack.Build.Add(&userAgentMiddleware{
 			providerName: ProviderName,
+			isEKSAddon:   p.isEKSAddon,
 		}, middleware.After)
 	})
 
@@ -116,6 +119,7 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 
 type userAgentMiddleware struct {
 	providerName string
+	isEKSAddon   bool
 }
 
 func (m *userAgentMiddleware) ID() string {
@@ -128,6 +132,6 @@ func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.Bui
 	if !ok {
 		return next.HandleBuild(ctx, in)
 	}
-	req.Header.Add("User-Agent", m.providerName+"/"+ProviderVersion)
+	req.Header.Add("User-Agent", m.providerName+"/"+ProviderVersion+"/EKSAddon="+strconv.FormatBool(m.isEKSAddon))
 	return next.HandleBuild(ctx, in)
 }

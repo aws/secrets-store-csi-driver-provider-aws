@@ -25,6 +25,7 @@ var (
 	driverWriteSecrets     = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
 	qps                    = flag.Int("qps", 5, "Maximum query per second to the Kubernetes API server. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
 	burst                  = flag.Int("burst", 10, "Maximum burst for throttle. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
+	isEKSAddon             = flag.Bool("is-eks-addon", false, "Whether the provider is running as an EKS addon")
 	podIdentityHttpTimeout = flag.String("pod-identity-http-timeout", "", "The HTTP timeout threshold for Pod Identity authentication.")
 )
 
@@ -102,7 +103,7 @@ func main() {
 	// Parse and validate HTTP timeout
 	podIdentityHttpTimeoutDuration := parsePodIdentityHttpTimeout(*podIdentityHttpTimeout)
 
-	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration)
+	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration, *isEKSAddon)
 	if err != nil {
 		klog.Fatalf("Could not create server. error: %v", err)
 	}
