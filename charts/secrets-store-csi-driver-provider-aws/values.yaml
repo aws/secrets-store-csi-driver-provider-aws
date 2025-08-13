@@ -45,6 +45,8 @@ securityContext:
 
 useFipsEndpoint: false
 
+podIdentityHttpTimeout: 100ms
+
 dnsConfig: {}
 
 secrets-store-csi-driver:
