@@ -70,7 +70,7 @@ func TestNewAuth(t *testing.T) {
 			podName:                "irsa-pod",
 			preferredAddressType:   "ipv6",
 			usePodIdentity:         false,
-			podIdentityHttpTimeout: 200 * time.Millisecond,
+			podIdentityHttpTimeout: 100 * time.Millisecond,
 			expectError:            false,
 		},
 		{

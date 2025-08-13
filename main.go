@@ -36,12 +36,12 @@ func parsePodIdentityHttpTimeout(timeoutStr string) time.Duration {
 
 	duration, err := time.ParseDuration(timeoutStr)
 	if err != nil {
-		klog.Errorf("failed to parse podIdentityHttpTimeout value '%s': %v", timeoutStr, err)
+		klog.Errorf("failed to parse podIdentityHttpTimeout value '%s': %v, using default 100ms", timeoutStr, err)
 		return 100 * time.Millisecond
 	}
 
 	if duration <= 0 {
-		klog.Errorf("podIdentityHttpTimeout must be positive, got: %v", duration)
+		klog.Errorf("podIdentityHttpTimeout must be positive, got: %v, using default 100ms", duration)
 		return 100 * time.Millisecond
 	}
 

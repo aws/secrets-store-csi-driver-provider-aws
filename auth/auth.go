@@ -33,7 +33,8 @@ var ProviderVersion = "unknown"
 // Auth is the main entry point to retrieve an AWS config. The caller
 // initializes a new Auth object with NewAuth passing the region, namespace, pod name,
 // K8s service account and usePodIdentity flag  (and request context). The caller can then obtain AWS
-// config by calling GetAWSConfig.
+// config by calling GetAWSConfig. podIdentityHttpTimeout is used to specify the HTTP timeout used for
+// Pod Identity auth
 type Auth struct {
 	region, nameSpace, svcAcc, podName, preferredAddressType string
 	usePodIdentity                                           bool
