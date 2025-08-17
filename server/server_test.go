@@ -2845,7 +2845,7 @@ func TestGetRegionFromNodeError(t *testing.T) {
 // Make sure the Version call works
 func TestDriverVersion(t *testing.T) {
 
-	svr, err := NewServer(nil, nil, true, false)
+	svr, err := NewServer(nil, nil, true, "test-version")
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected server error %s", err.Error())
 	}
