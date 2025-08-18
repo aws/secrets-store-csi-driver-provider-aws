@@ -130,11 +130,9 @@ func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.Bui
 	if !ok {
 		return next.HandleBuild(ctx, in)
 	}
-	userAgentString := m.providerName
+	userAgentString := m.providerName + "/" + ProviderVersion
 	if m.eksAddonVersion != "" {
 		userAgentString += "/" + m.eksAddonVersion
-	} else {
-		userAgentString += "/" + ProviderVersion
 	}
 	req.Header.Add("User-Agent", userAgentString)
 	return next.HandleBuild(ctx, in)
