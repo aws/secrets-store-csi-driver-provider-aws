@@ -72,7 +72,8 @@ func TestGetAWSConfig(t *testing.T) {
 
 func TestUserAgentMiddleware_ID(t *testing.T) {
 	middleware := &userAgentMiddleware{
-		providerName: "test-provider",
+		providerName:    "test-provider",
+		eksAddonVersion: "test-version",
 	}
 
 	expectedID := "AppendCSIDriverVersionToUserAgent"

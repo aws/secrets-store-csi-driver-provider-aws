@@ -55,6 +55,7 @@ type CSIDriverProviderServer struct {
 	secretProviderFactory provider.ProviderFactoryFactory
 	k8sClient             k8sv1.CoreV1Interface
 	driverWriteSecrets    bool
+	eksAddonVersion       string
 }
 
 // Factory function to create the server to handle incoming mount requests.
@@ -62,12 +63,14 @@ func NewServer(
 	secretProviderFact provider.ProviderFactoryFactory,
 	k8client k8sv1.CoreV1Interface,
 	driverWriteSecrets bool,
+	eksAddonVersion string,
 ) (srv *CSIDriverProviderServer, e error) {
 
 	return &CSIDriverProviderServer{
 		secretProviderFactory: secretProviderFact,
 		k8sClient:             k8client,
 		driverWriteSecrets:    driverWriteSecrets,
+		eksAddonVersion:       eksAddonVersion,
 	}, nil
 
 }
@@ -148,7 +151,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, regions, usePodIdentity, podName, preferredAddressType)
+	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, s.eksAddonVersion, regions, usePodIdentity, podName, preferredAddressType)
 	if err != nil {
 		return nil, err
 	}
@@ -232,12 +235,12 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []aws.Config, err error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, eksAddonVersion string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string) (response []aws.Config, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsConfigsList []aws.Config
 
 	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, usePodIdentity, s.k8sClient)
+		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, eksAddonVersion, usePodIdentity, s.k8sClient)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}

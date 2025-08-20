@@ -34,15 +34,15 @@ var ProviderVersion = "unknown"
 // K8s service account and usePodIdentity flag  (and request context). The caller can then obtain AWS
 // config by calling GetAWSConfig.
 type Auth struct {
-	region, nameSpace, svcAcc, podName, preferredAddressType string
-	usePodIdentity                                           bool
-	k8sClient                                                k8sv1.CoreV1Interface
-	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
+	region, nameSpace, svcAcc, podName, preferredAddressType, eksAddonVersion string
+	usePodIdentity                                                            bool
+	k8sClient                                                                 k8sv1.CoreV1Interface
+	stsClient                                                                 stscreds.AssumeRoleWithWebIdentityAPIClient
 }
 
 // NewAuth creates an Auth object for an incoming mount request.
 func NewAuth(
-	region, nameSpace, svcAcc, podName, preferredAddressType string,
+	region, nameSpace, svcAcc, podName, preferredAddressType, eksAddonVersion string,
 	usePodIdentity bool,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
@@ -66,6 +66,7 @@ func NewAuth(
 		svcAcc:               svcAcc,
 		podName:              podName,
 		preferredAddressType: preferredAddressType,
+		eksAddonVersion:      eksAddonVersion,
 		usePodIdentity:       usePodIdentity,
 		k8sClient:            k8sClient,
 		stsClient:            stsClient,
@@ -99,7 +100,8 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	// Add the user agent to the config
 	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
 		return stack.Build.Add(&userAgentMiddleware{
-			providerName: ProviderName,
+			providerName:    ProviderName,
+			eksAddonVersion: p.eksAddonVersion,
 		}, middleware.After)
 	})
 
@@ -107,7 +109,7 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 }
 
 type userAgentMiddleware struct {
-	providerName string
+	providerName, eksAddonVersion string
 }
 
 func (m *userAgentMiddleware) ID() string {
@@ -120,6 +122,10 @@ func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.Bui
 	if !ok {
 		return next.HandleBuild(ctx, in)
 	}
-	req.Header.Add("User-Agent", m.providerName+"/"+ProviderVersion)
+	userAgentString := m.providerName + "/" + ProviderVersion
+	if m.eksAddonVersion != "" {
+		userAgentString += "/" + m.eksAddonVersion
+	}
+	req.Header.Add("User-Agent", userAgentString)
 	return next.HandleBuild(ctx, in)
 }
