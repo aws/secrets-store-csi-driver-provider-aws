@@ -68,8 +68,6 @@ teardown_file() {
 	log "Cleaning up kubeconfig file"
 	rm -f ${{KUBECONFIG_VAR}}
 
-{{TEARDOWN_CLEANUP}}
-
 	log "Cluster teardown completed for $CLUSTER_NAME"
 }
 

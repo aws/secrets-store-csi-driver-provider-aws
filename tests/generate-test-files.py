@@ -294,51 +294,14 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
     return f"""	log "Creating EKS Pod Identity addon"
 	eksctl create addon --name eks-pod-identity-agent --cluster $CLUSTER_NAME --region $REGION
 
-	log "Creating IAM role for Pod Identity"
-	ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name {arch}-pod-identity-role --assume-role-policy-document '{{
-    "Version": "2012-10-17",
-    "Statement": [
-        {{
-            "Effect": "Allow",
-            "Principal": {{
-                "Service": "pods.eks.amazonaws.com"
-            }},
-            "Action": [
-                "sts:AssumeRole",
-                "sts:TagSession"
-            ]
-        }}
-    ]
-}}')
-
-	log "Attaching policies to Pod Identity role"
-	aws iam attach-role-policy \\
-		--role-name {arch}-pod-identity-role \\
-		--policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
-
-	aws iam attach-role-policy \\
-		--role-name {arch}-pod-identity-role \\
-		--policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
-
 	log "Creating Pod Identity association"
 	eksctl create podidentityassociation \\
 		--cluster $CLUSTER_NAME \\
 		--namespace $NAMESPACE \\
 		--region $REGION \\
 		--service-account-name basic-test-mount-sa-{arch}-{auth_type} \\
-		--role-arn $ROLE_ARN \\
+		--role-arn $POD_IDENTITY_{arch.upper()}_ROLE_ARN \\
 		--create-service-account true"""
-
-
-def get_teardown_cleanup(arch: str, auth_type: str) -> str:
-    """Generate teardown cleanup code"""
-    if auth_type == "irsa":
-        return ""
-
-    return f"""	log "Cleaning up Pod Identity IAM role"
-	aws iam detach-role-policy --role-name {arch}-pod-identity-role --policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess 2>/dev/null || true
-	aws iam detach-role-policy --role-name {arch}-pod-identity-role --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite 2>/dev/null || true
-	aws iam delete-role --role-name {arch}-pod-identity-role 2>/dev/null || true"""
 
 
 def get_pod_identity_param(auth_type: str) -> str:
@@ -363,9 +326,6 @@ def replace_template_vars(template_file: str, output_file: str, config: Dict[str
     auth_type = config["AUTH_TYPE"]
 
     content = content.replace("{{AUTH_SETUP}}", get_auth_setup(arch, auth_type))
-    content = content.replace(
-        "{{TEARDOWN_CLEANUP}}", get_teardown_cleanup(arch, auth_type)
-    )
     content = content.replace(
         "{{POD_IDENTITY_PARAM}}", get_pod_identity_param(auth_type)
     )
