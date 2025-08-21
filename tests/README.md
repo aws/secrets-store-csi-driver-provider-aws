@@ -8,37 +8,37 @@
 6. Create the following two IAM roles:
 
 ```bash
-export POD_IDENTITY_x64_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name x64-pod-identity-role --assume-role-policy-document '{{
+export POD_IDENTITY_x64_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name x64-pod-identity-role --assume-role-policy-document '{
     "Version": "2012-10-17",
     "Statement": [
-        {{
+        {
             "Effect": "Allow",
-            "Principal": {{
+            "Principal": {
                 "Service": "pods.eks.amazonaws.com"
-            }},
+            },
             "Action": [
                 "sts:AssumeRole",
                 "sts:TagSession"
             ]
-        }}
+        }
     ]
-}}')
+}')
 
-export POD_IDENTITY_ARM_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name arm-pod-identity-role --assume-role-policy-document '{{
+export POD_IDENTITY_ARM_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name arm-pod-identity-role --assume-role-policy-document '{
     "Version": "2012-10-17",
     "Statement": [
-        {{
+        {
             "Effect": "Allow",
-            "Principal": {{
+            "Principal": {
                 "Service": "pods.eks.amazonaws.com"
-            }},
+            },
             "Action": [
                 "sts:AssumeRole",
                 "sts:TagSession"
             ]
-        }}
+        }
     ]
-}}')
+}')
 ```
 
 7. Attach the following policies to each role, replacing `{arch}` with `x64` and `arm` respectively:
