@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"k8s.io/klog/v2"
 
@@ -22,7 +21,6 @@ const (
 	podIdentityAudience = "pods.eks.amazonaws.com"
 	defaultIPv4Endpoint = "http://169.254.170.23/v1/credentials"
 	defaultIPv6Endpoint = "http://[fd00:ec2::23]/v1/credentials"
-	httpTimeout         = 100 * time.Millisecond
 )
 
 var (
@@ -93,9 +91,7 @@ func NewPodIdentityCredentialProvider(
 		region:               region,
 		preferredAddressType: preferredAddressType,
 		fetcher:              newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
-		httpClient: &http.Client{
-			Timeout: httpTimeout,
-		},
+		httpClient:           &http.Client{},
 	}, nil
 }
 
