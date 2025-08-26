@@ -8,7 +8,7 @@
 6. Create the following two IAM roles:
 
 ```bash
-export POD_IDENTITY_x64_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name x64-pod-identity-role --assume-role-policy-document '{
+export POD_IDENTITY_X64_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name x64-pod-identity-role --assume-role-policy-document '{
     "Version": "2012-10-17",
     "Statement": [
         {
