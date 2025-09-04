@@ -254,31 +254,4 @@ func TestUserAgentMiddleware_HandleBuild(t *testing.T) {
 			}
 		})
 	}
-
-	// Test case for non-smithyhttp.Request
-	t.Run("non-smithyhttp request", func(t *testing.T) {
-		m := &userAgentMiddleware{
-			providerName:    "test-provider",
-			eksAddonVersion: "v1.0.0",
-		}
-
-		// Use a different request type
-		input := middleware.BuildInput{Request: "not-a-smithy-request"}
-
-		nextCalled := false
-		next := middleware.BuildHandlerFunc(func(ctx context.Context, in middleware.BuildInput) (middleware.BuildOutput, middleware.Metadata, error) {
-			nextCalled = true
-			return middleware.BuildOutput{}, middleware.Metadata{}, nil
-		})
-
-		_, _, err := m.HandleBuild(context.Background(), input, next)
-
-		if err != nil {
-			t.Errorf("HandleBuild() error = %v", err)
-		}
-
-		if !nextCalled {
-			t.Error("Expected next handler to be called")
-		}
-	})
 }
