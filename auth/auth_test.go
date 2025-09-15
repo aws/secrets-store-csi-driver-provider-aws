@@ -97,7 +97,7 @@ func TestNewAuth(t *testing.T) {
 				tt.podName,
 				tt.preferredAddressType,
 				tt.usePodIdentity,
-				tt.podIdentityHttpTimeout,
+				&tt.podIdentityHttpTimeout,
 				k8sClient,
 			)
 
@@ -128,7 +128,7 @@ func TestNewAuth(t *testing.T) {
 				if auth.usePodIdentity != tt.usePodIdentity {
 					t.Errorf("Expected usePodIdentity %v, got %v", tt.usePodIdentity, auth.usePodIdentity)
 				}
-				if auth.podIdentityHttpTimeout != tt.podIdentityHttpTimeout {
+				if *auth.podIdentityHttpTimeout != tt.podIdentityHttpTimeout {
 					t.Errorf("Expected podIdentityHttpTimeout %v, got %v", tt.podIdentityHttpTimeout, auth.podIdentityHttpTimeout)
 				}
 				if auth.k8sClient == nil {
@@ -146,13 +146,15 @@ func TestGetAWSConfig(t *testing.T) {
 	for _, tstData := range sessionTests {
 		t.Run(tstData.testName, func(t *testing.T) {
 
+			timeout := 100 * time.Millisecond
+
 			auth := &Auth{
 				region:                 "someRegion",
 				nameSpace:              "someNamespace",
 				svcAcc:                 "someSvcAcc",
 				podName:                "somepod",
 				usePodIdentity:         tstData.testPodIdentity,
-				podIdentityHttpTimeout: 100 * time.Millisecond,
+				podIdentityHttpTimeout: &timeout,
 				k8sClient:              fake.NewSimpleClientset().CoreV1(),
 				stsClient:              &mockSTS{},
 			}

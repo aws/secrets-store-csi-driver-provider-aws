@@ -322,7 +322,7 @@ In order to configure the HTTP timeout for Pod Identity authentication, pass the
 ```shell
 helm install ... --pod-identity-http-timeout=250ms
 ```
-The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value is `100ms` by default.
+The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value uses the [AWS SDK default](https://github.com/aws/aws-sdk-go-v2/blob/main/aws/transport/http/client.go#L33) by default.
 
 ### Security Considerations
 

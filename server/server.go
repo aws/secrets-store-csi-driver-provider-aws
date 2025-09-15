@@ -56,7 +56,7 @@ type CSIDriverProviderServer struct {
 	secretProviderFactory  provider.ProviderFactoryFactory
 	k8sClient              k8sv1.CoreV1Interface
 	driverWriteSecrets     bool
-	podIdentityHttpTimeout time.Duration
+	podIdentityHttpTimeout *time.Duration
 }
 
 // Factory function to create the server to handle incoming mount requests.
@@ -64,7 +64,7 @@ func NewServer(
 	secretProviderFact provider.ProviderFactoryFactory,
 	k8client k8sv1.CoreV1Interface,
 	driverWriteSecrets bool,
-	podIdentityHttpTimeout time.Duration,
+	podIdentityHttpTimeout *time.Duration,
 ) (srv *CSIDriverProviderServer, e error) {
 
 	return &CSIDriverProviderServer{
@@ -236,7 +236,7 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, podIdentityHttpTimeout time.Duration) (response []aws.Config, err error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, podIdentityHttpTimeout *time.Duration) (response []aws.Config, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsConfigsList []aws.Config
 

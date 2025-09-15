@@ -38,7 +38,7 @@ var ProviderVersion = "unknown"
 type Auth struct {
 	region, nameSpace, svcAcc, podName, preferredAddressType string
 	usePodIdentity                                           bool
-	podIdentityHttpTimeout                                   time.Duration
+	podIdentityHttpTimeout                                   *time.Duration
 	k8sClient                                                k8sv1.CoreV1Interface
 	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
 }
@@ -47,7 +47,7 @@ type Auth struct {
 func NewAuth(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
 	usePodIdentity bool,
-	podIdentityHttpTimeout time.Duration,
+	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
 	var stsClient *sts.Client
@@ -85,7 +85,10 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	var credProvider credential_provider.ConfigProvider
 
 	if p.usePodIdentity {
-		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s, podIdentityHttpTimeout: %v", p.nameSpace, p.svcAcc, p.podIdentityHttpTimeout)
+		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
+		if p.podIdentityHttpTimeout != nil {
+			klog.Infof("Using custom Pod Identity timeout: %v", *p.podIdentityHttpTimeout)
+		}
 		var err error
 		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, p.k8sClient)
 		if err != nil {

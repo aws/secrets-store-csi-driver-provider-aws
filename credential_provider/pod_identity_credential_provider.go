@@ -3,7 +3,6 @@ package credential_provider
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/endpointcreds"
 
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	authv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -73,12 +73,12 @@ type PodIdentityCredentialProvider struct {
 	region               string
 	preferredAddressType string
 	fetcher              endpointcreds.AuthTokenProvider
-	httpClient           *http.Client
+	httpClient           *awshttp.BuildableClient
 }
 
 func NewPodIdentityCredentialProvider(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
-	podIdentityHttpTimeout time.Duration,
+	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (ConfigProvider, error) {
 	// Add validation if needed
@@ -89,14 +89,17 @@ func NewPodIdentityCredentialProvider(
 		return nil, fmt.Errorf("k8s client cannot be nil")
 	}
 
-	return &PodIdentityCredentialProvider{
+	pod_identity := PodIdentityCredentialProvider{
 		region:               region,
 		preferredAddressType: preferredAddressType,
 		fetcher:              newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
-		httpClient: &http.Client{
-			Timeout: podIdentityHttpTimeout,
-		},
-	}, nil
+	}
+
+	if podIdentityHttpTimeout != nil {
+		pod_identity.httpClient = awshttp.NewBuildableClient().WithTimeout(*podIdentityHttpTimeout)
+	}
+
+	return &pod_identity, nil
 }
 
 func parseAddressPreference(preferredAddressType string) string {

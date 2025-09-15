@@ -8,67 +8,83 @@ import (
 )
 
 func TestParsePodIdentityHttpTimeout(t *testing.T) {
+	oneHundredMs := 100 * time.Millisecond
+	twoSecs := 2 * time.Second
+	fiveHundredMs := 500 * time.Millisecond
+	thirtyFiveSecs := 35 * time.Second
+	thirtySecs := 30 * time.Second
+	thirtyPoint001Milliseconds := 30001 * time.Millisecond
+
 	tests := []struct {
 		name           string
 		timeoutValue   string
-		expectedResult time.Duration
+		expectedResult *time.Duration
 	}{
 		{
 			name:           "valid timeout - 100ms",
 			timeoutValue:   "100ms",
-			expectedResult: 100 * time.Millisecond,
+			expectedResult: &oneHundredMs,
 		},
 		{
 			name:           "valid timeout - 2s",
 			timeoutValue:   "2s",
-			expectedResult: 2 * time.Second,
+			expectedResult: &twoSecs,
 		},
 		{
 			name:           "valid timeout - 500ms",
 			timeoutValue:   "500ms",
-			expectedResult: 500 * time.Millisecond,
+			expectedResult: &fiveHundredMs,
 		},
 		{
 			name:           "high timeout - 35s (should warn but return value)",
 			timeoutValue:   "35s",
-			expectedResult: 35 * time.Second,
+			expectedResult: &thirtyFiveSecs,
 		},
 		{
 			name:           "invalid timeout format (should return default)",
 			timeoutValue:   "invalid",
-			expectedResult: 100 * time.Millisecond,
+			expectedResult: nil,
 		},
 		{
-			name:           "zero timeout (should return default)",
+			name:           "zero timeout (should return nil)",
 			timeoutValue:   "0s",
-			expectedResult: 100 * time.Millisecond,
+			expectedResult: nil,
 		},
 		{
-			name:           "negative timeout (should return default)",
+			name:           "negative timeout (should return nil)",
 			timeoutValue:   "-100ms",
-			expectedResult: 100 * time.Millisecond,
+			expectedResult: nil,
 		},
 		{
-			name:           "empty timeout (should use default)",
+			name:           "empty timeout (should use nil)",
 			timeoutValue:   "",
-			expectedResult: 100 * time.Millisecond,
+			expectedResult: nil,
 		},
 		{
 			name:           "exactly 30s (should not warn)",
 			timeoutValue:   "30s",
-			expectedResult: 30 * time.Second,
+			expectedResult: &thirtySecs,
 		},
 		{
 			name:           "just over 30s (should warn but return value)",
 			timeoutValue:   "30001ms",
-			expectedResult: 30001 * time.Millisecond,
+			expectedResult: &thirtyPoint001Milliseconds,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parsePodIdentityHttpTimeout(tt.timeoutValue)
-			if result != tt.expectedResult {
+
+			if result == nil && tt.expectedResult == nil {
+				return
+			}
+
+			if result == nil || tt.expectedResult == nil {
+				t.Errorf("Expected timeout %v, got %v", tt.expectedResult, result)
+			}
+
+			if *result != *tt.expectedResult {
 				t.Errorf("Expected timeout %v, got %v", tt.expectedResult, result)
 			}
 		})
