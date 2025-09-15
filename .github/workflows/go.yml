@@ -40,6 +40,9 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      - name: Static analysis
+        uses: dominikh/staticcheck-action@v1
+
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 

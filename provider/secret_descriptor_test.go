@@ -66,7 +66,7 @@ func TestUnknownService(t *testing.T) {
 		ObjectName: objectName,
 	}
 
-	expectedErrorMessage := fmt.Sprintf("Invalid service in ARN: sts")
+	expectedErrorMessage := "Invalid service in ARN: sts"
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
@@ -362,7 +362,7 @@ func TestMissingAliasJMES(t *testing.T) {
               - path: .username`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Object alias must be specified for JMES object")
+	expectedErrorMessage := "Object alias must be specified for JMES object"
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -378,7 +378,7 @@ func TestMissingPathJMES(t *testing.T) {
               - objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Path must be specified for JMES object")
+	expectedErrorMessage := "Path must be specified for JMES object"
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
