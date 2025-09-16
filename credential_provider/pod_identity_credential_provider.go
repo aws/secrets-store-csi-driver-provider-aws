@@ -146,7 +146,10 @@ func (p *PodIdentityCredentialProvider) getConfigWithEndpoint(ctx context.Contex
 	provider := endpointcreds.New(endpoint,
 		func(opts *endpointcreds.Options) {
 			opts.AuthorizationTokenProvider = p.fetcher
-			opts.HTTPClient = p.httpClient
+
+			if p.httpClient != nil {
+				opts.HTTPClient = p.httpClient
+			}
 		},
 	)
 	return config.LoadDefaultConfig(ctx,
