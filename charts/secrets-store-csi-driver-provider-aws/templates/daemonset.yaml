@@ -62,7 +62,7 @@ spec:
             - name: mountpoint-dir
               mountPath: {{ .Values.kubeletPath }}/pods
               mountPropagation: HostToContainer
-          {{- if or .Values.useFipsEndpoint .Values.awsRegion }}
+          {{- if or .Values.useFipsEndpoint .Values.awsRegion .Values.env }}
           env:
             {{- if .Values.useFipsEndpoint }}
             - name: AWS_USE_FIPS_ENDPOINT
@@ -71,6 +71,9 @@ spec:
             {{- if .Values.awsRegion }}
             - name: AWS_REGION
               value: {{ .Values.awsRegion | quote }}
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
       volumes:
