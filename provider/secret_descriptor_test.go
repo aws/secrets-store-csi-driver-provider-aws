@@ -41,19 +41,23 @@ func RunDescriptorValidationTest(t *testing.T, descriptor *SecretDescriptor, exp
 }
 
 func TestSetDefaultFilePermission(t *testing.T) {
-	perms := os.FileMode(0777)
-	SetDefaultFilePermission(perms)
+	previousPerms := defaultFilePermission
+	newPerms := os.FileMode(0777)
+	SetDefaultFilePermission(newPerms)
+
+	t.Cleanup(func() {
+		// Set back to default.
+		SetDefaultFilePermission(previousPerms)
+	})
 
 	descriptor := SecretDescriptor{
 		ObjectName: "arn:aws:ssm:us-west-2:123456789012:parameter/feaw",
 	}
 
-	if descriptor.GetFilePermission() != perms {
-		t.Fatalf("expected file permission to be %v but got %v", perms, descriptor.GetFilePermission())
+	if descriptor.GetFilePermission() != newPerms {
+		t.Fatalf("expected file permission to be %v but got %v", newPerms, descriptor.GetFilePermission())
 	}
 
-	// Set back to default. This is not great but unfortunately the field is static and only instantiated once.
-	SetDefaultFilePermission(os.FileMode(0644))
 }
 
 func TestNoNamePresent(t *testing.T) {
