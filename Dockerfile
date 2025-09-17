@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS go
+FROM golang:1.25-alpine AS go
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 RUN echo "Running on ${BUILDPLATFORM}, building for ${TARGETPLATFORM}."
