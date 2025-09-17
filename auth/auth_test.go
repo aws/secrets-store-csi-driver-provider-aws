@@ -98,6 +98,7 @@ func TestNewAuth(t *testing.T) {
 				tt.svcAcc,
 				tt.podName,
 				tt.preferredAddressType,
+				"test-version",
 				tt.usePodIdentity,
 				&tt.podIdentityHttpTimeout,
 				k8sClient,
