@@ -49,6 +49,9 @@ spec:
             - --burst={{ .Values.k8sThrottlingParams.burst }}
             {{- end }}
             {{- end }}
+            {{- if .Values.podIdentityHttpTimeout }}
+            - --pod-identity-http-timeout={{ .Values.podIdentityHttpTimeout }}
+            {{- end }}
           resources:
 {{ toYaml .Values.resources | indent 12 }}
           securityContext:

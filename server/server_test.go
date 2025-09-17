@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -97,7 +98,7 @@ func (m *MockSecretsManagerClient) DescribeSecret(ctx context.Context, input *se
 	return rsp, nil
 }
 
-func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProviderServer {
+func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTimeout *time.Duration) *CSIDriverProviderServer {
 
 	var ssmRsp, backupRegionSsmRsp []*ssm.GetParametersOutput
 	var gsvRsp, backupRegionGsvRsp []*secretsmanager.GetSecretValueOutput
@@ -203,9 +204,10 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 	clientset := fake.NewSimpleClientset(sa, pod, node)
 
 	return &CSIDriverProviderServer{
-		secretProviderFactory: factory,
-		k8sClient:             clientset.CoreV1(),
-		driverWriteSecrets:    driverWrites,
+		secretProviderFactory:  factory,
+		k8sClient:              clientset.CoreV1(),
+		driverWriteSecrets:     driverWrites,
+		podIdentityHttpTimeout: podIdentityHttpTimeout,
 	}
 
 }
@@ -2200,7 +2202,7 @@ func TestMounts(t *testing.T) {
 		t.Run(tst.testName, func(t *testing.T) {
 
 			dir := t.TempDir() // t.TempDir() handles cleanup automatically
-			svr := newServerWithMocks(&tst, false)
+			svr := newServerWithMocks(&tst, false, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, []*v1alpha1.ObjectVersion{})
@@ -2237,7 +2239,7 @@ func TestMountsNoWrite(t *testing.T) {
 
 			dir := t.TempDir() // t.TempDir() handles cleanup automatically
 
-			svr := newServerWithMocks(&tst, true)
+			svr := newServerWithMocks(&tst, true, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, []*v1alpha1.ObjectVersion{})
@@ -2656,7 +2658,7 @@ func TestReMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			svr := newServerWithMocks(&tst, false)
+			svr := newServerWithMocks(&tst, false, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, curState)
@@ -2694,7 +2696,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			svr := newServerWithMocks(&tst, true)
+			svr := newServerWithMocks(&tst, true, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, curState)
@@ -2728,7 +2730,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 func TestEmptyAttributes(t *testing.T) {
 
-	svr := newServerWithMocks(nil, false)
+	svr := newServerWithMocks(nil, false, nil)
 	req := &v1alpha1.MountRequest{
 		Attributes:           "", // Should error
 		TargetPath:           "/tmp",
@@ -2749,7 +2751,7 @@ func TestEmptyAttributes(t *testing.T) {
 
 func TestNoPath(t *testing.T) {
 
-	svr := newServerWithMocks(nil, false)
+	svr := newServerWithMocks(nil, false, nil)
 	req := &v1alpha1.MountRequest{ // Missing TargetPath
 		Attributes:           "{}",
 		Permission:           "420",
@@ -2779,7 +2781,7 @@ func TestGetRegionFromNodeWithAWSRegionEnvVar(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "fakeNode",
 		},
-	}, false)
+	}, false, nil)
 
 	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 
@@ -2802,7 +2804,7 @@ func TestGetRegionFromNodeWithNodeLabels(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "fakeNode",
 		},
-	}, false)
+	}, false, nil)
 
 	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 	if err != nil {
@@ -2824,7 +2826,7 @@ func TestGetRegionFromNodeError(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "FailNode",
 		},
-	}, false)
+	}, false, nil)
 
 	_, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 	if err == nil {
@@ -2834,8 +2836,7 @@ func TestGetRegionFromNodeError(t *testing.T) {
 
 // Make sure the Version call works
 func TestDriverVersion(t *testing.T) {
-
-	svr, err := NewServer(nil, nil, true)
+	svr, err := NewServer(nil, nil, true, nil)
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected server error %s", err.Error())
 	}
