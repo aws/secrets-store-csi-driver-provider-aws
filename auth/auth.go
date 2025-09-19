@@ -9,6 +9,7 @@ package auth
 
 import (
 	"context"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -32,10 +33,12 @@ var ProviderVersion = "unknown"
 // Auth is the main entry point to retrieve an AWS config. The caller
 // initializes a new Auth object with NewAuth passing the region, namespace, pod name,
 // K8s service account and usePodIdentity flag  (and request context). The caller can then obtain AWS
-// config by calling GetAWSConfig.
+// config by calling GetAWSConfig. podIdentityHttpTimeout is used to specify the HTTP timeout used for
+// Pod Identity auth
 type Auth struct {
 	region, nameSpace, svcAcc, podName, preferredAddressType string
 	usePodIdentity                                           bool
+	podIdentityHttpTimeout                                   *time.Duration
 	k8sClient                                                k8sv1.CoreV1Interface
 	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
 }
@@ -44,6 +47,7 @@ type Auth struct {
 func NewAuth(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
 	usePodIdentity bool,
+	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
 	var stsClient *sts.Client
@@ -61,14 +65,15 @@ func NewAuth(
 	}
 
 	return &Auth{
-		region:               region,
-		nameSpace:            nameSpace,
-		svcAcc:               svcAcc,
-		podName:              podName,
-		preferredAddressType: preferredAddressType,
-		usePodIdentity:       usePodIdentity,
-		k8sClient:            k8sClient,
-		stsClient:            stsClient,
+		region:                 region,
+		nameSpace:              nameSpace,
+		svcAcc:                 svcAcc,
+		podName:                podName,
+		preferredAddressType:   preferredAddressType,
+		usePodIdentity:         usePodIdentity,
+		podIdentityHttpTimeout: podIdentityHttpTimeout,
+		k8sClient:              k8sClient,
+		stsClient:              stsClient,
 	}, nil
 
 }
@@ -81,8 +86,11 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 
 	if p.usePodIdentity {
 		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
+		if p.podIdentityHttpTimeout != nil {
+			klog.Infof("Using custom Pod Identity timeout: %v", *p.podIdentityHttpTimeout)
+		}
 		var err error
-		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.k8sClient)
+		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, p.k8sClient)
 		if err != nil {
 			return aws.Config{}, err
 		}
