@@ -205,7 +205,7 @@ func TestUserAgentMiddleware_HandleBuild(t *testing.T) {
 			name:            "with EKS addon version",
 			providerName:    "test-provider",
 			eksAddonVersion: "v1.0.0-eksbuild.1",
-			expectedUA:      "test-provider/unknown/eksAddonVersion=v1.0.0-eksbuild.1",
+			expectedUA:      "test-provider/unknown eksAddonVersion/v1.0.0-eksbuild.1",
 		},
 		{
 			name:            "without EKS addon version",
