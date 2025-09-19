@@ -9,6 +9,7 @@ package auth
 
 import (
 	"context"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -32,18 +33,21 @@ var ProviderVersion = "unknown"
 // Auth is the main entry point to retrieve an AWS config. The caller
 // initializes a new Auth object with NewAuth passing the region, namespace, pod name,
 // K8s service account and usePodIdentity flag  (and request context). The caller can then obtain AWS
-// config by calling GetAWSConfig.
+// config by calling GetAWSConfig. podIdentityHttpTimeout is used to specify the HTTP timeout used for
+// Pod Identity auth
 type Auth struct {
-	region, nameSpace, svcAcc, podName, preferredAddressType string
-	usePodIdentity                                           bool
-	k8sClient                                                k8sv1.CoreV1Interface
-	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
+	region, nameSpace, svcAcc, podName, preferredAddressType, eksAddonVersion string
+	usePodIdentity                                                            bool
+	podIdentityHttpTimeout                                                    *time.Duration
+	k8sClient                                                                 k8sv1.CoreV1Interface
+	stsClient                                                                 stscreds.AssumeRoleWithWebIdentityAPIClient
 }
 
 // NewAuth creates an Auth object for an incoming mount request.
 func NewAuth(
-	region, nameSpace, svcAcc, podName, preferredAddressType string,
+	region, nameSpace, svcAcc, podName, preferredAddressType, eksAddonVersion string,
 	usePodIdentity bool,
+	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 ) (auth *Auth, e error) {
 	var stsClient *sts.Client
@@ -61,14 +65,16 @@ func NewAuth(
 	}
 
 	return &Auth{
-		region:               region,
-		nameSpace:            nameSpace,
-		svcAcc:               svcAcc,
-		podName:              podName,
-		preferredAddressType: preferredAddressType,
-		usePodIdentity:       usePodIdentity,
-		k8sClient:            k8sClient,
-		stsClient:            stsClient,
+		region:                 region,
+		nameSpace:              nameSpace,
+		svcAcc:                 svcAcc,
+		podName:                podName,
+		preferredAddressType:   preferredAddressType,
+		eksAddonVersion:        eksAddonVersion,
+		usePodIdentity:         usePodIdentity,
+		podIdentityHttpTimeout: podIdentityHttpTimeout,
+		k8sClient:              k8sClient,
+		stsClient:              stsClient,
 	}, nil
 
 }
@@ -81,8 +87,11 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 
 	if p.usePodIdentity {
 		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
+		if p.podIdentityHttpTimeout != nil {
+			klog.Infof("Using custom Pod Identity timeout: %v", *p.podIdentityHttpTimeout)
+		}
 		var err error
-		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.k8sClient)
+		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, p.k8sClient)
 		if err != nil {
 			return aws.Config{}, err
 		}
@@ -99,7 +108,8 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	// Add the user agent to the config
 	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
 		return stack.Build.Add(&userAgentMiddleware{
-			providerName: ProviderName,
+			providerName:    ProviderName,
+			eksAddonVersion: p.eksAddonVersion,
 		}, middleware.After)
 	})
 
@@ -107,7 +117,7 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 }
 
 type userAgentMiddleware struct {
-	providerName string
+	providerName, eksAddonVersion string
 }
 
 func (m *userAgentMiddleware) ID() string {
@@ -120,6 +130,10 @@ func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.Bui
 	if !ok {
 		return next.HandleBuild(ctx, in)
 	}
-	req.Header.Add("User-Agent", m.providerName+"/"+ProviderVersion)
+	userAgentString := m.providerName + "/" + ProviderVersion
+	if m.eksAddonVersion != "" {
+		userAgentString += " eksAddonVersion/" + m.eksAddonVersion
+	}
+	req.Header.Add("User-Agent", userAgentString)
 	return next.HandleBuild(ctx, in)
 }
