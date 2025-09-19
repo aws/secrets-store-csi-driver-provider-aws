@@ -40,6 +40,13 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      - name: Static analysis
+        run: |
+          export STATICCHECK_CACHE="${{ runner.temp }}/staticcheck"
+          go install "honnef.co/go/tools/cmd/staticcheck@latest"
+          $(go env GOPATH)/bin/staticcheck ./...
+        shell: bash
+
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 

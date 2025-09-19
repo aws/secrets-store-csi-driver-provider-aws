@@ -40,6 +40,26 @@ func RunDescriptorValidationTest(t *testing.T, descriptor *SecretDescriptor, exp
 	}
 }
 
+func TestSetDefaultFilePermission(t *testing.T) {
+	previousPerms := defaultFilePermission
+	newPerms := os.FileMode(0777)
+	SetDefaultFilePermission(newPerms)
+
+	t.Cleanup(func() {
+		// Set back to default.
+		SetDefaultFilePermission(previousPerms)
+	})
+
+	descriptor := SecretDescriptor{
+		ObjectName: "arn:aws:ssm:us-west-2:123456789012:parameter/feaw",
+	}
+
+	if descriptor.GetFilePermission() != newPerms {
+		t.Fatalf("expected file permission to be %v but got %v", newPerms, descriptor.GetFilePermission())
+	}
+
+}
+
 func TestNoNamePresent(t *testing.T) {
 	descriptor := SecretDescriptor{}
 
@@ -66,7 +86,7 @@ func TestUnknownService(t *testing.T) {
 		ObjectName: objectName,
 	}
 
-	expectedErrorMessage := fmt.Sprintf("Invalid service in ARN: sts")
+	expectedErrorMessage := "Invalid service in ARN: sts"
 	RunDescriptorValidationTest(t, &descriptor, expectedErrorMessage)
 }
 
@@ -362,7 +382,7 @@ func TestMissingAliasJMES(t *testing.T) {
               - path: .username`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Object alias must be specified for JMES object")
+	expectedErrorMessage := "Object alias must be specified for JMES object"
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
@@ -378,7 +398,7 @@ func TestMissingPathJMES(t *testing.T) {
               - objectAlias: aliasOne`
 
 	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
-	expectedErrorMessage := fmt.Sprintf("Path must be specified for JMES object")
+	expectedErrorMessage := "Path must be specified for JMES object"
 
 	if err == nil || err.Error() != expectedErrorMessage {
 		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)

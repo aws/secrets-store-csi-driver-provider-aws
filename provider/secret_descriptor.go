@@ -13,7 +13,7 @@ import (
 )
 
 // An RE pattern to check for bad paths
-var badPathRE = regexp.MustCompile("(/\\.\\./)|(^\\.\\./)|(/\\.\\.$)")
+var badPathRE = regexp.MustCompile(`(\/\.\.\/)|(^\.\.\/)|(\/\.\.$)`)
 
 // An RE pattern to check for valid file permission
 var validFilePermissionRE = regexp.MustCompile("^[0-7]{4}$")
@@ -88,8 +88,8 @@ type FailoverObjectEntry struct {
 }
 
 // Helper function to set the default file permission
-func SetDefaultFilePermission(defaultFilePermission os.FileMode) {
-	defaultFilePermission = defaultFilePermission
+func SetDefaultFilePermission(filePermission os.FileMode) {
+	defaultFilePermission = filePermission
 }
 
 // Enum of supported secret types

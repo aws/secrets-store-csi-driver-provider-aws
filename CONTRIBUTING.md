@@ -33,10 +33,11 @@ To send us a pull request, please:
 2. Modify the source; please focus on the specific change you are contributing. 
 3. Run `gofmt -w ./..` to ensure consistent formatting.
 4. Install `goimports` (`brew install goimports` on MacOS) and run `goimports -w ./..` to tidy import statements.
-4. Ensure local tests pass.
-5. Commit to your fork using clear commit messages.
-6. Send us a pull request, answering any default questions in the pull request interface.
-7. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
+5. Install [staticcheck](https://staticcheck.dev/docs/getting-started/) and run `staticcheck ./...`. Address any issues or disable the relevant rule as appropriate.
+6. Ensure local tests pass.
+7. Commit to your fork using clear commit messages.
+8. Send us a pull request, answering any default questions in the pull request interface.
+9. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
 
 GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
