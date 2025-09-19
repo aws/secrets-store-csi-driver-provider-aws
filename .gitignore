@@ -21,4 +21,4 @@ _output
 # JetBrains
 .idea/
 
-./secrets-store-csi-driver-provider-aws
+secrets-store-csi-driver-provider-aws
