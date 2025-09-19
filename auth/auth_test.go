@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -96,6 +98,7 @@ func TestNewAuth(t *testing.T) {
 				tt.svcAcc,
 				tt.podName,
 				tt.preferredAddressType,
+				"test-version",
 				tt.usePodIdentity,
 				&tt.podIdentityHttpTimeout,
 				k8sClient,
@@ -179,7 +182,8 @@ func TestGetAWSConfig(t *testing.T) {
 
 func TestUserAgentMiddleware_ID(t *testing.T) {
 	middleware := &userAgentMiddleware{
-		providerName: "test-provider",
+		providerName:    "test-provider",
+		eksAddonVersion: "test-version",
 	}
 
 	expectedID := "AppendCSIDriverVersionToUserAgent"
@@ -187,5 +191,68 @@ func TestUserAgentMiddleware_ID(t *testing.T) {
 
 	if actualID != expectedID {
 		t.Errorf("Expected ID() to return '%s', but got '%s'", expectedID, actualID)
+	}
+}
+
+func TestUserAgentMiddleware_HandleBuild(t *testing.T) {
+	tests := []struct {
+		name            string
+		providerName    string
+		eksAddonVersion string
+		expectedUA      string
+	}{
+		{
+			name:            "with EKS addon version",
+			providerName:    "test-provider",
+			eksAddonVersion: "v1.0.0-eksbuild.1",
+			expectedUA:      "test-provider/unknown eksAddonVersion/v1.0.0-eksbuild.1",
+		},
+		{
+			name:            "without EKS addon version",
+			providerName:    "test-provider",
+			eksAddonVersion: "",
+			expectedUA:      "test-provider/unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &userAgentMiddleware{
+				providerName:    tt.providerName,
+				eksAddonVersion: tt.eksAddonVersion,
+			}
+
+			req := smithyhttp.NewStackRequest()
+
+			input := middleware.BuildInput{Request: req}
+
+			nextCalled := false
+			next := middleware.BuildHandlerFunc(func(ctx context.Context, in middleware.BuildInput) (middleware.BuildOutput, middleware.Metadata, error) {
+				nextCalled = true
+				return middleware.BuildOutput{}, middleware.Metadata{}, nil
+			})
+
+			_, _, err := m.HandleBuild(context.Background(), input, next)
+
+			if err != nil {
+				t.Errorf("HandleBuild() error = %v", err)
+			}
+
+			if !nextCalled {
+				t.Error("Expected next handler to be called")
+			}
+
+			// Cast to smithyhttp.Request to access Header
+			if smithyReq, ok := input.Request.(*smithyhttp.Request); ok {
+				userAgents := smithyReq.Header["User-Agent"]
+				if len(userAgents) == 0 {
+					t.Error("Expected User-Agent header to be set")
+				} else if userAgents[0] != tt.expectedUA {
+					t.Errorf("Expected User-Agent '%s', got '%s'", tt.expectedUA, userAgents[0])
+				}
+			} else {
+				t.Error("Expected request to be *smithyhttp.Request")
+			}
+		})
 	}
 }

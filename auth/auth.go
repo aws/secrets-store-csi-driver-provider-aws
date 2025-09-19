@@ -36,16 +36,16 @@ var ProviderVersion = "unknown"
 // config by calling GetAWSConfig. podIdentityHttpTimeout is used to specify the HTTP timeout used for
 // Pod Identity auth
 type Auth struct {
-	region, nameSpace, svcAcc, podName, preferredAddressType string
-	usePodIdentity                                           bool
-	podIdentityHttpTimeout                                   *time.Duration
-	k8sClient                                                k8sv1.CoreV1Interface
-	stsClient                                                stscreds.AssumeRoleWithWebIdentityAPIClient
+	region, nameSpace, svcAcc, podName, preferredAddressType, eksAddonVersion string
+	usePodIdentity                                                            bool
+	podIdentityHttpTimeout                                                    *time.Duration
+	k8sClient                                                                 k8sv1.CoreV1Interface
+	stsClient                                                                 stscreds.AssumeRoleWithWebIdentityAPIClient
 }
 
 // NewAuth creates an Auth object for an incoming mount request.
 func NewAuth(
-	region, nameSpace, svcAcc, podName, preferredAddressType string,
+	region, nameSpace, svcAcc, podName, preferredAddressType, eksAddonVersion string,
 	usePodIdentity bool,
 	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
@@ -70,6 +70,7 @@ func NewAuth(
 		svcAcc:                 svcAcc,
 		podName:                podName,
 		preferredAddressType:   preferredAddressType,
+		eksAddonVersion:        eksAddonVersion,
 		usePodIdentity:         usePodIdentity,
 		podIdentityHttpTimeout: podIdentityHttpTimeout,
 		k8sClient:              k8sClient,
@@ -107,7 +108,8 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	// Add the user agent to the config
 	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
 		return stack.Build.Add(&userAgentMiddleware{
-			providerName: ProviderName,
+			providerName:    ProviderName,
+			eksAddonVersion: p.eksAddonVersion,
 		}, middleware.After)
 	})
 
@@ -115,7 +117,7 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 }
 
 type userAgentMiddleware struct {
-	providerName string
+	providerName, eksAddonVersion string
 }
 
 func (m *userAgentMiddleware) ID() string {
@@ -128,6 +130,10 @@ func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.Bui
 	if !ok {
 		return next.HandleBuild(ctx, in)
 	}
-	req.Header.Add("User-Agent", m.providerName+"/"+ProviderVersion)
+	userAgentString := m.providerName + "/" + ProviderVersion
+	if m.eksAddonVersion != "" {
+		userAgentString += " eksAddonVersion/" + m.eksAddonVersion
+	}
+	req.Header.Add("User-Agent", userAgentString)
 	return next.HandleBuild(ctx, in)
 }
