@@ -14,7 +14,8 @@ AWS offers two services to manage secrets and parameters conveniently in your co
     helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
     helm install -n kube-system csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver
     ```
-  **Note** that older versions of the driver may require the ```--set grpcSupportedProviders="aws"``` flag on the install step.
+  **Note** that older versions of the driver may require the ```--set grpcSupportedProviders="aws"``` flag on the install step.  
+  **Note** this step can be skipped if installing from Helm. The Helm chart for the ASCP by default automatically installs a compatible version of the Secrets Store CSI driver as a helm dependency. This can be disabled by setting `secrets-store-csi-driver.install=false`.
 * IAM Roles for Service Accounts ([IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)) or [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) as described in the usage section below.
 
 [^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate.
@@ -314,6 +315,14 @@ helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-sto
 To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server.
 
 If you use Helm chart to install the provider, append the `--set-json 'k8sThrottlingParams={"qps": "<custom qps>", "burst": "<custom qps>"}'` flag in the install step.
+
+### HTTP timeout for Pod Identity
+
+In order to configure the HTTP timeout for Pod Identity authentication, pass the `pod-identity-http-timeout` flag during the install step:
+```shell
+helm install ... --pod-identity-http-timeout=250ms
+```
+The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value uses the [AWS SDK default](https://github.com/aws/aws-sdk-go-v2/blob/main/aws/transport/http/client.go#L33) by default.
 
 ### Security Considerations
 
