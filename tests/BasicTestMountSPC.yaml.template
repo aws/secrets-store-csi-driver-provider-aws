@@ -1,0 +1,62 @@
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: basic-test-mount-spc-{{ARCH}}-{{AUTH_TYPE}}
+spec:
+  provider: aws
+  secretObjects:
+    - secretName: secret
+      type: Opaque
+      data:
+        - objectName: SecretsManagerSync-{{ARCH}}-{{AUTH_TYPE}}
+          key: username
+    - secretName: json-ssm
+      type: Opaque
+      data:
+        - objectName: ssmUsername
+          key: username
+        - objectName: ssmPassword
+          key: password
+    - secretName: secrets-manager-json
+      type: Opaque
+      data:
+        - objectName: secretsManagerUsername
+          key: username
+        - objectName: secretsManagerPassword
+          key: password
+
+  parameters:{{POD_IDENTITY_PARAM}}
+    region: ${REGION}
+    failoverRegion: ${FAILOVERREGION}
+    objects: |
+      - objectName: "ParameterStoreTest1-{{ARCH}}-{{AUTH_TYPE}}"
+        objectType: "ssmparameter"
+      - objectName: "ParameterStoreTestWithLongName-{{ARCH}}-{{AUTH_TYPE}}"
+        objectAlias: "ParameterStoreTest2"
+        objectType: "ssmparameter"
+      - objectName: "ParameterStoreRotationTest-{{ARCH}}-{{AUTH_TYPE}}"
+        objectType: "ssmparameter"
+      - objectName: "SecretsManagerRotationTest-{{ARCH}}-{{AUTH_TYPE}}"
+        objectType: "secretsmanager"
+      - objectName: "SecretsManagerTest1-{{ARCH}}-{{AUTH_TYPE}}"
+        objectType: "secretsmanager"
+      - objectName: arn:aws:secretsmanager:${REGION}:${ACCOUNT_NUMBER}:secret:SecretsManagerTest2-{{ARCH}}-{{AUTH_TYPE}}
+        objectAlias: "SecretsManagerTest2"
+        failoverObject:
+          objectName: arn:aws:secretsmanager:${FAILOVERREGION}:${ACCOUNT_NUMBER}:secret:SecretsManagerTest2-{{ARCH}}-{{AUTH_TYPE}}
+      - objectName: "SecretsManagerSync-{{ARCH}}-{{AUTH_TYPE}}"
+        objectType: "secretsmanager"
+      - objectName: "jsonSsm-{{ARCH}}-{{AUTH_TYPE}}"
+        objectType: "ssmparameter"
+        jmesPath:
+            - Path: "username"
+              ObjectAlias: "ssmUsername"
+            - Path: "password"
+              ObjectAlias: "ssmPassword"
+      - objectName: "secretsManagerJson-{{ARCH}}-{{AUTH_TYPE}}"
+        objectType: "secretsmanager"
+        jmesPath:
+            - Path: "username"
+              ObjectAlias: "secretsManagerUsername"
+            - Path: "password"
+              ObjectAlias: "secretsManagerPassword"

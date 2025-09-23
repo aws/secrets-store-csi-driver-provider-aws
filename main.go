@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
@@ -20,11 +21,37 @@ import (
 )
 
 var (
-	endpointDir        = flag.String("provider-volume", "/var/run/secrets-store-csi-providers", "Rendezvous directory for provider socket")
-	driverWriteSecrets = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
-	qps                = flag.Int("qps", 5, "Maximum query per second to the Kubernetes API server. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
-	burst              = flag.Int("burst", 10, "Maximum burst for throttle. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
+	endpointDir            = flag.String("provider-volume", "/var/run/secrets-store-csi-providers", "Rendezvous directory for provider socket")
+	driverWriteSecrets     = flag.Bool("driver-writes-secrets", false, "The driver will do the write instead of the plugin")
+	qps                    = flag.Int("qps", 5, "Maximum query per second to the Kubernetes API server. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
+	burst                  = flag.Int("burst", 10, "Maximum burst for throttle. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
+	eksAddonVersion        = flag.String("eks-addon-version", "", "The EKS addon version of the provider")
+	podIdentityHttpTimeout = flag.String("pod-identity-http-timeout", "", "The HTTP timeout threshold for Pod Identity authentication.")
 )
+
+// parsePodIdentityHttpTimeout parses and validates the HTTP timeout for Pod Identity authentication
+func parsePodIdentityHttpTimeout(timeoutStr string) *time.Duration {
+	if timeoutStr == "" {
+		return nil
+	}
+
+	duration, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		klog.Errorf("failed to parse podIdentityHttpTimeout value '%s': %v, using default SDK value", timeoutStr, err)
+		return nil
+	}
+
+	if duration <= 0 {
+		klog.Errorf("podIdentityHttpTimeout must be positive, got: %v, using default SDK value", duration)
+		return nil
+	}
+
+	if duration > 30*time.Second {
+		klog.Warningf("podIdentityHttpTimeout value %v is unusually high, consider using a smaller value", duration)
+	}
+
+	return &duration
+}
 
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
@@ -73,7 +100,10 @@ func main() {
 		os.Remove(endpoint)
 	}()
 
-	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets)
+	// Parse and validate HTTP timeout
+	podIdentityHttpTimeoutDuration := parsePodIdentityHttpTimeout(*podIdentityHttpTimeout)
+
+	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration, *eksAddonVersion)
 	if err != nil {
 		klog.Fatalf("Could not create server. error: %v", err)
 	}

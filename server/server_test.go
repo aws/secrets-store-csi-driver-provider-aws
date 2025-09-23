@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -97,7 +98,7 @@ func (m *MockSecretsManagerClient) DescribeSecret(ctx context.Context, input *se
 	return rsp, nil
 }
 
-func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProviderServer {
+func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTimeout *time.Duration) *CSIDriverProviderServer {
 
 	var ssmRsp, backupRegionSsmRsp []*ssm.GetParametersOutput
 	var gsvRsp, backupRegionGsvRsp []*secretsmanager.GetSecretValueOutput
@@ -203,9 +204,10 @@ func newServerWithMocks(tstData *testCase, driverWrites bool) *CSIDriverProvider
 	clientset := fake.NewSimpleClientset(sa, pod, node)
 
 	return &CSIDriverProviderServer{
-		secretProviderFactory: factory,
-		k8sClient:             clientset.CoreV1(),
-		driverWriteSecrets:    driverWrites,
+		secretProviderFactory:  factory,
+		k8sClient:              clientset.CoreV1(),
+		driverWriteSecrets:     driverWrites,
+		podIdentityHttpTimeout: podIdentityHttpTimeout,
 	}
 
 }
@@ -326,7 +328,7 @@ func createFilePermissionMapping(tst *testCase) map[string]string {
 		// Proccess the jmesPathEntries
 		if jmesObjs, ok := obj["jmesPath"].([]map[string]string); ok {
 			for _, jmesObj := range jmesObjs {
-				jmesObjectAlias, _ := jmesObj["objectAlias"]
+				jmesObjectAlias := jmesObj["objectAlias"]
 				jmesObjectAlias = resolveFilePath(jmesObjectAlias, translate)
 				if filePermission, ok := jmesObj["filePermission"]; ok {
 					fileToPermissionMap[jmesObjectAlias] = filePermission
@@ -401,7 +403,7 @@ func validateResponse(t *testing.T, dir string, tst testCase, rsp *v1alpha1.Moun
 	}
 
 	// Make sure there is a file response
-	if rsp.Files == nil || len(rsp.Files) <= 0 {
+	if len(rsp.Files) <= 0 {
 		t.Errorf("%s: Mount response must contain Files attribute when driverWriteSecrets is true", tst.testName)
 		return false
 	}
@@ -2192,16 +2194,6 @@ var noWriteMountTests []testCase = []testCase{
 	},
 }
 
-// Map test name for use as a directory
-var nameCharMap map[rune]bool = map[rune]bool{filepath.Separator: true, ' ': true}
-
-func nameMapper(c rune) rune {
-	if nameCharMap[c] {
-		return '_'
-	}
-	return c
-}
-
 func TestMounts(t *testing.T) {
 	testCases := append(mountTests, mountTestsForMultiRegion...)
 	allTests := append(testCases, writeOnlyMountTests...)
@@ -2210,7 +2202,7 @@ func TestMounts(t *testing.T) {
 		t.Run(tst.testName, func(t *testing.T) {
 
 			dir := t.TempDir() // t.TempDir() handles cleanup automatically
-			svr := newServerWithMocks(&tst, false)
+			svr := newServerWithMocks(&tst, false, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, []*v1alpha1.ObjectVersion{})
@@ -2247,7 +2239,7 @@ func TestMountsNoWrite(t *testing.T) {
 
 			dir := t.TempDir() // t.TempDir() handles cleanup automatically
 
-			svr := newServerWithMocks(&tst, true)
+			svr := newServerWithMocks(&tst, true, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, []*v1alpha1.ObjectVersion{})
@@ -2666,7 +2658,7 @@ func TestReMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			svr := newServerWithMocks(&tst, false)
+			svr := newServerWithMocks(&tst, false, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, curState)
@@ -2704,7 +2696,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 		t.Run(tst.testName, func(t *testing.T) {
 
-			svr := newServerWithMocks(&tst, true)
+			svr := newServerWithMocks(&tst, true, nil)
 
 			// Do the mount
 			req := buildMountReq(t, dir, tst, curState)
@@ -2738,7 +2730,7 @@ func TestNoWriteReMounts(t *testing.T) {
 
 func TestEmptyAttributes(t *testing.T) {
 
-	svr := newServerWithMocks(nil, false)
+	svr := newServerWithMocks(nil, false, nil)
 	req := &v1alpha1.MountRequest{
 		Attributes:           "", // Should error
 		TargetPath:           "/tmp",
@@ -2759,7 +2751,7 @@ func TestEmptyAttributes(t *testing.T) {
 
 func TestNoPath(t *testing.T) {
 
-	svr := newServerWithMocks(nil, false)
+	svr := newServerWithMocks(nil, false, nil)
 	req := &v1alpha1.MountRequest{ // Missing TargetPath
 		Attributes:           "{}",
 		Permission:           "420",
@@ -2789,7 +2781,7 @@ func TestGetRegionFromNodeWithAWSRegionEnvVar(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "fakeNode",
 		},
-	}, false)
+	}, false, nil)
 
 	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 
@@ -2812,7 +2804,7 @@ func TestGetRegionFromNodeWithNodeLabels(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "fakeNode",
 		},
-	}, false)
+	}, false, nil)
 
 	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 	if err != nil {
@@ -2834,7 +2826,7 @@ func TestGetRegionFromNodeError(t *testing.T) {
 			"podName":   "fakePod",
 			"nodeName":  "FailNode",
 		},
-	}, false)
+	}, false, nil)
 
 	_, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 	if err == nil {
@@ -2844,8 +2836,7 @@ func TestGetRegionFromNodeError(t *testing.T) {
 
 // Make sure the Version call works
 func TestDriverVersion(t *testing.T) {
-
-	svr, err := NewServer(nil, nil, true)
+	svr, err := NewServer(nil, nil, true, nil, "test-version")
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected server error %s", err.Error())
 	}
@@ -2853,7 +2844,7 @@ func TestDriverVersion(t *testing.T) {
 		t.Fatalf("TestDriverVersion: got empty server")
 	}
 
-	ver, err := svr.Version(nil, &v1alpha1.VersionRequest{})
+	ver, err := svr.Version(context.TODO(), &v1alpha1.VersionRequest{})
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected error %s", err.Error())
 	}
