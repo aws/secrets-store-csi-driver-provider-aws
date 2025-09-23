@@ -10,18 +10,18 @@ kind: ClusterRole
 metadata:
   name: csi-secrets-store-provider-aws-cluster-role
 rules:
-- apiGroups: [""]
-  resources: ["serviceaccounts/token"]
-  verbs: ["create"]
-- apiGroups: [""]
-  resources: ["serviceaccounts"]
-  verbs: ["get"]
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get"]
-- apiGroups: [""]
-  resources: ["nodes"]
-  verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -32,9 +32,9 @@ roleRef:
   kind: ClusterRole
   name: csi-secrets-store-provider-aws-cluster-role
 subjects:
-- kind: ServiceAccount
-  name: csi-secrets-store-provider-aws
-  namespace: kube-system
+  - kind: ServiceAccount
+    name: csi-secrets-store-provider-aws
+    namespace: kube-system
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -58,10 +58,10 @@ spec:
       hostNetwork: false
       containers:
         - name: provider-aws-installer
-          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:2.0.0
+          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:2.1.0
           imagePullPolicy: Always
           args:
-              - --provider-volume=/var/run/secrets-store-csi-providers
+            - --provider-volume=/var/run/secrets-store-csi-providers
           resources:
             requests:
               cpu: 50m

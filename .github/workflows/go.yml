@@ -50,6 +50,12 @@ jobs:
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 
+      - name: Setup Helm
+        uses: Azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint charts/*
+
       - name: Codecov
         uses: codecov/codecov-action@v5
         env:
