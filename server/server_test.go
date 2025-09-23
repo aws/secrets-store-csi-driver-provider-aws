@@ -328,7 +328,7 @@ func createFilePermissionMapping(tst *testCase) map[string]string {
 		// Proccess the jmesPathEntries
 		if jmesObjs, ok := obj["jmesPath"].([]map[string]string); ok {
 			for _, jmesObj := range jmesObjs {
-				jmesObjectAlias, _ := jmesObj["objectAlias"]
+				jmesObjectAlias := jmesObj["objectAlias"]
 				jmesObjectAlias = resolveFilePath(jmesObjectAlias, translate)
 				if filePermission, ok := jmesObj["filePermission"]; ok {
 					fileToPermissionMap[jmesObjectAlias] = filePermission
@@ -403,7 +403,7 @@ func validateResponse(t *testing.T, dir string, tst testCase, rsp *v1alpha1.Moun
 	}
 
 	// Make sure there is a file response
-	if rsp.Files == nil || len(rsp.Files) <= 0 {
+	if len(rsp.Files) <= 0 {
 		t.Errorf("%s: Mount response must contain Files attribute when driverWriteSecrets is true", tst.testName)
 		return false
 	}
@@ -2194,16 +2194,6 @@ var noWriteMountTests []testCase = []testCase{
 	},
 }
 
-// Map test name for use as a directory
-var nameCharMap map[rune]bool = map[rune]bool{filepath.Separator: true, ' ': true}
-
-func nameMapper(c rune) rune {
-	if nameCharMap[c] {
-		return '_'
-	}
-	return c
-}
-
 func TestMounts(t *testing.T) {
 	testCases := append(mountTests, mountTestsForMultiRegion...)
 	allTests := append(testCases, writeOnlyMountTests...)
@@ -2854,7 +2844,7 @@ func TestDriverVersion(t *testing.T) {
 		t.Fatalf("TestDriverVersion: got empty server")
 	}
 
-	ver, err := svr.Version(nil, &v1alpha1.VersionRequest{})
+	ver, err := svr.Version(context.TODO(), &v1alpha1.VersionRequest{})
 	if err != nil {
 		t.Fatalf("TestDriverVersion: got unexpected error %s", err.Error())
 	}
