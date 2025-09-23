@@ -58,7 +58,7 @@ spec:
       hostNetwork: false
       containers:
         - name: provider-aws-installer
-          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:2.1.0
+          image: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:2.1.1
           imagePullPolicy: Always
           args:
             - --provider-volume=/var/run/secrets-store-csi-providers
