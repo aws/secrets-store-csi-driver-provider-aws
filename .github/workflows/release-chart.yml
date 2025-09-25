@@ -10,6 +10,7 @@ jobs:
     needs: [test]
     permissions:
       contents: write
+    environment: prod
     runs-on: ubuntu-latest
     steps:
       - name: Harden Runner
