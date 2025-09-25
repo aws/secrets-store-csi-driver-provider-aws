@@ -53,9 +53,3 @@ docker-buildx:
 				-t $(REGISTRY_NAME):$(FULL_REV)-linux-amd64 \
 				-t $(REGISTRY_NAME):$(FULL_REV)-linux-arm64 \
 				. ;
-
-# Get a GitHub personal access token from the "Developer settings" section of your Github Account settings
-upload-helm:
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} package
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} upload -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --skip-existing
-	cd charts/secrets-store-csi-driver-provider-aws && ${CHART_RELEASER_PATH} index -o aws -r secrets-store-csi-driver-provider-aws --token $(GITHUB_TOKEN) --push --index-path .

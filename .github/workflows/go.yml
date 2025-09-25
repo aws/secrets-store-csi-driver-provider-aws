@@ -2,9 +2,14 @@ name: Go
 
 on:
   push:
-    branches: main
+    branches: [main]
   pull_request:
     types: [opened, synchronize, ready_for_review]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
