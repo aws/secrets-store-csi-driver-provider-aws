@@ -41,14 +41,14 @@ export POD_IDENTITY_ARM_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --out
 }')
 ```
 
-7. Attach the following policies to each role, replacing `{arch}` with `x64` and `arm` respectively:
+7. Attach the following policies to each role, replacing `${ARCH}` with `x64` and `arm` respectively:
 
 ```bash
-aws iam attach-role-policy \\
-	--role-name {arch}-pod-identity-role \\
+aws iam attach-role-policy \
+	--role-name ${ARCH}-pod-identity-role \
 	--policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
-aws iam attach-role-policy \\
-	--role-name {arch}-pod-identity-role \\
+aws iam attach-role-policy \
+	--role-name ${ARCH}-pod-identity-role \
 	--policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
 ```
 
