@@ -174,7 +174,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	}
 
 	providerFactory := s.secretProviderFactory(awsConfigs, regions)
-	var fetchedSecrets []*provider.SecretValue
+	fetchedSecrets := []*provider.SecretValue{}
 	for sType := range descriptors { // Iterate over each secret type.
 		// Fetch all the secrets and update the curVerMap
 		provider := providerFactory.GetSecretProvider(sType)
@@ -187,7 +187,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	}
 
 	// Write out the secrets to the mount point after everything is fetched.
-	var files []*v1alpha1.File
+	files := []*v1alpha1.File{}
 	for _, secret := range fetchedSecrets {
 		file, err := s.writeFile(secret, secret.Descriptor.GetFilePermission())
 		if err != nil {
@@ -199,7 +199,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	}
 
 	// Build the version response from the current version map and return it.
-	var ov []*v1alpha1.ObjectVersion
+	ov := []*v1alpha1.ObjectVersion{}
 	for id := range curVerMap {
 		ov = append(ov, curVerMap[id])
 	}
