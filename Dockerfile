@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS go
+FROM public.ecr.aws/docker/library/golang:1.24-alpine as go
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 RUN echo "Running on ${BUILDPLATFORM}, building for ${TARGETPLATFORM}."
