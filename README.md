@@ -293,11 +293,11 @@ Where `<REGION>` is the AWS region in which your Kubernetes cluster is running, 
 ```bash
 aws --region $REGION ecr create-repository --repository-name secrets-store-csi-driver-provider-aws # Only do this once
 ```
-1. Run `make` to build the plugin and push it to the ECR repo:
+4. Run `make` to build the plugin and push it to the ECR repo:
 ```
 make
 ```
-1. Once the image is in the ECR repo, it can be installed on EKS clusters using the private installer:
+5. Once the image is in the ECR repo, it can be installed on EKS clusters using the private installer:
 ```bash
 envsubst < deployment/private-installer.yaml | kubectl apply -f -
 ```
