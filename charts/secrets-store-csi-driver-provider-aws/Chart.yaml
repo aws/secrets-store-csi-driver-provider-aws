@@ -1,6 +1,6 @@
 apiVersion: v2
 name: secrets-store-csi-driver-provider-aws
-version: 2.0.0
+version: 2.1.1
 kubeVersion: ">=1.17.0-0"
 description: A Helm chart for the AWS Secrets Manager and Config Provider for Secret Store CSI Driver
 icon: https://raw.githubusercontent.com/aws/eks-charts/master/docs/logo/aws.png
@@ -9,10 +9,10 @@ sources:
 home: "https://github.com/aws/secrets-store-csi-driver-provider-aws"
 type: application
 dependencies:
-- name: secrets-store-csi-driver
-  repository: https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-  version: "^1"
-  condition: secrets-store-csi-driver.install
+  - name: secrets-store-csi-driver
+    repository: https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+    version: "^1"
+    condition: secrets-store-csi-driver.install
 
 keywords:
   - "eks"
