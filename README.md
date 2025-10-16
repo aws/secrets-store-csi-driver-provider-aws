@@ -311,7 +311,7 @@ helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver
 helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set useFipsEndpoint=true
 ```
 
-### Client-Side Rate-Limitting to Kubernetes API server
+### Client-Side Rate-Limiting to Kubernetes API server
 
 To mount each secret in each pod, the AWS CSI provider looks up the Region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of `qps` and `burst` if you notice the provider is throttled by client-side limits to the API server.
 
