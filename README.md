@@ -15,7 +15,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
     helm install -n kube-system csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver
     ```
   **NOTE:** older versions of the driver may require the ```--set grpcSupportedProviders="aws"``` flag for the install step.  
-  **NOTE:** this step can be skipped if installing via Helm. The Helm chart for the ASCP automatically installs a compatible version of the Secrets Store CSI driver as a Helm dependency by default. This can be disabled by setting `secrets-store-csi-driver.install=false`.
+  **NOTE:** this step can be skipped if installing with Helm. The Helm chart for the ASCP automatically installs a compatible version of the Secrets Store CSI driver as a Helm dependency by default. This can be disabled by setting `secrets-store-csi-driver.install=false`.
 * IAM Roles for Service Accounts ([IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)) or [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) as described in the usage section below.
 
 [^1]: The CSI Secret Store driver runs as a DaemonSet. As described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSets are not supported on Fargate.
@@ -37,19 +37,19 @@ kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-
 
 ## Usage
 
-Set the AWS region name and the name of your cluster to use in the bash commands that follow:
+Set the AWS Region and cluster name to use in the bash commands that follow:
 ```bash
 REGION=<REGION>
 CLUSTERNAME=<CLUSTERNAME>
 ```
-Where `<REGION>` is the region in which your cluster is running and `<CLUSTERNAME>` is the name of your cluster.
+Where `<REGION>` is the Region in which your cluster is running and `<CLUSTERNAME>` is the name of your cluster.
 
 Create a test secret:
 ```shell
 aws --region "$REGION" secretsmanager create-secret --name MySecret --secret-string '{"username":"memeuser", "password":"hunter2"}'
 ```
 
-Create an access policy for the pod scoped down to just the secrets it should have access to and save the policy ARN in a shell variable:
+Create an access policy for the pod with least permissions for the secrets you need access to. Save the policy ARN in a shell variable:
 ```shell
 POLICY_ARN=$(aws --region "$REGION" --query Policy.Arn --output text iam create-policy --policy-name nginx-deployment-policy --policy-document '{
     "Version": "2012-10-17",
@@ -82,14 +82,14 @@ kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment-IRSA.yaml
 ```
-5. Verify that the secret has been mounted correctly:
+5. Verify that the secret has been mounted correctly. Running the following command should output the secret string:
 ```shell
 kubectl exec -it $(kubectl get pods | awk '/nginx-irsa-deployment/{print $1}' | head -1) -- cat /mnt/secrets-store/MySecret; echo
 ```
 
 #### Option 2: Using EKS Pod Identity
-*Note: EKS Pod Identity is only supported for EKS in the Cloud. It's not supported for [Amazon EKS Anywhere](https://aws.amazon.com/eks/eks-anywhere/), [Red Hat Openshift Service on AWS (ROSA)](https://aws.amazon.com/rosa/), and self-managed Kubernetes clusters on Amazon Elastic Compute Cloud (Amazon EC2) instances.*
-1. Install the Amazon EKS Pod Identity Agent add-on on the cluster.
+*Note: EKS Pod Identity is only supported for EKS in the AWS Cloud. It's not supported for [Amazon EKS Anywhere](https://aws.amazon.com/eks/eks-anywhere/), [Red Hat Openshift Service on AWS (ROSA)](https://aws.amazon.com/rosa/), and self-managed Kubernetes clusters on Amazon Elastic Compute Cloud (Amazon EC2) instances.*
+1. Install the Amazon EKS Pod Identity Agent add-on to the cluster.
 ```shell
 eksctl create addon --name eks-pod-identity-agent --cluster "$CLUSTERNAME" --region "$REGION"
 ```
@@ -134,19 +134,19 @@ kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment-PodIdentity.yaml
 ```
-6. Verify that the secret has been mounted correctly:
+6. Verify that the secret has been mounted correctly. Running the following command should output the secret string:
 ```shell
 kubectl exec -it $(kubectl get pods | awk '/nginx-pod-identity-deployment/{print $1}' | head -1) -- cat /mnt/secrets-store/MySecret; echo
 ```
 
 ### Troubleshooting
-Most errors can be viewed by describing the pod deployment:
+Most errors can be viewed using the `get pods`, `describe pod/<PODID>`, and `logs pod/<PODID>` commands:
 
 1. Find the pod names using `get pods` (use `-n <NAMESPACE>` if you are not using the default namespace):
 ```shell
 kubectl get pods
 ```
-2. Describe the pod (substitute the pod ID from above for `<PODID>`, use `-n <NAMESPACE>` if you are not using the default namespace):
+1. Describe the pod (substitute the pod ID from above for `<PODID>`, use `-n <NAMESPACE>` if you are not using the default namespace):
 ```shell
 kubectl describe pod/<PODID>
 ```
@@ -176,8 +176,8 @@ The parameters section contains the details of the mount request and one of the 
             - objectName: "MySecret"
               objectType: "secretsmanager"
     ```
-* `region` **(optional)**: Specifies the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the region from the `topology.kubernetes.io/region` label on the node. This lookup adds overhead to mount requests: clusters using large numbers of pods will therefore benefit from explicitly specifying the region.
-* `failoverRegion` **(optional)**: Specifies a secondary AWS region to use when retrieving secrets. See the [Automated Failover Regions](#automated-failover-regions) section for more information.
+* `region` **(optional)**: Specifies the AWS Region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the Region from the `topology.kubernetes.io/region` label on the node. This lookup adds overhead to mount requests: clusters using large numbers of pods will therefore benefit from explicitly specifying the Region.
+* `failoverRegion` **(optional)**: Specifies a secondary AWS Region to use when retrieving secrets. See the [Automated Failover Regions](#automated-failover-regions) section for more information.
 * `pathTranslation` **(optional)**: Specifies a substitution character to use when the path separator character (`/` on Linux) is used in the file name. If a secret or parameter name contains the path separator, failures will occur when the provider tries to create a mounted file using the name. If unspecified, the underscore character is used, i.e., `My/Path/Secret` will be mounted as `My_Path_Secret`. `pathTranslation` can either be set to `"False"` or a single character string. When set to `"False"`, no character substitution is performed.
 * `usePodIdentity` **(optional)**: Determines the authentication approach. If not specified, it defaults to using IAM Roles for Service Accounts (IRSA). 
   - To use EKS Pod Identity, use any of these values: `"true"`, `"True"`, `"TRUE"`, `"t"`, `"T"`.
@@ -196,8 +196,8 @@ The primary `objects` field of the SecretProviderClass can contain the following
 * `objectVersionLabel` **(optional)**: Specifies the alias used for the version. Most applications should not use this field since the most recent version of the secret is used by default. For Secrets Manager, this is the [VersionStage](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) field. For SSM Parameter Store, this is the optional [Parameter Label](https://docs.amazonaws.cn/en_us/systems-manager/latest/userguide/sysman-paramstore-labels.html) field.
 
 * `failoverObject`: Optional when using the `failoverRegion` feature. See the [Automated Failover Regions](#automated-failover-regions) section for more information. The failover object can contain the following sub-fields:
-  * `objectName`: Required if `failoverObject` is present. Specifies the name of the secret or parameter to be fetched from the failover region. See the primary `objectName` field for more information.
-  * `objectVersion` **(optional)**: Defines the `objectVersion` for the failover region. If specified, it must match the primary region's `objectVersion`. See the primary `objectVersion` field for more information.
+  * `objectName`: Required if `failoverObject` is present. Specifies the name of the secret or parameter to be fetched from the failover Region. See the primary `objectName` field for more information.
+  * `objectVersion` **(optional)**: Defines the `objectVersion` for the failover Region. If specified, it must match the primary Region's `objectVersion`. See the primary `objectVersion` field for more information.
   * `objectVersionLabel` **(optional)**: Specifies the alias used for the version of the `failoverObject`. See the primary `objectVersionLabel` field for more information. 
 
 * `jmesPath` **(optional)**: Specifies the key-value pairs to extract from a JSON-formatted secret. You can use this field to mount key-value pairs from a properly formatted secret value as individual secrets. For example: Consider a secret "MySecret" with JSON content as follows:
@@ -245,7 +245,7 @@ helm upgrade -n kube-system csi-secrets-store secrets-store-csi-driver/secrets-s
 ```
 
 ### Automated Failover Regions
-In order to provide availability during connectivity outages or for disaster recovery configurations, this provider supports an automated failover feature to fetch secrets or parameters from a secondary region. To define an automated failover region, define the `failoverRegion` in the `SecretProviderClass.yaml` file:
+In order to provide availability during connectivity outages or for disaster recovery configurations, this provider supports an automated failover feature to fetch secrets or parameters from a secondary Region. To define an automated failover Region, define the `failoverRegion` in the `SecretProviderClass.yaml` file:
 ```yaml
 spec:
   provider: aws
@@ -254,12 +254,12 @@ spec:
     failoverRegion: us-east-2
 ```
 
-When the `failoverRegion` is defined, the driver will attempt to get the secret value from both regions.
-* If both regions successfully retrieve the secret value, the mount will contain the secret value of the secret in the primary region.
-* If one region returns a non-client error (code `5XX`), and the other region succeeds, the mount will contain the secret value of the non-failing region.
-* If either region returns a client error (code `4XX`), the mount will fail, and the cause of the error must be resolved before the mount will succeed.
+When the `failoverRegion` is defined, the driver will attempt to get the secret value from both Regions.
+* If both Regions successfully retrieve the secret value, the mount will contain the secret value of the secret in the primary Region.
+* If one Region returns a non-client error (code `5XX`), and the other Region succeeds, the mount will contain the secret value of the non-failing Region.
+* If either Region returns a client error (code `4XX`), the mount will fail, and the failure must be resolved before the mount will succeed.
 
- It is possible to use different secrets or parameters between the primary and failover regions. The following example uses different ARNs depending on which region it is pulling from:
+ It is possible to use different secrets or parameters between the primary and failover Regions. The following example uses different ARNs depending on which Region it is pulling from:
  ```yaml
 - objectName: "arn:aws:secretsmanager:us-east-1:123456789012:secret:PrimarySecret-12345"
   failoverObject: 
@@ -283,12 +283,12 @@ Users may build and install this provider into their AWS account's [AWS ECR](htt
 git clone https://github.com/aws/secrets-store-csi-driver-provider-aws
 cd secrets-store-csi-driver-provider-aws
 ```
-2. Set the AWS region and ECR repository name in bash shell variables to be used later:
+2. Set the AWS Region and ECR repository name in bash shell variables to be used later:
 ```bash
 export REGION=<REGION>
 export PRIVREPO=<ACCOUNT>.dkr.ecr.$REGION.amazonaws.com/secrets-store-csi-driver-provider-aws
 ```
-Where `<REGION>` is the AWS region in which your Kubernetes cluster is running, and `<ACCOUNT>` is your AWS account ID. 
+Where `<REGION>` is the AWS Region in which your Kubernetes cluster is running, and `<ACCOUNT>` is your AWS account ID.
 3. Create the ECR repository:
 ```bash
 aws --region $REGION ecr create-repository --repository-name secrets-store-csi-driver-provider-aws # Only do this once
@@ -313,7 +313,7 @@ helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-sto
 
 ### Client-Side Rate-Limitting to Kubernetes API server
 
-To mount each secret in each pod, the AWS CSI provider looks up the region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of `qps` and `burst` if you notice the provider is throttled by client-side limits to the API server.
+To mount each secret in each pod, the AWS CSI provider looks up the Region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of `qps` and `burst` if you notice the provider is throttled by client-side limits to the API server.
 
 If you use Helm to install the provider, append the `--set-json 'k8sThrottlingParams={"qps": "<custom qps>", "burst": "<custom qps>"}'` flag during the install step.
 
