@@ -126,17 +126,17 @@ eksctl create podidentityassociation \
     --role-arn $ROLE_ARN \
     --create-service-account true
 ```
-4. Create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. `ExampleSecretProviderClass-IRSA.yaml` in the [`examples/`](./examples) directory will mount "MySecret" created above:
+4. Create the SecretProviderClass which tells the AWS provider which secrets are to be mounted in the pod. `ExampleSecretProviderClass-PodIdentity.yaml` in the [`examples/`](./examples) directory will mount "MySecret" created above:
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleSecretProviderClass-PodIdentity.yaml
 ```
-5. Deploy the pod. `ExampleDeployment-IRSA.yaml` in the [`examples/`](./examples) directory contains a sample nginx deployment that mounts the secrets under `/mnt/secrets-store` in the pod:
+5. Deploy the pod. `ExampleDeployment-PodIdentity.yaml` in the [`examples/`](./examples) directory contains a sample nginx deployment that mounts the secrets under `/mnt/secrets-store` in the pod:
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/examples/ExampleDeployment-PodIdentity.yaml
 ```
 6. Verify that the secret has been mounted correctly:
 ```shell
-kubectl exec -it $(kubectl get pods | awk '/nginx-irsa-deployment/{print $1}' | head -1) -- cat /mnt/secrets-store/MySecret; echo
+kubectl exec -it $(kubectl get pods | awk '/nginx-pod-identity-deployment/{print $1}' | head -1) -- cat /mnt/secrets-store/MySecret; echo
 ```
 
 ### Troubleshooting
