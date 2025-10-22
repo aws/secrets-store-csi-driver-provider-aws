@@ -8,6 +8,7 @@ jobs:
   remove-label:
     runs-on: ubuntu-latest
     permissions:
+      issues: write
       pull-requests: write
     env:
       LABEL_NAME: safe-to-test
