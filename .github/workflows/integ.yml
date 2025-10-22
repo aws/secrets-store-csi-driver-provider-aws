@@ -1,0 +1,136 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+jobs:
+  build-docker:
+    name: Build Docker Image
+    if: |
+      github.event_name != 'pull_request_target' ||
+      github.event.pull_request.author_association == 'COLLABORATOR' ||
+      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        include:
+          - os: linux
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the Docker image
+        uses: docker/build-push-action@v6
+        with:
+          build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=fakeversion' -extldflags '-static'
+          context: .
+          platforms: ${{ matrix.os }}/${{ matrix.arch }}
+          load: true
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/test-build:latest-${{ matrix.arch }}-${{ github.run_id }}
+
+      - name: List images
+        run: |
+          docker image ls -a
+  integration-tests:
+    name: Run Integration Tests
+    needs: build-docker
+    if: |
+      github.event_name != 'pull_request_target' ||
+      github.event.pull_request.author_association == 'COLLABORATOR' ||
+      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        auth_type: [irsa, pod-identity]
+        include:
+          - os: linux
+          - arch: amd64
+            arch-short: x64
+            runner: ubuntu-latest
+          - arch: arm64
+            arch-short: arm
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup eksctl
+        run: |
+          ARCH=${{ matrix.arch }}
+          PLATFORM=$(uname -s)_$ARCH
+
+          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+
+          curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_checksums.txt" | grep $PLATFORM | sha256sum --check
+
+          tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+
+          sudo install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
+
+      - run: eksctl version
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3"
+
+      - name: Install Python dependencies
+        run: pip install boto3
+
+      - name: Setup Bats and bats libs
+        id: setup-bats
+        uses: bats-core/bats-action@3.0.1
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.ROLE_ARN }}
+          role-session-name: csi-driver-ci-${{ github.run_id }}-${{ matrix.arch }}
+          aws-region: us-west-2
+          role-duration-seconds: 7200
+
+      - name: Run integ tests
+        run: cd tests && ./run-tests.sh ${{ matrix.arch-short }}-${{ matrix.auth_type }}
+        env:
+          POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
+          PRIVIMAGE: ghcr.io/${{ github.repository_owner }}/test-build:latest-${{ matrix.arch }}-${{ github.run_id }}
+
+      - name: Run cleanup
+        if: always()
+        run: cd tests && ./run-tests.sh clean ${{ matrix.arch-short }}-${{ matrix.auth_type }}

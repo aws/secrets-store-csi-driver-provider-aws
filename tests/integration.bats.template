@@ -22,8 +22,8 @@ log() {
 	echo -e "${{{LOG_COLOR}}}[$TIMESTAMP] [{{ARCH}}-{{AUTH_TYPE}}] $msg${NC}" >&3
 }
 
-if [[ -z "${PRIVREPO}" ]]; then
-	echo "Error: PRIVREPO is not specified" >&2
+if [[ -z "${PRIVIMAGE}" ]]; then
+	echo "Error: PRIVIMAGE is not specified" >&2
 	return 1
 fi
 
