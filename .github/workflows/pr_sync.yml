@@ -1,4 +1,4 @@
-name: Remove label when new commits are pushed
+name: Remove safe-to-test label when new commits are pushed
 
 on:
   pull_request:
@@ -14,8 +14,7 @@ jobs:
       - name: Remove label
         env:
           LABEL_NAME: safe-to-test
-          OWNER: ${{ github.repository_owner }}
-          REPO: ${{ github.event.pull_request.base.repo.name }}
+          REPO: ${{ github.event.pull_request.base.repo.full_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           echo "Removing label '$LABEL_NAME' from PR #$PR_NUMBER on repo $REPO"

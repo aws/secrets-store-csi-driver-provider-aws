@@ -5,14 +5,14 @@ on:
   push:
     branches: ["main"]
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [labeled]
 
 jobs:
   build-docker:
     name: Build Docker Image
     if: |
       github.event_name != 'pull_request_target' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
+      github.event.pull_request.author_association == 'MEMBER' ||
       contains(github.event.pull_request.labels.*.name, 'safe-to-test')
     permissions:
       contents: read
@@ -58,7 +58,7 @@ jobs:
     needs: build-docker
     if: |
       github.event_name != 'pull_request_target' ||
-      github.event.pull_request.author_association == 'COLLABORATOR' ||
+      github.event.pull_request.author_association == 'MEMBER' ||
       contains(github.event.pull_request.labels.*.name, 'safe-to-test')
     permissions:
       id-token: write
