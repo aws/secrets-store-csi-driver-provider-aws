@@ -12,8 +12,8 @@ export REGION=us-west-2
 export FAILOVERREGION=us-east-2
 export ACCOUNT_NUMBER=$(aws --region $REGION  sts get-caller-identity --query Account --output text)
 
-if [[ -z "${PRIVIMAGE}" ]]; then
-    echo "Error: PRIVIMAGE is not specified" >&2
+if [[ -z "${PRIVREPO}" ]]; then
+    echo "Error: PRIVREPO is not specified" >&2
     return 1
 fi
 

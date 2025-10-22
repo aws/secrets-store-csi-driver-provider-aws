@@ -3,7 +3,7 @@
 1. Complete the [Private Builds](https://github.com/aws/secrets-store-csi-driver-provider-aws/tree/main#private-builds) section of the README.
 2. Install [bats](https://github.com/bats-core/bats-core).
 3. If running multi-arch/multi-auth tests, install GNU Parallel (`brew install parallel`).
-4. Ensure that the `PRIVIMAGE` environment variable is set.
+4. Ensure that the `PRIVREPO` environment variable is set.
 5. You can set the `NODE_TYPE_*` environment variables to specify the EC2 instance types used for the test clusters (default: `m5.large` for x64, `m6g.large` for ARM).
 6. Create the following two IAM roles:
 
