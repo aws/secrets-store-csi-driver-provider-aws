@@ -21,3 +21,5 @@ jobs:
 
       - name: Remove label with gh CLI
         run: gh api repos/$REPO/issues/$PR_NUMBER/labels/$LABEL_NAME -X DELETE || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
