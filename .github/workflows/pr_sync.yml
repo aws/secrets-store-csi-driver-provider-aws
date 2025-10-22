@@ -9,17 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+    env:
+      LABEL_NAME: safe-to-test
+      REPO: ${{ github.event.pull_request.base.repo.full_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
 
     steps:
       - name: Remove label
-        env:
-          LABEL_NAME: safe-to-test
-          REPO: ${{ github.event.pull_request.base.repo.full_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "Removing label '$LABEL_NAME' from PR #$PR_NUMBER on repo $REPO"
-
-      - name: Remove label with gh CLI
-        run: gh api repos/$REPO/issues/$PR_NUMBER/labels/$LABEL_NAME -X DELETE || true
+          echo "Removing label '$LABEL_NAME' from PR #$PR_NUMBER on repo $REPO" 
+          gh api repos/$REPO/issues/$PR_NUMBER/labels/$LABEL_NAME -X DELETE || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
