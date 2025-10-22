@@ -117,13 +117,12 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
 
-      - name: Configure AWS credentials
+      - name: gure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.ROLE_ARN }}
           role-session-name: csi-driver-ci-${{ github.run_id }}-${{ matrix.arch }}
           aws-region: us-west-2
-          role-duration-seconds: 7200
 
       - name: Run integ tests
         run: cd tests && ./run-tests.sh ${{ matrix.arch-short }}-${{ matrix.auth_type }}
