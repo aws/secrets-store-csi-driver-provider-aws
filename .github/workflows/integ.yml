@@ -7,6 +7,11 @@ on:
   pull_request_target:
     types: [labeled]
 
+concurrency:
+  # Only run one workflow at a time to avoid hitting the network interface quota
+  group: integration-tests
+  cancel-in-progress: false
+
 jobs:
   build-docker:
     name: Build Docker Image
