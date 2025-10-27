@@ -1,7 +1,7 @@
 name: Remove safe-to-test label when new commits are pushed
 
 on:
-  pull_request_target:
+  pull_request:
     types: [synchronize]
 
 jobs:
