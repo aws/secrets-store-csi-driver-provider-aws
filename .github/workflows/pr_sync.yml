@@ -1,6 +1,7 @@
 name: Remove safe-to-test label when new commits are pushed
 
 on:
+  workflow_dispatch:
   pull_request:
     types: [synchronize]
 
@@ -10,6 +11,7 @@ jobs:
     permissions:
       issues: write
       pull-requests: write
+      contents: read
 
     steps:
       - name: Remove label
