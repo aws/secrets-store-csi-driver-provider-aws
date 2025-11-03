@@ -286,7 +286,7 @@ cd secrets-store-csi-driver-provider-aws
 2. Set the AWS Region and ECR repository name in bash shell variables to be used later:
 ```bash
 export REGION=<REGION>
-export PRIVREPO=<ACCOUNT>.dkr.ecr.$REGION.amazonaws.com/secrets-store-csi-driver-provider-aws
+export PRIVREPO=<ACCOUNT>.dkr.ecr.$REGION.amazonaws.com/secrets-store-csi-driver-provider-aws:latest
 ```
 Where `<REGION>` is the AWS Region in which your Kubernetes cluster is running, and `<ACCOUNT>` is your AWS account ID.
 3. Create the ECR repository:
