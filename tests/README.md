@@ -33,7 +33,7 @@ aws iam attach-role-policy \
 	--policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
 aws iam attach-role-policy \
 	--role-name pod-identity-role \
-	--policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
+	--policy-arn arn:aws:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess
 ```
 
 8. `cd` into the `tests` directory.
@@ -45,3 +45,4 @@ aws iam attach-role-policy \
    - `./run-tests.sh x64-pod-identity` will run only x64 Pod Identity tests
    - `./run-tests.sh arm-irsa` will run only ARM IRSA tests
    - `./run-tests.sh arm-pod-identity` will run only ARM Pod Identity tests
+   - Add `--addon` flag to use EKS addon installation instead of Helm (e.g., `./run-tests.sh --addon` or `./run-tests.sh x64-irsa --addon`)

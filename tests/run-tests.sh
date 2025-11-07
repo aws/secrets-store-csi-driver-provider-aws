@@ -1,5 +1,7 @@
 #!/bin/bash
 
+USE_ADDON=false
+
 cleanup() {
 	cleanup_generated_files
 	cleanup_secrets
@@ -19,7 +21,12 @@ generate_test_files() {
 		exit 1
 	fi
 
-	python3 generate-test-files.py
+	if [[ "$USE_ADDON" == "true" ]]; then
+		python3 generate-test-files.py --addon
+	else
+		python3 generate-test-files.py
+	fi
+
 	if [[ $? -ne 0 ]]; then
 		echo "Error: Failed to generate test files from templates"
 		exit 1
@@ -44,19 +51,30 @@ cleanup_secrets() {
 	python3 generate-test-files.py cleanup-secrets
 }
 
-if [[ "$1" == "clean" ]]; then
+# Parse arguments
+TEST_TARGET=""
+for arg in "$@"; do
+	if [[ "$arg" == "--addon" ]]; then
+		USE_ADDON=true
+	elif [[ "$arg" != "--"* ]]; then
+		TEST_TARGET="$arg"
+	fi
+done
+
+if [[ "$TEST_TARGET" == "clean" ]]; then
 	cleanup
 
-	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "pod-identity" || "$2" == "x64-pod-identity" ]]; then
+	CLEAN_TARGET="${2:-all}"
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "x64" || "$CLEAN_TARGET" == "pod-identity" || "$CLEAN_TARGET" == "x64-pod-identity" ]]; then
 		delete_cluster integ-cluster-x64-pod-identity
 	fi
-	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "irsa" || "$2" == "x64-irsa" ]]; then
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "x64" || "$CLEAN_TARGET" == "irsa" || "$CLEAN_TARGET" == "x64-irsa" ]]; then
 		delete_cluster integ-cluster-x64-irsa
 	fi
-	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "pod-identity" || "$2" == "arm-pod-identity" ]]; then
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "arm" || "$CLEAN_TARGET" == "pod-identity" || "$CLEAN_TARGET" == "arm-pod-identity" ]]; then
 		delete_cluster integ-cluster-arm-pod-identity
 	fi
-	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "irsa" || "$2" == "arm-irsa" ]]; then
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "arm" || "$CLEAN_TARGET" == "irsa" || "$CLEAN_TARGET" == "arm-irsa" ]]; then
 		delete_cluster integ-cluster-arm-irsa
 	fi
 
@@ -67,44 +85,44 @@ fi
 generate_test_files
 
 # Run tests based on argument
-if [[ "$1" == "all" || "$1" == "" ]]; then
+if [[ "$TEST_TARGET" == "all" || "$TEST_TARGET" == "" ]]; then
 	check_parallel
 	echo "Running all tests: x64-irsa, x64-pod-identity, arm-irsa, arm-pod-identity"
 	bats --jobs 4 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats arm-irsa.bats arm-pod-identity.bats
 fi
-if [[ "$1" == "irsa" ]]; then
+if [[ "$TEST_TARGET" == "irsa" ]]; then
 	check_parallel
 	echo "Running IRSA tests: x64-irsa, arm-irsa"
 	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats arm-irsa.bats
 fi
-if [[ "$1" == "pod-identity" ]]; then
+if [[ "$TEST_TARGET" == "pod-identity" ]]; then
 	check_parallel
 	echo "Running Pod Identity tests: x64-pod-identity, arm-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files x64-pod-identity.bats arm-pod-identity.bats
 fi
-if [[ "$1" == "x64" ]]; then
+if [[ "$TEST_TARGET" == "x64" ]]; then
 	check_parallel
 	echo "Running x64 tests: x64-irsa, x64-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats
 fi
-if [[ "$1" == "arm" ]]; then
+if [[ "$TEST_TARGET" == "arm" ]]; then
 	check_parallel
 	echo "Running ARM tests: arm-irsa, arm-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files arm-irsa.bats arm-pod-identity.bats
 fi
-if [[ "$1" == "x64-irsa" ]]; then
+if [[ "$TEST_TARGET" == "x64-irsa" ]]; then
 	echo "Running x64 IRSA test: x64-irsa"
 	bats x64-irsa.bats
 fi
-if [[ "$1" == "x64-pod-identity" ]]; then
+if [[ "$TEST_TARGET" == "x64-pod-identity" ]]; then
 	echo "Running x64 Pod Identity test: x64-pod-identity"
 	bats x64-pod-identity.bats
 fi
-if [[ "$1" == "arm-irsa" ]]; then
+if [[ "$TEST_TARGET" == "arm-irsa" ]]; then
 	echo "Running ARM IRSA test: arm-irsa"
 	bats arm-irsa.bats
 fi
-if [[ "$1" == "arm-pod-identity" ]]; then
+if [[ "$TEST_TARGET" == "arm-pod-identity" ]]; then
 	echo "Running ARM Pod Identity test: arm-pod-identity"
 	bats arm-pod-identity.bats
 fi

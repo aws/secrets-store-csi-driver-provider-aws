@@ -49,11 +49,7 @@ setup_file() {
 
 {{AUTH_SETUP}}
 
-	log "Adding secrets-store-csi-driver Helm repository"
-	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-
-	log "Installing secrets-store-csi-driver via Helm"
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
+{{INSTALL_METHOD}}
 
 	log "Cluster setup completed for $CLUSTER_NAME"
 }
