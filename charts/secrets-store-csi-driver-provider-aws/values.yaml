@@ -11,6 +11,7 @@ kubeletPath: "/var/lib/kubelet"
 
 driverWritesSecrets: false
 
+commonLabels: {}
 podLabels: {}
 podAnnotations: {}
 
@@ -51,3 +52,4 @@ dnsConfig: {}
 
 secrets-store-csi-driver:
   install: true
+  fullnameOverride: secrets-store-csi-driver

@@ -22,7 +22,9 @@ If yes, the issue is likely with the k8s Secrets Store CSI driver, not the AWS p
 **Expected behavior**
 
 **Environment:**
-OS, Go version, etc.
+OS, Go version, CSI driver and AWS Provider versions, etc.
+
+- [ ] I am able to reproduce this issue on the latest version of the CSI driver and AWS providers.
 
 **Additional context**
 Add any other context about the problem here.

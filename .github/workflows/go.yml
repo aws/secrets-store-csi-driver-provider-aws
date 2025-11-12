@@ -4,9 +4,15 @@ permissions:
 
 on:
   push:
-    branches: main
+    branches: [main]
   pull_request:
     types: [opened, synchronize, ready_for_review]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   build:
@@ -52,7 +58,14 @@ jobs:
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 
+      - name: Setup Helm
+        uses: Azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint charts/*
+
       - name: Codecov
         uses: codecov/codecov-action@v5
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          fail_ci_if_error: true
+          use_oidc: true
