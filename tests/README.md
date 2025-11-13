@@ -8,23 +8,7 @@
 6. Create the following two IAM roles:
 
 ```bash
-export POD_IDENTITY_X64_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name x64-pod-identity-role --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "Service": "pods.eks.amazonaws.com"
-            },
-            "Action": [
-                "sts:AssumeRole",
-                "sts:TagSession"
-            ]
-        }
-    ]
-}')
-
-export POD_IDENTITY_ARM_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name arm-pod-identity-role --assume-role-policy-document '{
+export POD_IDENTITY_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name pod-identity-role --assume-role-policy-document '{
     "Version": "2012-10-17",
     "Statement": [
         {
@@ -41,14 +25,14 @@ export POD_IDENTITY_ARM_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --out
 }')
 ```
 
-7. Attach the following policies to each role, replacing `{arch}` with `x64` and `arm` respectively:
+7. Attach the following policies to the role:
 
 ```bash
-aws iam attach-role-policy \\
-	--role-name {arch}-pod-identity-role \\
+aws iam attach-role-policy \
+	--role-name pod-identity-role \
 	--policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
-aws iam attach-role-policy \\
-	--role-name {arch}-pod-identity-role \\
+aws iam attach-role-policy \
+	--role-name pod-identity-role \
 	--policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
 ```
 
