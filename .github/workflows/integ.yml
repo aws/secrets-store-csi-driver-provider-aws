@@ -126,6 +126,7 @@ jobs:
           role-to-assume: ${{ secrets.ROLE_ARN }}
           role-session-name: csi-driver-ci-${{ github.run_id }}-${{ matrix.arch }}
           aws-region: us-west-2
+          role-duration-seconds: 14400
 
       - name: Run integ tests
         run: cd tests && ./run-tests.sh ${{ matrix.arch-short }}-${{ matrix.auth_type }}
