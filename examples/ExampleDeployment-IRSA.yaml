@@ -30,19 +30,18 @@ spec:
     spec:
       serviceAccountName: nginx-irsa-deployment-sa
       volumes:
-      - name: secrets-store-inline
-        csi:
-          driver: secrets-store.csi.k8s.io
-          readOnly: true
-          volumeAttributes:
-            secretProviderClass: "nginx-irsa-deployment-aws-secrets"
-      containers:
-      - name: nginx-irsa-deployment
-        image: nginx
-        ports:
-        - containerPort: 80
-        volumeMounts:
         - name: secrets-store-inline
-          mountPath: "/mnt/secrets-store"
-          readOnly: true
-
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: "nginx-irsa-deployment-aws-secrets"
+      containers:
+        - name: nginx-irsa-deployment
+          image: public.ecr.aws/nginx/nginx:latest
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: secrets-store-inline
+              mountPath: "/mnt/secrets-store"
+              readOnly: true

@@ -23,7 +23,7 @@ affinity:
             - key: "eks.amazonaws.com/compute-type"
               operator: NotIn
               values:
-              - fargate
+                - fargate
 
 resources:
   requests:
