@@ -176,7 +176,7 @@ def get_install_method() -> str:
     use_addon = "--addon" in sys.argv
     if use_addon:
         return """	log "Installing AWS Secrets Store CSI Driver Provider via EKS addon"
-	eksctl create addon --name aws-secrets-store-csi-driver-provider --cluster $CLUSTER_NAME --region $REGION"""
+	aws eks create-addon --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider --configuration-values \"file://addon_config_values.yaml\" --region $REGION"""
 
     return """	log "Adding secrets-store-csi-driver Helm repository"
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
