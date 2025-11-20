@@ -5,7 +5,6 @@ on:
   push:
     branches: ["main"]
     paths-ignore:
-      - ".github/**"
       - ".*ignore"
       - "*.md"
       - "LICENSE"
@@ -13,7 +12,6 @@ on:
   pull_request_target:
     types: [labeled]
     paths-ignore:
-      - ".github/**"
       - ".*ignore"
       - "*.md"
       - "LICENSE"
