@@ -134,7 +134,7 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
         --namespace $NAMESPACE \\
         --cluster $CLUSTER_NAME \\
         --attach-policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess \\
-        --attach-policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite \\
+        --attach-policy-arn arn:aws:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess \\
         --override-existing-serviceaccounts \\
         --approve \\
         --region $REGION"""
