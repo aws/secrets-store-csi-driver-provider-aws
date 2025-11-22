@@ -42,11 +42,11 @@ setup_file() {
 		--node-type ${{NODE_TYPE_VAR}} \
 		--nodes 3 \
 		--region $REGION \
-		--kubeconfig=${{KUBECONFIG_VAR}}
-
-{{AUTH_SETUP}}
+		--kubeconfig=${{KUBECONFIG_VAR}} >&3 2>&1
 
 {{INSTALL_METHOD}}
+
+{{AUTH_SETUP}}
 
 	log "Cluster setup completed for $CLUSTER_NAME"
 }
@@ -56,7 +56,7 @@ teardown_file() {
 
 	eksctl delete cluster \
 		--name $CLUSTER_NAME \
-		--region $REGION
+		--region $REGION >&3 2>&1
 
 	log "Cleaning up kubeconfig file"
 	rm -f ${{KUBECONFIG_VAR}}

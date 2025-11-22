@@ -4,12 +4,11 @@
 2. Install [bats](https://github.com/bats-core/bats-core).
 3. If running multi-arch/multi-auth tests, install GNU Parallel (`brew install parallel`).
 4. `cd` into the `tests/` directory
-5. Create a Python virtual environment and install `boto3`. E.g. using `uv`:
+5. Create a Python virtual environment and install `boto3` and `argparse`. The `run-tests.sh` script will automatically activate the virtual environment. E.g. using `uv`:
 
 ```bash
 uv venv
-uv pip install boto3
-source .venv/bin/activate
+uv pip install boto3 argparse
 ```
 
 6. Ensure that the `PRIVREPO` environment variable is set (not required if using `--addon` flag, see step 9).
@@ -55,4 +54,4 @@ aws iam attach-role-policy \
 - `./run-tests.sh arm-irsa` will run only ARM IRSA tests
 - `./run-tests.sh arm-pod-identity` will run only ARM Pod Identity tests
 - Add `--addon` flag to use EKS add-on installation instead of Helm (e.g., `./run-tests.sh --addon` or `./run-tests.sh x64-irsa --addon`)
-  - Add `--version` flag to select which EKS add-on version to test. (e.g. `./ren-tests.sh --addon --version v2.1.1-eksbuild.1`)
+  - Add `--version` flag to select which EKS add-on version to test. (e.g. `./run-tests.sh pod-identity --addon --version v2.1.1-eksbuild.1`)
