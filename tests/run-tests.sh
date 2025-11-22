@@ -70,6 +70,11 @@ for i in "${!@}"; do
 	fi
 done
 
+if [[ -n "$ADDON_VERSION" ]] && [[ "$USE_ADDON" != "true" ]]; then
+	echo "Error: --version flag requires --addon flag"
+	exit 1
+fi
+
 if [[ "$TEST_TARGET" == "clean" ]]; then
 	cleanup
 
