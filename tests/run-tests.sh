@@ -5,11 +5,11 @@ USE_ADDON=false
 ADDON_VERSION=""
 
 venv_activate() {
-	venv_activate
+	[[ -d .venv ]] && source .venv/bin/activate
 }
 
 venv_deactivate() {
-	venv_deactivate
+	[[ -d .venv ]] && deactivate
 }
 
 cleanup() {
@@ -120,7 +120,17 @@ cleanup_secrets() {
 
 # Parse arguments - test target must come before flags
 TEST_TARGET=""
-if [[ $# -gt 0 ]] && [[ "$1" != "--"* ]]; then
+CLEAN_TARGET=""
+
+# Handle clean command specially since it takes two positional args
+if [[ $# -gt 0 ]] && [[ "$1" == "clean" ]]; then
+	TEST_TARGET="clean"
+	shift
+	if [[ $# -gt 0 ]] && [[ "$1" != "--"* ]]; then
+		CLEAN_TARGET="$1"
+		shift
+	fi
+elif [[ $# -gt 0 ]] && [[ "$1" != "--"* ]]; then
 	TEST_TARGET="$1"
 	shift
 fi
@@ -158,7 +168,7 @@ fi
 if [[ "$TEST_TARGET" == "clean" ]]; then
 	cleanup
 
-	CLEAN_TARGET="${2:-all}"
+	CLEAN_TARGET="${CLEAN_TARGET:-all}"
 	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "x64" || "$CLEAN_TARGET" == "pod-identity" || "$CLEAN_TARGET" == "x64-pod-identity" ]]; then
 		delete_cluster integ-cluster-x64-pod-identity
 	fi
