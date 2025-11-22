@@ -22,10 +22,7 @@ log() {
 	echo -e "${{{LOG_COLOR}}}[$TIMESTAMP] [{{ARCH}}-{{AUTH_TYPE}}] $msg${NC}" >&3
 }
 
-if [[ -z "${PRIVREPO}" ]]; then
-	echo "Error: PRIVREPO is not specified" >&2
-	return 1
-fi
+{{PRIVREPO_CHECK}}
 
 if [[ -z "${{{NODE_TYPE_VAR}}}" ]]; then
 	{{NODE_TYPE_VAR}}={{DEFAULT_NODE_TYPE}}
@@ -91,19 +88,7 @@ validate_jmes_mount() {
 	log "JMES mount validation completed successfully"
 }
 
-@test "Install aws provider" {
-	log "Installing AWS provider"
-
-	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${{KUBECONFIG_VAR}} apply -f -
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
-
-	PROVIDER_POD=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=csi-secrets-store-provider-aws -o jsonpath="{.items[0].metadata.name}")
-	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
-	assert_success
-
-	log "AWS provider installation completed"
-}
+{{INSTALL_PROVIDER_TEST}}
 
 @test "secretproviderclasses crd is established" {
 	log "Verifying secretproviderclasses CRD is established"

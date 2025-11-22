@@ -156,6 +156,7 @@ def replace_template_vars(template_file, output_file, config):
     with open(template_file, encoding="utf-8") as f:
         content = f.read()
 
+    use_addon = "--addon" in sys.argv
     replacements = {
         **{f"{{{{{k}}}}}": v for k, v in config.items()},
         "{{AUTH_SETUP}}": get_auth_setup(config["ARCH"], config["AUTH_TYPE"]),
@@ -163,6 +164,23 @@ def replace_template_vars(template_file, output_file, config):
         "{{POD_IDENTITY_PARAM}}": '\n    usePodIdentity: "true"'
         if config["AUTH_TYPE"] == "pod-identity"
         else "",
+        "{{PRIVREPO_CHECK}}": "" if use_addon else """if [[ -z "${PRIVREPO}" ]]; then
+	echo "Error: PRIVREPO is not specified" >&2
+	return 1
+fi""",
+        "{{INSTALL_PROVIDER_TEST}}": "" if use_addon else """@test "Install aws provider" {
+	log "Installing AWS provider"
+
+	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${{KUBECONFIG_VAR}} apply -f -
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
+	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+	PROVIDER_POD=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=csi-secrets-store-provider-aws -o jsonpath="{.items[0].metadata.name}")
+	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
+	assert_success
+
+	log "AWS provider installation completed"
+}""",
     }
 
     for old, new in replacements.items():
