@@ -14,7 +14,7 @@ source .venv/bin/activate
 
 6. Ensure that the `PRIVREPO` environment variable is set (not required if using `--addon` flag, see step 9).
 7. You can set the `NODE_TYPE_*` environment variables to specify the EC2 instance types used for the test clusters (default: `m5.large` for x64, `m6g.large` for ARM).
-8. Create the following two IAM roles:
+8. Create the following IAM role and save it in a shell variable:
 
 ```bash
 export POD_IDENTITY_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name pod-identity-role --assume-role-policy-document '{
@@ -54,4 +54,5 @@ aws iam attach-role-policy \
 - `./run-tests.sh x64-pod-identity` will run only x64 Pod Identity tests
 - `./run-tests.sh arm-irsa` will run only ARM IRSA tests
 - `./run-tests.sh arm-pod-identity` will run only ARM Pod Identity tests
-- Add `--addon` flag to use EKS addon installation instead of Helm (e.g., `./run-tests.sh --addon` or `./run-tests.sh x64-irsa --addon`)
+- Add `--addon` flag to use EKS add-on installation instead of Helm (e.g., `./run-tests.sh --addon` or `./run-tests.sh x64-irsa --addon`)
+  - Add `--version` flag to select which EKS add-on version to test. (e.g. `./ren-tests.sh --addon --version v2.1.1-eksbuild.1`)
