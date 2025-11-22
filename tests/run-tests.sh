@@ -191,14 +191,19 @@ if [[ "$USE_ADDON" != "true" ]]; then
 		echo "Error: PRIVREPO environment variable is not set"
 		exit 1
 	fi
-	echo "Validating ECR image: $PRIVREPO"
-	venv_activate
-	python3 test-manager.py validate-image
-	if [[ $? -ne 0 ]]; then
+	# Only validate ECR images
+	if [[ "$PRIVREPO" == *".dkr.ecr."*".amazonaws.com/"* ]]; then
+		echo "Validating ECR image: $PRIVREPO"
+		venv_activate
+		python3 test-manager.py validate-image
+		if [[ $? -ne 0 ]]; then
+			venv_deactivate
+			exit 1
+		fi
 		venv_deactivate
-		exit 1
+	else
+		echo "Skipping validation for non-ECR registry: $PRIVREPO"
 	fi
-	venv_deactivate
 fi
 
 # Check and cleanup any existing clusters for the target
