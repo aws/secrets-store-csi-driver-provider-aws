@@ -193,8 +193,13 @@ fi""",
 def get_install_method() -> str:
     use_addon = "--addon" in sys.argv
     if use_addon:
-        return """	log "Installing AWS Secrets Store CSI Driver Provider via EKS addon"
-	aws eks create-addon --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider --configuration-values \"file://addon_config_values.yaml\" --region $REGION"""
+        version_flag = ""
+        if "--version" in sys.argv:
+            idx = sys.argv.index("--version")
+            if idx + 1 < len(sys.argv):
+                version_flag = f" --addon-version {sys.argv[idx + 1]}"
+        return f"""	log "Installing AWS Secrets Store CSI Driver Provider via EKS addon"
+	aws eks create-addon --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider --configuration-values \\"file://addon_config_values.yaml\\"{version_flag} --region $REGION"""
 
     return """	log "Adding secrets-store-csi-driver Helm repository"
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -239,6 +244,7 @@ def main():
         "\nAll test files generated successfully\nUsage:\n"
         "  ./generate-test-files.py                 # Generate files and create secrets\n"
         "  ./generate-test-files.py --addon         # Generate files with EKS addon installation\n"
+        "  ./generate-test-files.py --addon --version v2.1.1-eksbuild.1  # Generate with specific addon version\n"
         "  ./generate-test-files.py generate-only  # Generate files only\n"
         "  ./generate-test-files.py create-secrets # Create secrets only\n"
         "  ./generate-test-files.py cleanup-secrets # Cleanup secrets only"

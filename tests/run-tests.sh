@@ -1,6 +1,7 @@
 #!/bin/bash
 
 USE_ADDON=false
+ADDON_VERSION=""
 
 cleanup() {
 	cleanup_generated_files
@@ -21,11 +22,15 @@ generate_test_files() {
 		exit 1
 	fi
 
+	ARGS=()
 	if [[ "$USE_ADDON" == "true" ]]; then
-		python3 generate-test-files.py --addon
-	else
-		python3 generate-test-files.py
+		ARGS+=(--addon)
 	fi
+	if [[ -n "$ADDON_VERSION" ]]; then
+		ARGS+=(--version "$ADDON_VERSION")
+	fi
+
+	python3 generate-test-files.py "${ARGS[@]}"
 
 	if [[ $? -ne 0 ]]; then
 		echo "Error: Failed to generate test files from templates"
@@ -53,10 +58,14 @@ cleanup_secrets() {
 
 # Parse arguments
 TEST_TARGET=""
-for arg in "$@"; do
+for i in "${!@}"; do
+	arg="${!i}"
 	if [[ "$arg" == "--addon" ]]; then
 		USE_ADDON=true
-	elif [[ "$arg" != "--"* ]]; then
+	elif [[ "$arg" == "--version" ]]; then
+		next_i=$((i + 1))
+		ADDON_VERSION="${!next_i}"
+	elif [[ "$arg" != "--"* ]] && [[ "$arg" != "$ADDON_VERSION" ]]; then
 		TEST_TARGET="$arg"
 	fi
 done
