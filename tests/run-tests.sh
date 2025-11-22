@@ -4,6 +4,14 @@ REGION="${REGION:-us-west-2}"
 USE_ADDON=false
 ADDON_VERSION=""
 
+venv_activate() {
+	venv_activate
+}
+
+venv_deactivate() {
+	venv_deactivate
+}
+
 cleanup() {
 	cleanup_generated_files
 	cleanup_secrets
@@ -22,7 +30,7 @@ generate_test_files() {
 		exit 1
 	fi
 
-	source .venv/bin/activate
+	venv_activate
 	python3 test-manager.py cleanup-files
 
 	ARGS=()
@@ -37,19 +45,19 @@ generate_test_files() {
 	python3 test-manager.py "${ARGS[@]}"
 
 	if [[ $? -ne 0 ]]; then
-		deactivate
+		venv_deactivate
 		echo "Error: Failed to generate test files from templates"
 		exit 1
 	fi
-	deactivate
+	venv_deactivate
 	echo "Test files generated successfully"
 }
 
 cleanup_generated_files() {
 	echo "Cleaning up generated test files..."
-	source .venv/bin/activate
+	venv_activate
 	python3 test-manager.py cleanup-files
-	deactivate
+	venv_deactivate
 }
 
 delete_cluster() {
@@ -59,7 +67,7 @@ delete_cluster() {
 check_and_cleanup_clusters() {
 	local targets=("$@")
 	local clusters_to_check=()
-	
+
 	# Determine which clusters to check based on targets
 	for target in "${targets[@]}"; do
 		case "$target" in
@@ -93,7 +101,7 @@ check_and_cleanup_clusters() {
 				;;
 		esac
 	done
-	
+
 	# Check if any clusters exist and delete them
 	for cluster in "${clusters_to_check[@]}"; do
 		if eksctl get cluster --name "$cluster" --region "$REGION" >/dev/null 2>&1; then
@@ -105,9 +113,9 @@ check_and_cleanup_clusters() {
 
 cleanup_secrets() {
 	echo "Cleaning up secrets and parameters..."
-	source .venv/bin/activate
+	venv_activate
 	python3 test-manager.py cleanup-secrets
-	deactivate
+	venv_deactivate
 }
 
 # Parse arguments - test target must come before flags
@@ -174,13 +182,13 @@ if [[ "$USE_ADDON" != "true" ]]; then
 		exit 1
 	fi
 	echo "Validating ECR image: $PRIVREPO"
-	source .venv/bin/activate
+	venv_activate
 	python3 test-manager.py validate-image
 	if [[ $? -ne 0 ]]; then
-		deactivate
+		venv_deactivate
 		exit 1
 	fi
-	deactivate
+	venv_deactivate
 fi
 
 # Check and cleanup any existing clusters for the target
