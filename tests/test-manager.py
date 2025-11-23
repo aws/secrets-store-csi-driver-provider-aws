@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
+from typing import Any
 import argparse
 import os
+import re
 import sys
 
 import boto3
@@ -10,37 +12,65 @@ import botocore.exceptions
 CYAN = "\033[36m"
 RESET = "\033[0m"
 
+REGION = os.environ.get("REGION", "us-west-2")
+FAILOVERREGION = os.environ.get("FAILOVERREGION", "us-east-2")
+
 CONFIGS = {
-    name: {
-        "ARCH": arch,
-        "AUTH_TYPE": auth,
-        "NODE_TYPE_VAR": f"NODE_TYPE_{arch.upper()}_{auth.upper().replace('-', '_')}",
-        "DEFAULT_NODE_TYPE": "m6g.large" if arch == "arm" else "m5.large",
-        "KUBECONFIG_VAR": f"KUBECONFIG_FILE_{arch.upper()}_{auth.upper().replace('-', '_')}",
-        "LOG_COLOR": color,
-        "COLOR_CODE": code,
-    }
-    for name, arch, auth, color, code in [
-        ("x64-irsa", "x64", "irsa", "CYAN", "36"),
-        ("x64-pod-identity", "x64", "pod-identity", "MAGENTA", "35"),
-        ("arm-irsa", "arm", "irsa", "BLUE", "34"),
-        ("arm-pod-identity", "arm", "pod-identity", "YELLOW", "33"),
-    ]
+    "x64-irsa": {
+        "ARCH": "x64",
+        "AUTH_TYPE": "irsa",
+        "LOG_COLOR": "CYAN",
+        "COLOR_CODE": "36",
+    },
+    "x64-pod-identity": {
+        "ARCH": "x64",
+        "AUTH_TYPE": "pod-identity",
+        "LOG_COLOR": "MAGENTA",
+        "COLOR_CODE": "35",
+    },
+    "arm-irsa": {
+        "ARCH": "arm",
+        "AUTH_TYPE": "irsa",
+        "LOG_COLOR": "BLUE",
+        "COLOR_CODE": "34",
+    },
+    "arm-pod-identity": {
+        "ARCH": "arm",
+        "AUTH_TYPE": "pod-identity",
+        "LOG_COLOR": "YELLOW",
+        "COLOR_CODE": "33",
+    },
 }
 
-REGION, FAILOVERREGION = (
-    os.environ.get("REGION", "us-west-2"),
-    os.environ.get("FAILOVERREGION", "us-east-2"),
-)
-secretsmanager = {
-    r: boto3.client("secretsmanager", region_name=r) for r in [REGION, FAILOVERREGION]
-}
-ssm = {r: boto3.client("ssm", region_name=r) for r in [REGION, FAILOVERREGION]}
+# Add computed fields to each config
+for config in CONFIGS.values():
+    arch_upper = config["ARCH"].upper()
+    auth_upper = config["AUTH_TYPE"].upper().replace("-", "_")
+    config["NODE_TYPE_VAR"] = f"NODE_TYPE_{arch_upper}_{auth_upper}"
+    config["DEFAULT_NODE_TYPE"] = "m6g.large" if config["ARCH"] == "arm" else "m5.large"
+    config["KUBECONFIG_VAR"] = f"KUBECONFIG_FILE_{arch_upper}_{auth_upper}"
 
 ARGS = None
 
 
-def aws_operation(client, operation, name, region, exists_code, **kwargs):
+def get_aws_clients() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Create and return AWS client dictionaries for secretsmanager and ssm."""
+    secretsmanager = {
+        r: boto3.client("secretsmanager", region_name=r)
+        for r in [REGION, FAILOVERREGION]
+    }
+    ssm = {r: boto3.client("ssm", region_name=r) for r in [REGION, FAILOVERREGION]}
+    return secretsmanager, ssm
+
+
+def aws_operation(
+    client: dict[str, Any],
+    operation: str,
+    name: str,
+    region: str,
+    exists_code: str,
+    **kwargs,
+) -> None:
     try:
         print(f"  {operation}: {name} in {region}")
         getattr(client[region], operation)(**kwargs)
@@ -51,11 +81,13 @@ def aws_operation(client, operation, name, region, exists_code, **kwargs):
             raise
 
 
-def manage_resources(arch, auth_type, action):
+def manage_resources(arch: str, auth_type: str, action: str) -> None:
     suffix = f"{arch}-{auth_type}"
     print(
         f"{'Creating' if action == 'create' else 'Cleaning up'} resources for {suffix}..."
     )
+
+    secretsmanager, ssm = get_aws_clients()
 
     resources = {
         "secrets": [
@@ -132,7 +164,7 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
     sa_name = f"basic-test-mount-sa-{arch}-{auth_type}"
     if auth_type == "irsa":
         return f"""	log "Associating IAM OIDC provider"
-    eksctl utils associate-iam-oidc-provider --name $CLUSTER_NAME --approve --region $REGION >&3 2>&1
+    eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $REGION >&3 2>&1
 
     log "Creating IAM service account for IRSA"
     eksctl create iamserviceaccount \\
@@ -158,14 +190,17 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
         --create-service-account true >&3 2>&1"""
 
 
-def replace_template_vars(template_file, output_file, config):
+def replace_template_vars(
+    template_file: str, output_file: str, config: dict[str, Any]
+) -> None:
     with open(template_file, encoding="utf-8") as f:
         content = f.read()
 
+    kubeconfig_var = config["KUBECONFIG_VAR"]
     replacements = {
         **{f"{{{{{k}}}}}": v for k, v in config.items()},
         "{{AUTH_SETUP}}": get_auth_setup(config["ARCH"], config["AUTH_TYPE"]),
-        "{{INSTALL_METHOD}}": get_install_method(),
+        "{{INSTALL_METHOD}}": get_install_method(config),
         "{{POD_IDENTITY_PARAM}}": '\n    usePodIdentity: "true"'
         if config["AUTH_TYPE"] == "pod-identity"
         else "",
@@ -177,19 +212,19 @@ def replace_template_vars(template_file, output_file, config):
 fi""",
         "{{INSTALL_PROVIDER_TEST}}": ""
         if ARGS.addon
-        else """@test "Install aws provider" {
+        else f"""@test "Install aws provider" {{
 	log "Installing AWS provider"
 
-	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${{KUBECONFIG_VAR}} apply -f -
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
+	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${kubeconfig_var} apply -f -
+	cmd="kubectl --kubeconfig=${kubeconfig_var} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
 	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
 
-	PROVIDER_POD=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=csi-secrets-store-provider-aws -o jsonpath="{.items[0].metadata.name}")
-	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
+	PROVIDER_POD=$(kubectl --kubeconfig=${kubeconfig_var} --namespace $NAMESPACE get pod -l app=csi-secrets-store-provider-aws -o jsonpath="{{.items[0].metadata.name}}")
+	run kubectl --kubeconfig=${kubeconfig_var} --namespace $NAMESPACE get pod/$PROVIDER_POD
 	assert_success
 
 	log "AWS provider installation completed"
-}""",
+}}""",
     }
 
     for old, new in replacements.items():
@@ -199,24 +234,25 @@ fi""",
         f.write(content)
 
 
-def get_install_method() -> str:
+def get_install_method(config: dict[str, Any]) -> str:
     if ARGS.addon:
         version_flag = f" --addon-version {ARGS.version}" if ARGS.version else ""
         return f"""	log "Installing AWS Secrets Store CSI Driver Provider via EKS addon"
 	aws eks create-addon --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider --configuration-values "file://addon_config_values.yaml"{version_flag} --region $REGION >&3 2>&1"""
 
-    return """	log "Adding secrets-store-csi-driver Helm repository"
+    kubeconfig_var = config["KUBECONFIG_VAR"]
+    return f"""	log "Adding secrets-store-csi-driver Helm repository"
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
 
 	log "Installing secrets-store-csi-driver via Helm"
-	helm --kubeconfig=${{KUBECONFIG_VAR}} --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
+	helm --kubeconfig=${kubeconfig_var} --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
 	if [[ $? -ne 0 ]]; then
 		echo "Error: Helm install failed" >&2
 		return 1
 	fi"""
 
 
-def main():
+def main() -> None:
     global ARGS
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -243,8 +279,6 @@ def main():
             sys.exit(1)
 
         # Parse ECR URI: account.dkr.ecr.region.amazonaws.com/repo or account.dkr.ecr.region.amazonaws.com/repo:tag
-        import re
-
         match = re.match(
             r"(\d+)\.dkr\.ecr\.([^.]+)\.amazonaws\.com/([^:]+)(?::(.+))?", image_uri
         )
@@ -252,7 +286,7 @@ def main():
             print(f"Error: Invalid ECR image URI format: {image_uri}")
             sys.exit(1)
 
-        account, region, repo, tag = match.groups()
+        _, region, repo, tag = match.groups()
 
         ecr = boto3.client("ecr", region_name=region)
         try:
@@ -279,7 +313,7 @@ def main():
         except ecr.exceptions.RepositoryNotFoundException:
             print(f"Error: Repository not found: {repo}")
             sys.exit(1)
-        except Exception as e:
+        except botocore.exceptions.ClientError as e:
             print(f"Error validating image: {e}")
             sys.exit(1)
         return
