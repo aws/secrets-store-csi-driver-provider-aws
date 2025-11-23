@@ -206,10 +206,14 @@ def get_install_method() -> str:
 	aws eks create-addon --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider --configuration-values "file://addon_config_values.yaml"{version_flag} --region $REGION >&3 2>&1"""
 
     return """	log "Adding secrets-store-csi-driver Helm repository"
-	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts >&3 2>&1
+	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
 
 	log "Installing secrets-store-csi-driver via Helm"
-	helm --kubeconfig=${{KUBECONFIG_VAR}} --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true >&3 2>&1"""
+	helm --kubeconfig=${{KUBECONFIG_VAR}} --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
+	if [[ $? -ne 0 ]]; then
+		echo "Error: Helm install failed" >&2
+		return 1
+	fi"""
 
 
 def main():
