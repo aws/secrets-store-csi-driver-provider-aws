@@ -209,7 +209,7 @@ def get_install_method() -> str:
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts >&3 2>&1
 
 	log "Installing secrets-store-csi-driver via Helm"
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true >&3 2>&1"""
+	helm --kubeconfig=${{KUBECONFIG_VAR}} --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true >&3 2>&1"""
 
 
 def main():
