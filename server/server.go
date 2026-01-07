@@ -113,6 +113,9 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	translate := attrib[transAttrib]
 	failoverRegion := attrib[failoverRegionAttrib]
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
+	assumeRoleArn := attrib["assumeRoleArn"]
+	assumeRoleDuration := attrib["assumeRoleDurationSeconds"]
+	assumeRoleExternalId := attrib["assumeRoleExternalId"]
 	preferredAddressType := attrib[preferredAddressTypeAttrib]
 
 	// Validate preferred address type
@@ -155,7 +158,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, s.eksAddonVersion, regions, usePodIdentity, podName, preferredAddressType, s.podIdentityHttpTimeout)
+	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, s.eksAddonVersion, regions, usePodIdentity, podName, preferredAddressType, s.podIdentityHttpTimeout, assumeRoleArn, assumeRoleDuration, assumeRoleExternalId)
 	if err != nil {
 		return nil, err
 	}
@@ -239,12 +242,12 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, eksAddonVersion string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, podIdentityHttpTimeout *time.Duration) (response []aws.Config, err error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, eksAddonVersion string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, podIdentityHttpTimeout *time.Duration, assumeRoleArn string, assumeRoleDuration string, assumeRoleExternalId string) (response []aws.Config, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsConfigsList []aws.Config
 
 	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, eksAddonVersion, usePodIdentity, podIdentityHttpTimeout, s.k8sClient)
+		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, eksAddonVersion, usePodIdentity, podIdentityHttpTimeout, s.k8sClient, assumeRoleArn, assumeRoleDuration, assumeRoleExternalId)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}

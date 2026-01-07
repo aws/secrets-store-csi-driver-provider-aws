@@ -102,6 +102,9 @@ func TestNewAuth(t *testing.T) {
 				tt.usePodIdentity,
 				&tt.podIdentityHttpTimeout,
 				k8sClient,
+				"",
+				"",
+				"",
 			)
 
 			if tt.expectError && err == nil {
