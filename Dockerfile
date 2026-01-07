@@ -5,8 +5,9 @@ RUN echo "Running on ${BUILDPLATFORM}, building for ${TARGETPLATFORM}."
 
 WORKDIR /workdir
 
-RUN apk add git build-base
-RUN go env -w GOPROXY=direct
+RUN apk add --no-cache git build-base ca-certificates
+RUN update-ca-certificates || true
+RUN go env -w GOPROXY=https://proxy.golang.org,direct
 
 COPY go.mod .
 COPY go.sum .
