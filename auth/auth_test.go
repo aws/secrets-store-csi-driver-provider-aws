@@ -183,6 +183,56 @@ func TestGetAWSConfig(t *testing.T) {
 	}
 }
 
+func TestGetAWSConfig_AssumeRole(t *testing.T) {
+	timeout := 100 * time.Millisecond
+
+	auth := &Auth{
+		region:                    "someRegion",
+		nameSpace:                 "someNamespace",
+		svcAcc:                    "someSvcAcc",
+		podName:                   "somepod",
+		usePodIdentity:            true,
+		podIdentityHttpTimeout:    &timeout,
+		k8sClient:                 fake.NewSimpleClientset().CoreV1(),
+		stsClient:                 &mockSTS{},
+		assumeRoleArn:             "arn:aws:iam::123456789012:role/TestRole",
+		assumeRoleDurationSeconds: "900",
+	}
+
+	cfg, err := auth.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected error from GetAWSConfig with assume role: %v", err)
+	}
+	if cfg.Credentials == nil {
+		t.Fatalf("Expected credentials to be set when assume role is configured")
+	}
+}
+
+func TestGetAWSConfig_InvalidDuration(t *testing.T) {
+	timeout := 100 * time.Millisecond
+
+	auth := &Auth{
+		region:                    "someRegion",
+		nameSpace:                 "someNamespace",
+		svcAcc:                    "someSvcAcc",
+		podName:                   "somepod",
+		usePodIdentity:            true,
+		podIdentityHttpTimeout:    &timeout,
+		k8sClient:                 fake.NewSimpleClientset().CoreV1(),
+		stsClient:                 &mockSTS{},
+		assumeRoleArn:             "arn:aws:iam::123456789012:role/TestRole",
+		assumeRoleDurationSeconds: "not-a-number",
+	}
+
+	cfg, err := auth.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected error from GetAWSConfig with invalid duration: %v", err)
+	}
+	if cfg.Credentials == nil {
+		t.Fatalf("Expected credentials to be set even if duration is invalid")
+	}
+}
+
 func TestUserAgentMiddleware_ID(t *testing.T) {
 	middleware := &userAgentMiddleware{
 		providerName:    "test-provider",

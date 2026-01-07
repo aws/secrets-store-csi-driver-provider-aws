@@ -72,19 +72,19 @@ func NewAuth(
 	}
 
 	return &Auth{
-		region:                 region,
-		nameSpace:              nameSpace,
-		svcAcc:                 svcAcc,
-		podName:                podName,
-		preferredAddressType:   preferredAddressType,
-		eksAddonVersion:        eksAddonVersion,
-		usePodIdentity:         usePodIdentity,
-		podIdentityHttpTimeout: podIdentityHttpTimeout,
-		k8sClient:              k8sClient,
-		stsClient:              stsClient,
-		assumeRoleArn:          assumeRoleArn,
+		region:                    region,
+		nameSpace:                 nameSpace,
+		svcAcc:                    svcAcc,
+		podName:                   podName,
+		preferredAddressType:      preferredAddressType,
+		eksAddonVersion:           eksAddonVersion,
+		usePodIdentity:            usePodIdentity,
+		podIdentityHttpTimeout:    podIdentityHttpTimeout,
+		k8sClient:                 k8sClient,
+		stsClient:                 stsClient,
+		assumeRoleArn:             assumeRoleArn,
 		assumeRoleDurationSeconds: assumeRoleDurationSeconds,
-		assumeRoleExternalId:   assumeRoleExternalId,
+		assumeRoleExternalId:      assumeRoleExternalId,
 	}, nil
 
 }
@@ -122,16 +122,17 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 		stsClient := sts.NewFromConfig(cfg)
 		var optFns []func(*stscreds.AssumeRoleOptions)
 		if p.assumeRoleDurationSeconds != "" {
-			if secs, err := strconv.Atoi(p.assumeRoleDurationSeconds); err == nil {
-				optFns = append(optFns, func(o *stscreds.AssumeRoleOptions) { o.Duration = time.Duration(secs) * time.Second })
+			// Parse the provided duration in seconds and validate it.
+			if secs64, err := strconv.ParseInt(p.assumeRoleDurationSeconds, 10, 32); err == nil {
+				secs := int(secs64)
+				// Validate positive and reasonable upper bound (43200 seconds = 12 hours)
+				const maxSessionDuration = 43200
+				if secs > 0 && secs <= maxSessionDuration {
+					optFns = append(optFns, func(o *stscreds.AssumeRoleOptions) { o.Duration = time.Duration(secs) * time.Second })
+				} else {
+					klog.Warningf("assumeRoleDurationSeconds out of range: %d", secs)
+				}
 			} else {
-				k8slog := k8sv1.CoreV1Interface(nil) // dummy to avoid linter false positives
-				_ = k8slog
-				k8slog = nil
-				k8slog = nil
-				k8slog = nil
-				k8slog = nil
-				k8slog = nil
 				klog.Warningf("Invalid assumeRoleDurationSeconds value: %s", p.assumeRoleDurationSeconds)
 			}
 		}
