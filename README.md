@@ -236,6 +236,41 @@ The primary objects field of the SecretProviderClass can contain the following s
   You may pass an additional sub-field to specify the file permission:
   * filePermission: This optional field expects a 4 digit string which specifies the file permission for the secret that will be mounted. When not specified this will default to the parent object's file permission.
 
+## Assume Role parameters
+
+The provider supports an optional assume-role flow where the base credentials (from IRSA or Pod Identity) are used to call STS AssumeRole and obtain short-lived credentials for a different role.
+
+Add the following parameters to the `parameters:` block in your `SecretProviderClass` to enable assume-role behavior:
+
+- `assumeRoleArn`: The ARN of the IAM role to assume. When provided, the provider will call STS AssumeRole and use the resulting credentials for subsequent AWS API calls.
+- `assumeRoleDurationSeconds`: Optional. The requested session duration in seconds for the assumed role. The provider accepts a numeric string and validates it; out-of-range or invalid values are ignored and a warning is emitted. A sensible upper bound is applied by the provider (12 hours / 43200s).
+- `assumeRoleExternalId`: Optional. An external ID string to pass to STS AssumeRole for additional cross-account security.
+
+Example `SecretProviderClass` snippet enabling assume-role (Pod Identity mode):
+
+```yaml
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: example-assume-role
+spec:
+  provider: aws
+  parameters:
+    region: us-west-2
+    usePodIdentity: "true"
+    assumeRoleArn: "arn:aws:iam::123456789012:role/MyAssumedRole"
+    assumeRoleDurationSeconds: "3600"
+    assumeRoleExternalId: "external-id-value"
+    objects: |
+      - objectName: "MySecret"
+        objectType: "secretsmanager"
+```
+
+Notes:
+- Ensure the base credentials obtained via Pod Identity or IRSA have permission to call `sts:AssumeRole` on the target role.
+- For Pod Identity, ensure the pod-identity agent is deployed and reachable from your pods.
+- If using cross-account assume-role, confirm the target role's trust policy allows the principal used by the base credentials.
+
 ## Additional Considerations
 
 ### Rotation
