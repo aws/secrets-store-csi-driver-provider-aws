@@ -12,13 +12,12 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
-	"github.com/aws/smithy-go/middleware"
 
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -105,35 +104,11 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 		return aws.Config{}, err
 	}
 
-	// Add the user agent to the config
-	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
-		return stack.Build.Add(&userAgentMiddleware{
-			providerName:    ProviderName,
-			eksAddonVersion: p.eksAddonVersion,
-		}, middleware.After)
-	})
+	// Add the user agent to the config using SDK's built-in mechanism
+	cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue(ProviderName, ProviderVersion))
+	if p.eksAddonVersion != "" {
+		cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue("eksAddonVersion", p.eksAddonVersion))
+	}
 
 	return cfg, nil
-}
-
-type userAgentMiddleware struct {
-	providerName, eksAddonVersion string
-}
-
-func (m *userAgentMiddleware) ID() string {
-	return "AppendCSIDriverVersionToUserAgent"
-}
-
-func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.BuildInput, next middleware.BuildHandler) (
-	out middleware.BuildOutput, metadata middleware.Metadata, err error) {
-	req, ok := in.Request.(*smithyhttp.Request)
-	if !ok {
-		return next.HandleBuild(ctx, in)
-	}
-	userAgentString := m.providerName + "/" + ProviderVersion
-	if m.eksAddonVersion != "" {
-		userAgentString += " eksAddonVersion/" + m.eksAddonVersion
-	}
-	req.Header.Add("User-Agent", userAgentString)
-	return next.HandleBuild(ctx, in)
 }

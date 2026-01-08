@@ -180,78 +180,74 @@ func TestGetAWSConfig(t *testing.T) {
 	}
 }
 
-func TestUserAgentMiddleware_ID(t *testing.T) {
-	middleware := &userAgentMiddleware{
-		providerName:    "test-provider",
-		eksAddonVersion: "test-version",
-	}
-
-	expectedID := "AppendCSIDriverVersionToUserAgent"
-	actualID := middleware.ID()
-
-	if actualID != expectedID {
-		t.Errorf("Expected ID() to return '%s', but got '%s'", expectedID, actualID)
-	}
-}
-
-func TestUserAgentMiddleware_HandleBuild(t *testing.T) {
+func TestGetAWSConfig_UserAgent(t *testing.T) {
 	tests := []struct {
-		name            string
-		providerName    string
-		eksAddonVersion string
-		expectedUA      string
+		name                   string
+		eksAddonVersion        string
+		expectAddonVersionInUA bool
 	}{
 		{
-			name:            "with EKS addon version",
-			providerName:    "test-provider",
-			eksAddonVersion: "v1.0.0-eksbuild.1",
-			expectedUA:      "test-provider/unknown eksAddonVersion/v1.0.0-eksbuild.1",
+			name:                   "with EKS addon version",
+			eksAddonVersion:        "v1.0.0-eksbuild.1",
+			expectAddonVersionInUA: true,
 		},
 		{
-			name:            "without EKS addon version",
-			providerName:    "test-provider",
-			eksAddonVersion: "",
-			expectedUA:      "test-provider/unknown",
+			name:                   "without EKS addon version",
+			eksAddonVersion:        "",
+			expectAddonVersionInUA: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &userAgentMiddleware{
-				providerName:    tt.providerName,
-				eksAddonVersion: tt.eksAddonVersion,
+			timeout := 100 * time.Millisecond
+
+			auth := &Auth{
+				region:                 "us-west-2",
+				nameSpace:              "default",
+				svcAcc:                 "test-sa",
+				podName:                "test-pod",
+				eksAddonVersion:        tt.eksAddonVersion,
+				usePodIdentity:         true,
+				podIdentityHttpTimeout: &timeout,
+				k8sClient:              fake.NewSimpleClientset().CoreV1(),
 			}
 
-			req := smithyhttp.NewStackRequest()
-
-			input := middleware.BuildInput{Request: req}
-
-			nextCalled := false
-			next := middleware.BuildHandlerFunc(func(ctx context.Context, in middleware.BuildInput) (middleware.BuildOutput, middleware.Metadata, error) {
-				nextCalled = true
-				return middleware.BuildOutput{}, middleware.Metadata{}, nil
-			})
-
-			_, _, err := m.HandleBuild(context.Background(), input, next)
-
+			cfg, err := auth.GetAWSConfig(context.Background())
 			if err != nil {
-				t.Errorf("HandleBuild() error = %v", err)
+				t.Fatalf("GetAWSConfig() error = %v", err)
 			}
 
-			if !nextCalled {
-				t.Error("Expected next handler to be called")
+			// Verify APIOptions are configured
+			// With eksAddonVersion: expect 2 options (provider + addon version)
+			// Without eksAddonVersion: expect 1 option (provider only)
+			expectedOptions := 1
+			if tt.expectAddonVersionInUA {
+				expectedOptions = 2
+			}
+			if len(cfg.APIOptions) != expectedOptions {
+				t.Errorf("Expected %d APIOptions, got %d", expectedOptions, len(cfg.APIOptions))
 			}
 
-			// Cast to smithyhttp.Request to access Header
-			if smithyReq, ok := input.Request.(*smithyhttp.Request); ok {
-				userAgents := smithyReq.Header["User-Agent"]
-				if len(userAgents) == 0 {
-					t.Error("Expected User-Agent header to be set")
-				} else if userAgents[0] != tt.expectedUA {
-					t.Errorf("Expected User-Agent '%s', got '%s'", tt.expectedUA, userAgents[0])
+			// Apply APIOptions to a stack and verify middleware is added
+			stack := middleware.NewStack("test", smithyhttp.NewStackRequest)
+			for _, opt := range cfg.APIOptions {
+				if err := opt(stack); err != nil {
+					t.Fatalf("Failed to apply APIOption: %v", err)
 				}
-			} else {
-				t.Error("Expected request to be *smithyhttp.Request")
+			}
+
+			// Verify the UserAgent middleware was added to the Build step
+			middlewareIDs := stack.Build.List()
+			hasUserAgent := false
+			for _, id := range middlewareIDs {
+				if id == "UserAgent" {
+					hasUserAgent = true
+					break
+				}
+			}
+			if !hasUserAgent {
+				t.Errorf("Expected UserAgent middleware in Build step, got: %v", middlewareIDs)
 			}
 		})
 	}
