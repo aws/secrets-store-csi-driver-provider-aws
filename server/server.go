@@ -158,7 +158,25 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, s.eksAddonVersion, regions, usePodIdentity, podName, preferredAddressType, s.podIdentityHttpTimeout, assumeRoleArn, assumeRoleDuration, assumeRoleExternalId)
+	// Parse and validate assumeRoleDuration
+	var parsedDuration time.Duration
+	if assumeRoleDuration != "" {
+		// Parse the provided duration in seconds and validate it.
+		if secs64, err := strconv.ParseInt(assumeRoleDuration, 10, 32); err == nil {
+			secs := int(secs64)
+			// Validate positive and reasonable upper bound (43200 seconds = 12 hours)
+			const maxSessionDuration = 43200
+			if secs > 0 && secs <= maxSessionDuration {
+				parsedDuration = time.Duration(secs) * time.Second
+			} else {
+				klog.Warningf("assumeRoleDurationSeconds out of range: %d", secs)
+			}
+		} else {
+			klog.Warningf("Invalid assumeRoleDurationSeconds value: %s", assumeRoleDuration)
+		}
+	}
+
+	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, s.eksAddonVersion, regions, usePodIdentity, podName, preferredAddressType, s.podIdentityHttpTimeout, assumeRoleArn, parsedDuration, assumeRoleExternalId)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +260,7 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, eksAddonVersion string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, podIdentityHttpTimeout *time.Duration, assumeRoleArn string, assumeRoleDuration string, assumeRoleExternalId string) (response []aws.Config, err error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, eksAddonVersion string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, podIdentityHttpTimeout *time.Duration, assumeRoleArn string, assumeRoleDuration time.Duration, assumeRoleExternalId string) (response []aws.Config, err error) {
 	// Get the pod's AWS creds for each lookup region.
 	var awsConfigsList []aws.Config
 

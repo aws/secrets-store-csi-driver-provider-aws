@@ -9,7 +9,6 @@ package auth
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -43,7 +42,7 @@ type Auth struct {
 	k8sClient                                                                 k8sv1.CoreV1Interface
 	stsClient                                                                 stscreds.AssumeRoleWithWebIdentityAPIClient
 	assumeRoleArn                                                             string
-	assumeRoleDurationSeconds                                                 string
+	assumeRoleDurationSeconds                                                 time.Duration
 	assumeRoleExternalId                                                      string
 }
 
@@ -54,7 +53,7 @@ func NewAuth(
 	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
 	assumeRoleArn string,
-	assumeRoleDurationSeconds string,
+	assumeRoleDurationSeconds time.Duration,
 	assumeRoleExternalId string,
 ) (auth *Auth, e error) {
 	var stsClient *sts.Client
@@ -121,20 +120,8 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	if p.assumeRoleArn != "" {
 		stsClient := sts.NewFromConfig(cfg)
 		var optFns []func(*stscreds.AssumeRoleOptions)
-		if p.assumeRoleDurationSeconds != "" {
-			// Parse the provided duration in seconds and validate it.
-			if secs64, err := strconv.ParseInt(p.assumeRoleDurationSeconds, 10, 32); err == nil {
-				secs := int(secs64)
-				// Validate positive and reasonable upper bound (43200 seconds = 12 hours)
-				const maxSessionDuration = 43200
-				if secs > 0 && secs <= maxSessionDuration {
-					optFns = append(optFns, func(o *stscreds.AssumeRoleOptions) { o.Duration = time.Duration(secs) * time.Second })
-				} else {
-					klog.Warningf("assumeRoleDurationSeconds out of range: %d", secs)
-				}
-			} else {
-				klog.Warningf("Invalid assumeRoleDurationSeconds value: %s", p.assumeRoleDurationSeconds)
-			}
+		if p.assumeRoleDurationSeconds > 0 {
+			optFns = append(optFns, func(o *stscreds.AssumeRoleOptions) { o.Duration = p.assumeRoleDurationSeconds })
 		}
 		if p.assumeRoleExternalId != "" {
 			external := p.assumeRoleExternalId
