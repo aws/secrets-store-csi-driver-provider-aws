@@ -43,48 +43,64 @@ var sessionTests []sessionTest = []sessionTest{
 
 func TestNewAuth(t *testing.T) {
 	tests := []struct {
-		name                   string
-		region                 string
-		nameSpace              string
-		svcAcc                 string
-		podName                string
-		preferredAddressType   string
-		usePodIdentity         bool
-		podIdentityHttpTimeout time.Duration
-		expectError            bool
+		name                      string
+		region                    string
+		nameSpace                 string
+		svcAcc                    string
+		podName                   string
+		preferredAddressType      string
+		usePodIdentity            bool
+		podIdentityHttpTimeout    time.Duration
+		assumeRoleDurationSeconds time.Duration
+		expectError               bool
 	}{
 		{
-			name:                   "valid auth with pod identity",
-			region:                 "us-west-2",
-			nameSpace:              "default",
-			svcAcc:                 "test-sa",
-			podName:                "test-pod",
-			preferredAddressType:   "ipv4",
-			usePodIdentity:         true,
-			podIdentityHttpTimeout: 100 * time.Millisecond,
-			expectError:            false,
+			name:                      "valid auth with pod identity",
+			region:                    "us-west-2",
+			nameSpace:                 "default",
+			svcAcc:                    "test-sa",
+			podName:                   "test-pod",
+			preferredAddressType:      "ipv4",
+			usePodIdentity:            true,
+			podIdentityHttpTimeout:    100 * time.Millisecond,
+			assumeRoleDurationSeconds: 0,
+			expectError:               false,
 		},
 		{
-			name:                   "valid auth with IRSA",
-			region:                 "us-east-1",
-			nameSpace:              "kube-system",
-			svcAcc:                 "irsa-sa",
-			podName:                "irsa-pod",
-			preferredAddressType:   "ipv6",
-			usePodIdentity:         false,
-			podIdentityHttpTimeout: 100 * time.Millisecond,
-			expectError:            false,
+			name:                      "valid auth with IRSA",
+			region:                    "us-east-1",
+			nameSpace:                 "kube-system",
+			svcAcc:                    "irsa-sa",
+			podName:                   "irsa-pod",
+			preferredAddressType:      "ipv6",
+			usePodIdentity:            false,
+			podIdentityHttpTimeout:    100 * time.Millisecond,
+			assumeRoleDurationSeconds: 0,
+			expectError:               false,
 		},
 		{
-			name:                   "valid auth with empty preferred address type",
-			region:                 "eu-west-1",
-			nameSpace:              "test-ns",
-			svcAcc:                 "test-sa",
-			podName:                "test-pod",
-			preferredAddressType:   "",
-			usePodIdentity:         true,
-			podIdentityHttpTimeout: 50 * time.Millisecond,
-			expectError:            false,
+			name:                      "valid auth with empty preferred address type",
+			region:                    "eu-west-1",
+			nameSpace:                 "test-ns",
+			svcAcc:                    "test-sa",
+			podName:                   "test-pod",
+			preferredAddressType:      "",
+			usePodIdentity:            true,
+			podIdentityHttpTimeout:    50 * time.Millisecond,
+			assumeRoleDurationSeconds: 0,
+			expectError:               false,
+		},
+		{
+			name:                      "valid auth with assume role duration",
+			region:                    "us-west-2",
+			nameSpace:                 "default",
+			svcAcc:                    "test-sa",
+			podName:                   "test-pod",
+			preferredAddressType:      "ipv4",
+			usePodIdentity:            true,
+			podIdentityHttpTimeout:    100 * time.Millisecond,
+			assumeRoleDurationSeconds: 3600 * time.Second,
+			expectError:               false,
 		},
 	}
 
@@ -102,6 +118,9 @@ func TestNewAuth(t *testing.T) {
 				tt.usePodIdentity,
 				&tt.podIdentityHttpTimeout,
 				k8sClient,
+				"",
+				tt.assumeRoleDurationSeconds,
+				"",
 			)
 
 			if tt.expectError && err == nil {
@@ -133,6 +152,9 @@ func TestNewAuth(t *testing.T) {
 				}
 				if *auth.podIdentityHttpTimeout != tt.podIdentityHttpTimeout {
 					t.Errorf("Expected podIdentityHttpTimeout %v, got %v", tt.podIdentityHttpTimeout, auth.podIdentityHttpTimeout)
+				}
+				if auth.assumeRoleDurationSeconds != tt.assumeRoleDurationSeconds {
+					t.Errorf("Expected assumeRoleDurationSeconds %v, got %v", tt.assumeRoleDurationSeconds, auth.assumeRoleDurationSeconds)
 				}
 				if auth.k8sClient == nil {
 					t.Error("Expected k8sClient to be set")
@@ -177,6 +199,31 @@ func TestGetAWSConfig(t *testing.T) {
 				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
 			}
 		})
+	}
+}
+
+func TestGetAWSConfig_AssumeRole(t *testing.T) {
+	timeout := 100 * time.Millisecond
+
+	auth := &Auth{
+		region:                    "someRegion",
+		nameSpace:                 "someNamespace",
+		svcAcc:                    "someSvcAcc",
+		podName:                   "somepod",
+		usePodIdentity:            true,
+		podIdentityHttpTimeout:    &timeout,
+		k8sClient:                 fake.NewSimpleClientset().CoreV1(),
+		stsClient:                 &mockSTS{},
+		assumeRoleArn:             "arn:aws:iam::123456789012:role/TestRole",
+		assumeRoleDurationSeconds: 900 * time.Second,
+	}
+
+	cfg, err := auth.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected error from GetAWSConfig with assume role: %v", err)
+	}
+	if cfg.Credentials == nil {
+		t.Fatalf("Expected credentials to be set when assume role is configured")
 	}
 }
 
@@ -254,5 +301,148 @@ func TestUserAgentMiddleware_HandleBuild(t *testing.T) {
 				t.Error("Expected request to be *smithyhttp.Request")
 			}
 		})
+	}
+}
+
+// TestGetAWSConfig_AssumeRoleDurations tests various duration scenarios
+func TestGetAWSConfig_AssumeRoleDurations(t *testing.T) {
+	tests := []struct {
+		name        string
+		duration    time.Duration
+		expectError bool
+	}{
+		{
+			name:        "valid duration - 15 minutes",
+			duration:    15 * time.Minute,
+			expectError: false,
+		},
+		{
+			name:        "valid duration - 1 hour",
+			duration:    1 * time.Hour,
+			expectError: false,
+		},
+		{
+			name:        "valid duration - 12 hours",
+			duration:    12 * time.Hour,
+			expectError: false,
+		},
+		{
+			name:        "zero duration",
+			duration:    0,
+			expectError: false,
+		},
+		{
+			name:        "minimum valid duration - 1 second",
+			duration:    1 * time.Second,
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			timeout := 100 * time.Millisecond
+
+			auth := &Auth{
+				region:                    "someRegion",
+				nameSpace:                 "someNamespace",
+				svcAcc:                    "someSvcAcc",
+				podName:                   "somepod",
+				usePodIdentity:            true,
+				podIdentityHttpTimeout:    &timeout,
+				k8sClient:                 fake.NewSimpleClientset().CoreV1(),
+				stsClient:                 &mockSTS{},
+				assumeRoleArn:             "arn:aws:iam::123456789012:role/TestRole",
+				assumeRoleDurationSeconds: tt.duration,
+			}
+
+			cfg, err := auth.GetAWSConfig(context.Background())
+			if tt.expectError && err == nil {
+				t.Fatalf("Expected error but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if !tt.expectError && cfg.Credentials == nil {
+				t.Fatalf("Expected credentials to be set")
+			}
+		})
+	}
+}
+
+// TestGetAWSConfig_AssumeRoleWithExternalId tests assume role with external ID
+func TestGetAWSConfig_AssumeRoleWithExternalId(t *testing.T) {
+	timeout := 100 * time.Millisecond
+
+	auth := &Auth{
+		region:                    "someRegion",
+		nameSpace:                 "someNamespace",
+		svcAcc:                    "someSvcAcc",
+		podName:                   "somepod",
+		usePodIdentity:            true,
+		podIdentityHttpTimeout:    &timeout,
+		k8sClient:                 fake.NewSimpleClientset().CoreV1(),
+		stsClient:                 &mockSTS{},
+		assumeRoleArn:             "arn:aws:iam::123456789012:role/TestRole",
+		assumeRoleDurationSeconds: 3600 * time.Second,
+		assumeRoleExternalId:      "external-id-123",
+	}
+
+	cfg, err := auth.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if cfg.Credentials == nil {
+		t.Fatalf("Expected credentials to be set")
+	}
+}
+
+// TestGetAWSConfig_AssumeRoleWithoutDuration tests assume role without duration (should use AWS default)
+func TestGetAWSConfig_AssumeRoleWithoutDuration(t *testing.T) {
+	timeout := 100 * time.Millisecond
+
+	auth := &Auth{
+		region:                    "someRegion",
+		nameSpace:                 "someNamespace",
+		svcAcc:                    "someSvcAcc",
+		podName:                   "somepod",
+		usePodIdentity:            true,
+		podIdentityHttpTimeout:    &timeout,
+		k8sClient:                 fake.NewSimpleClientset().CoreV1(),
+		stsClient:                 &mockSTS{},
+		assumeRoleArn:             "arn:aws:iam::123456789012:role/TestRole",
+		assumeRoleDurationSeconds: 0,
+	}
+
+	cfg, err := auth.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if cfg.Credentials == nil {
+		t.Fatalf("Expected credentials to be set")
+	}
+}
+
+// TestGetAWSConfig_NoAssumeRole tests when no assume role is configured
+func TestGetAWSConfig_NoAssumeRole(t *testing.T) {
+	timeout := 100 * time.Millisecond
+
+	auth := &Auth{
+		region:                 "someRegion",
+		nameSpace:              "someNamespace",
+		svcAcc:                 "someSvcAcc",
+		podName:                "somepod",
+		usePodIdentity:         true,
+		podIdentityHttpTimeout: &timeout,
+		k8sClient:              fake.NewSimpleClientset().CoreV1(),
+		stsClient:              &mockSTS{},
+		assumeRoleArn:          "",
+	}
+
+	cfg, err := auth.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if cfg.Credentials == nil {
+		t.Fatalf("Expected credentials to be set")
 	}
 }

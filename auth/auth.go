@@ -41,6 +41,9 @@ type Auth struct {
 	podIdentityHttpTimeout                                                    *time.Duration
 	k8sClient                                                                 k8sv1.CoreV1Interface
 	stsClient                                                                 stscreds.AssumeRoleWithWebIdentityAPIClient
+	assumeRoleArn                                                             string
+	assumeRoleDurationSeconds                                                 time.Duration
+	assumeRoleExternalId                                                      string
 }
 
 // NewAuth creates an Auth object for an incoming mount request.
@@ -49,6 +52,9 @@ func NewAuth(
 	usePodIdentity bool,
 	podIdentityHttpTimeout *time.Duration,
 	k8sClient k8sv1.CoreV1Interface,
+	assumeRoleArn string,
+	assumeRoleDurationSeconds time.Duration,
+	assumeRoleExternalId string,
 ) (auth *Auth, e error) {
 	var stsClient *sts.Client
 
@@ -65,16 +71,19 @@ func NewAuth(
 	}
 
 	return &Auth{
-		region:                 region,
-		nameSpace:              nameSpace,
-		svcAcc:                 svcAcc,
-		podName:                podName,
-		preferredAddressType:   preferredAddressType,
-		eksAddonVersion:        eksAddonVersion,
-		usePodIdentity:         usePodIdentity,
-		podIdentityHttpTimeout: podIdentityHttpTimeout,
-		k8sClient:              k8sClient,
-		stsClient:              stsClient,
+		region:                    region,
+		nameSpace:                 nameSpace,
+		svcAcc:                    svcAcc,
+		podName:                   podName,
+		preferredAddressType:      preferredAddressType,
+		eksAddonVersion:           eksAddonVersion,
+		usePodIdentity:            usePodIdentity,
+		podIdentityHttpTimeout:    podIdentityHttpTimeout,
+		k8sClient:                 k8sClient,
+		stsClient:                 stsClient,
+		assumeRoleArn:             assumeRoleArn,
+		assumeRoleDurationSeconds: assumeRoleDurationSeconds,
+		assumeRoleExternalId:      assumeRoleExternalId,
 	}, nil
 
 }
@@ -103,6 +112,25 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	cfg, err := credProvider.GetAWSConfig(ctx)
 	if err != nil {
 		return aws.Config{}, err
+	}
+
+	// If an assumeRoleArn was provided, create an AssumeRole provider using the
+	// base credentials (from cfg) and wrap the config's Credentials with the
+	// resulting credentials cache so subsequent AWS calls use the assumed role.
+	if p.assumeRoleArn != "" {
+		stsClient := sts.NewFromConfig(cfg)
+		var optFns []func(*stscreds.AssumeRoleOptions)
+		if p.assumeRoleDurationSeconds > 0 {
+			optFns = append(optFns, func(o *stscreds.AssumeRoleOptions) { o.Duration = p.assumeRoleDurationSeconds })
+		}
+		if p.assumeRoleExternalId != "" {
+			external := p.assumeRoleExternalId
+			optFns = append(optFns, func(o *stscreds.AssumeRoleOptions) { o.ExternalID = &external })
+		}
+
+		assumeProv := stscreds.NewAssumeRoleProvider(stsClient, p.assumeRoleArn, optFns...)
+		cfg.Credentials = aws.NewCredentialsCache(assumeProv)
+		klog.Infof("Using assumed role %s for AWS calls", p.assumeRoleArn)
 	}
 
 	// Add the user agent to the config
