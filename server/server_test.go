@@ -2855,3 +2855,92 @@ func TestDriverVersion(t *testing.T) {
 		t.Fatalf("TestDriverVersion: wrong RuntimeName: %s", ver.RuntimeName)
 	}
 }
+
+// Test that writeFile skips writing when content is unchanged
+func TestWriteFileSkipsUnchangedContent(t *testing.T) {
+	dir := t.TempDir()
+	secretContent := []byte("my-secret-value")
+	fileName := "test-secret"
+	filePath := filepath.Join(dir, fileName)
+
+	// Write initial file
+	if err := os.WriteFile(filePath, secretContent, 0644); err != nil {
+		t.Fatalf("Failed to write initial file: %v", err)
+	}
+
+	initialStat, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Failed to stat initial file: %v", err)
+	}
+
+	// Small delay to ensure mtime would differ if file is rewritten
+	time.Sleep(10 * time.Millisecond)
+
+	svr := &CSIDriverProviderServer{driverWriteSecrets: false}
+	descriptor := provider.SecretDescriptor{}
+	descriptor.ObjectName = fileName
+	secret := &provider.SecretValue{
+		Value:      secretContent,
+		Descriptor: descriptor,
+	}
+	// Set mount dir via the descriptor's internal field using a helper
+	testDescriptor := createTestDescriptor(dir, fileName)
+	secret.Descriptor = testDescriptor
+
+	_, err = svr.writeFile(secret, 0644)
+	if err != nil {
+		t.Fatalf("writeFile returned error: %v", err)
+	}
+
+	finalStat, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Failed to stat file after writeFile: %v", err)
+	}
+
+	if !initialStat.ModTime().Equal(finalStat.ModTime()) {
+		t.Errorf("File was rewritten when content was unchanged. Initial mtime: %v, Final mtime: %v",
+			initialStat.ModTime(), finalStat.ModTime())
+	}
+}
+
+// Test that writeFile writes when content has changed
+func TestWriteFileWritesChangedContent(t *testing.T) {
+	dir := t.TempDir()
+	initialContent := []byte("initial-value")
+	newContent := []byte("new-value")
+	fileName := "test-secret"
+	filePath := filepath.Join(dir, fileName)
+
+	// Write initial file
+	if err := os.WriteFile(filePath, initialContent, 0644); err != nil {
+		t.Fatalf("Failed to write initial file: %v", err)
+	}
+
+	svr := &CSIDriverProviderServer{driverWriteSecrets: false}
+	testDescriptor := createTestDescriptor(dir, fileName)
+	secret := &provider.SecretValue{
+		Value:      newContent,
+		Descriptor: testDescriptor,
+	}
+
+	_, err := svr.writeFile(secret, 0644)
+	if err != nil {
+		t.Fatalf("writeFile returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read file: %v", err)
+	}
+
+	if string(content) != string(newContent) {
+		t.Errorf("File content not updated. Expected: %s, Got: %s", newContent, content)
+	}
+}
+
+// Helper to create a SecretDescriptor with mountDir set
+func createTestDescriptor(mountDir, objectName string) provider.SecretDescriptor {
+	objects := fmt.Sprintf(`[{"objectName": "%s", "objectType": "secretsmanager"}]`, objectName)
+	descriptors, _ := provider.NewSecretDescriptorList(mountDir, "_", objects, []string{"us-east-1"})
+	return *descriptors[provider.SecretsManager][0]
+}

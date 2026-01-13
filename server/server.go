@@ -8,6 +8,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -324,6 +325,12 @@ func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode o
 			Contents: secret.Value,
 		}, nil
 
+	}
+
+	// Skip write if file exists with identical content
+	existing, err := os.ReadFile(secret.Descriptor.GetMountPath())
+	if err == nil && bytes.Equal(existing, secret.Value) {
+		return nil, nil
 	}
 
 	// Write to a tempfile first
