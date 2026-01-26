@@ -187,12 +187,12 @@ func TestGetAWSConfig_UserAgent(t *testing.T) {
 		{
 			name:            "with EKS addon version",
 			eksAddonVersion: "v1.0.0-eksbuild.1",
-			expectedAppID:   ProviderName + "/v1.0.0-eksbuild.1",
+			expectedAppID:   ProviderName + "-v1.0.0-eksbuild.1",
 		},
 		{
 			name:            "without EKS addon version",
 			eksAddonVersion: "",
-			expectedAppID:   ProviderName + "/" + ProviderVersion,
+			expectedAppID:   ProviderName + "-" + ProviderVersion,
 		},
 	}
 

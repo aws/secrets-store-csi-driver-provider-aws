@@ -83,7 +83,7 @@ func (p Auth) getAppID() string {
 	if p.eksAddonVersion != "" {
 		version = p.eksAddonVersion
 	}
-	return ProviderName + "/" + version
+	return ProviderName + "-" + version
 }
 
 // Get the AWS config associated with a given pod's service account.
