@@ -218,18 +218,7 @@ func TestGetAWSConfig_UserAgent(t *testing.T) {
 				t.Fatalf("GetAWSConfig() error = %v", err)
 			}
 
-			// Verify APIOptions are configured
-			// With eksAddonVersion: expect 2 options (provider + addon version)
-			// Without eksAddonVersion: expect 1 option (provider only)
-			expectedOptions := 1
-			if tt.expectAddonVersionInUA {
-				expectedOptions = 2
-			}
-			if len(cfg.APIOptions) != expectedOptions {
-				t.Errorf("Expected %d APIOptions, got %d", expectedOptions, len(cfg.APIOptions))
-			}
-
-			// Apply APIOptions to a stack and verify middleware is added
+			// Apply APIOptions to a stack and build a request to verify User-Agent header
 			stack := middleware.NewStack("test", smithyhttp.NewStackRequest)
 			for _, opt := range cfg.APIOptions {
 				if err := opt(stack); err != nil {
@@ -237,17 +226,39 @@ func TestGetAWSConfig_UserAgent(t *testing.T) {
 				}
 			}
 
-			// Verify the UserAgent middleware was added to the Build step
-			middlewareIDs := stack.Build.List()
-			hasUserAgent := false
-			for _, id := range middlewareIDs {
-				if id == "UserAgent" {
-					hasUserAgent = true
-					break
-				}
+			// Get the UserAgent middleware and execute HandleBuild to populate the header
+			uaMiddleware, ok := stack.Build.Get("UserAgent")
+			if !ok {
+				t.Fatal("Expected UserAgent middleware in Build step")
 			}
-			if !hasUserAgent {
-				t.Errorf("Expected UserAgent middleware in Build step, got: %v", middlewareIDs)
+
+			req := smithyhttp.NewStackRequest()
+			input := middleware.BuildInput{Request: req}
+			_, _, err = uaMiddleware.HandleBuild(context.Background(), input, middleware.BuildHandlerFunc(
+				func(ctx context.Context, in middleware.BuildInput) (middleware.BuildOutput, middleware.Metadata, error) {
+					return middleware.BuildOutput{}, middleware.Metadata{}, nil
+				},
+			))
+			if err != nil {
+				t.Fatalf("HandleBuild() error = %v", err)
+			}
+
+			// Verify User-Agent header contains expected values
+			httpReq := req.(*smithyhttp.Request)
+			userAgent := httpReq.Header.Get("User-Agent")
+
+			if !strings.Contains(userAgent, ProviderName+"/"+ProviderVersion) {
+				t.Errorf("User-Agent should contain '%s/%s', got: %s", ProviderName, ProviderVersion, userAgent)
+			}
+
+			if tt.expectAddonVersionInUA {
+				if !strings.Contains(userAgent, "eksAddonVersion/"+tt.eksAddonVersion) {
+					t.Errorf("User-Agent should contain 'eksAddonVersion/%s', got: %s", tt.eksAddonVersion, userAgent)
+				}
+			} else {
+				if strings.Contains(userAgent, "eksAddonVersion") {
+					t.Errorf("User-Agent should not contain 'eksAddonVersion', got: %s", userAgent)
+				}
 			}
 		})
 	}
