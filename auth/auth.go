@@ -105,9 +105,10 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	}
 
 	// Add the user agent to the config using SDK's built-in mechanism
-	cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue(ProviderName, ProviderVersion))
 	if p.eksAddonVersion != "" {
-		cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue("eksAddonVersion", p.eksAddonVersion))
+		cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue(ProviderName, p.eksAddonVersion))
+	} else {
+		cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue(ProviderName, ProviderVersion))
 	}
 
 	return cfg, nil

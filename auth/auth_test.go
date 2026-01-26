@@ -182,19 +182,19 @@ func TestGetAWSConfig(t *testing.T) {
 
 func TestGetAWSConfig_UserAgent(t *testing.T) {
 	tests := []struct {
-		name                   string
-		eksAddonVersion        string
-		expectAddonVersionInUA bool
+		name            string
+		eksAddonVersion string
+		expectedVersion string
 	}{
 		{
-			name:                   "with EKS addon version",
-			eksAddonVersion:        "v1.0.0-eksbuild.1",
-			expectAddonVersionInUA: true,
+			name:            "with EKS addon version",
+			eksAddonVersion: "v1.0.0-eksbuild.1",
+			expectedVersion: "v1.0.0-eksbuild.1",
 		},
 		{
-			name:                   "without EKS addon version",
-			eksAddonVersion:        "",
-			expectAddonVersionInUA: false,
+			name:            "without EKS addon version",
+			eksAddonVersion: "",
+			expectedVersion: ProviderVersion,
 		},
 	}
 
@@ -247,18 +247,9 @@ func TestGetAWSConfig_UserAgent(t *testing.T) {
 			httpReq := req.(*smithyhttp.Request)
 			userAgent := httpReq.Header.Get("User-Agent")
 
-			if !strings.Contains(userAgent, ProviderName+"/"+ProviderVersion) {
-				t.Errorf("User-Agent should contain '%s/%s', got: %s", ProviderName, ProviderVersion, userAgent)
-			}
-
-			if tt.expectAddonVersionInUA {
-				if !strings.Contains(userAgent, "eksAddonVersion/"+tt.eksAddonVersion) {
-					t.Errorf("User-Agent should contain 'eksAddonVersion/%s', got: %s", tt.eksAddonVersion, userAgent)
-				}
-			} else {
-				if strings.Contains(userAgent, "eksAddonVersion") {
-					t.Errorf("User-Agent should not contain 'eksAddonVersion', got: %s", userAgent)
-				}
+			expectedUA := ProviderName + "/" + tt.expectedVersion
+			if !strings.Contains(userAgent, expectedUA) {
+				t.Errorf("User-Agent should contain '%s', got: %s", expectedUA, userAgent)
 			}
 		})
 	}
