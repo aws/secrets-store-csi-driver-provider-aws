@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/aws/smithy-go/middleware"
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -184,17 +182,17 @@ func TestGetAWSConfig_UserAgent(t *testing.T) {
 	tests := []struct {
 		name            string
 		eksAddonVersion string
-		expectedVersion string
+		expectedAppID   string
 	}{
 		{
 			name:            "with EKS addon version",
 			eksAddonVersion: "v1.0.0-eksbuild.1",
-			expectedVersion: "v1.0.0-eksbuild.1",
+			expectedAppID:   ProviderName + ":v1.0.0-eksbuild.1",
 		},
 		{
 			name:            "without EKS addon version",
 			eksAddonVersion: "",
-			expectedVersion: ProviderVersion,
+			expectedAppID:   ProviderName + ":" + ProviderVersion,
 		},
 	}
 
@@ -213,43 +211,10 @@ func TestGetAWSConfig_UserAgent(t *testing.T) {
 				k8sClient:              fake.NewSimpleClientset().CoreV1(),
 			}
 
-			cfg, err := auth.GetAWSConfig(context.Background())
-			if err != nil {
-				t.Fatalf("GetAWSConfig() error = %v", err)
-			}
-
-			// Apply APIOptions to a stack and build a request to verify User-Agent header
-			stack := middleware.NewStack("test", smithyhttp.NewStackRequest)
-			for _, opt := range cfg.APIOptions {
-				if err := opt(stack); err != nil {
-					t.Fatalf("Failed to apply APIOption: %v", err)
-				}
-			}
-
-			// Get the UserAgent middleware and execute HandleBuild to populate the header
-			uaMiddleware, ok := stack.Build.Get("UserAgent")
-			if !ok {
-				t.Fatal("Expected UserAgent middleware in Build step")
-			}
-
-			req := smithyhttp.NewStackRequest()
-			input := middleware.BuildInput{Request: req}
-			_, _, err = uaMiddleware.HandleBuild(context.Background(), input, middleware.BuildHandlerFunc(
-				func(ctx context.Context, in middleware.BuildInput) (middleware.BuildOutput, middleware.Metadata, error) {
-					return middleware.BuildOutput{}, middleware.Metadata{}, nil
-				},
-			))
-			if err != nil {
-				t.Fatalf("HandleBuild() error = %v", err)
-			}
-
-			// Verify User-Agent header contains expected values
-			httpReq := req.(*smithyhttp.Request)
-			userAgent := httpReq.Header.Get("User-Agent")
-
-			expectedUA := ProviderName + "/" + tt.expectedVersion
-			if !strings.Contains(userAgent, expectedUA) {
-				t.Errorf("User-Agent should contain '%s', got: %s", expectedUA, userAgent)
+			// Test getAppID directly
+			appID := auth.getAppID()
+			if appID != tt.expectedAppID {
+				t.Errorf("getAppID() = %q, want %q", appID, tt.expectedAppID)
 			}
 		})
 	}

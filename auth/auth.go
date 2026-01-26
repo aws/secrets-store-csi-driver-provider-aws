@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsmiddleware "github.com/aws/aws-sdk-go-v2/aws/middleware"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -78,11 +77,22 @@ func NewAuth(
 
 }
 
+// getAppID returns the AppID string for User-Agent
+func (p Auth) getAppID() string {
+	version := ProviderVersion
+	if p.eksAddonVersion != "" {
+		version = p.eksAddonVersion
+	}
+	return ProviderName + ":" + version
+}
+
 // Get the AWS config associated with a given pod's service account.
 // The returned config is capable of automatically refreshing creds as needed
 // by using a private TokenFetcher helper.
 func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	var credProvider credential_provider.ConfigProvider
+
+	appID := p.getAppID()
 
 	if p.usePodIdentity {
 		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
@@ -90,26 +100,14 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 			klog.Infof("Using custom Pod Identity timeout: %v", *p.podIdentityHttpTimeout)
 		}
 		var err error
-		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, p.k8sClient)
+		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, appID, p.k8sClient)
 		if err != nil {
 			return aws.Config{}, err
 		}
 	} else {
 		klog.Infof("Using IAM Roles for Service Accounts for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
-		credProvider = credential_provider.NewIRSACredentialProvider(p.stsClient, p.region, p.nameSpace, p.svcAcc, p.k8sClient)
+		credProvider = credential_provider.NewIRSACredentialProvider(p.stsClient, p.region, p.nameSpace, p.svcAcc, appID, p.k8sClient)
 	}
 
-	cfg, err := credProvider.GetAWSConfig(ctx)
-	if err != nil {
-		return aws.Config{}, err
-	}
-
-	// Add the user agent to the config using SDK's built-in mechanism
-	if p.eksAddonVersion != "" {
-		cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue(ProviderName, p.eksAddonVersion))
-	} else {
-		cfg.APIOptions = append(cfg.APIOptions, awsmiddleware.AddUserAgentKeyValue(ProviderName, ProviderVersion))
-	}
-
-	return cfg, nil
+	return credProvider.GetAWSConfig(ctx)
 }
