@@ -178,7 +178,7 @@ func TestGetAWSConfig(t *testing.T) {
 	}
 }
 
-func TestGetAWSConfig_UserAgent(t *testing.T) {
+func TestAppID(t *testing.T) {
 	tests := []struct {
 		name            string
 		eksAddonVersion string

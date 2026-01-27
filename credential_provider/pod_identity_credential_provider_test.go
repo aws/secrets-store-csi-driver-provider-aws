@@ -478,3 +478,31 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestNewPodIdentityCredentialProvider_AppID(t *testing.T) {
+	expectedAppID := "test-app-id"
+	k8sClient := fake.NewSimpleClientset().CoreV1()
+
+	provider, err := NewPodIdentityCredentialProvider(
+		testRegion,
+		testNamespace,
+		testServiceAccount,
+		testPodName,
+		"",
+		nil,
+		expectedAppID,
+		k8sClient,
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	podProvider, ok := provider.(*PodIdentityCredentialProvider)
+	if !ok {
+		t.Fatal("Expected PodIdentityCredentialProvider type")
+	}
+
+	if podProvider.appID != expectedAppID {
+		t.Errorf("Expected appID %q, got %q", expectedAppID, podProvider.appID)
+	}
+}
