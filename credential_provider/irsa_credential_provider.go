@@ -18,7 +18,6 @@ const (
 	arnAnno      = "eks.amazonaws.com/role-arn"
 	docURL       = "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
 	irsaAudience = "sts.amazonaws.com"
-	ProviderName = "secrets-store-csi-driver-provider-aws"
 )
 
 type irsaTokenFetcher struct {
@@ -56,15 +55,15 @@ func (p *irsaTokenFetcher) GetIdentityToken() ([]byte, error) {
 
 // IRSACredentialProvider implements CredentialProvider using IAM Roles for Service Accounts
 type IRSACredentialProvider struct {
-	stsClient                 stscreds.AssumeRoleWithWebIdentityAPIClient
-	k8sClient                 k8sv1.CoreV1Interface
-	region, nameSpace, svcAcc string
-	fetcher                   stscreds.IdentityTokenRetriever
+	stsClient                        stscreds.AssumeRoleWithWebIdentityAPIClient
+	k8sClient                        k8sv1.CoreV1Interface
+	region, nameSpace, svcAcc, appID string
+	fetcher                          stscreds.IdentityTokenRetriever
 }
 
 func NewIRSACredentialProvider(
 	stsClient stscreds.AssumeRoleWithWebIdentityAPIClient,
-	region, nameSpace, svcAcc string,
+	region, nameSpace, svcAcc, appID string,
 	k8sClient k8sv1.CoreV1Interface,
 ) ConfigProvider {
 	return &IRSACredentialProvider{
@@ -73,6 +72,7 @@ func NewIRSACredentialProvider(
 		region:    region,
 		nameSpace: nameSpace,
 		svcAcc:    svcAcc,
+		appID:     appID,
 		fetcher:   newIRSATokenFetcher(nameSpace, svcAcc, k8sClient),
 	}
 }
@@ -87,6 +87,7 @@ func (p *IRSACredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, 
 	return config.LoadDefaultConfig(ctx,
 		config.WithRegion(p.region),
 		config.WithCredentialsProvider(stscreds.NewWebIdentityRoleProvider(p.stsClient, *roleArn, p.fetcher)),
+		config.WithAppID(p.appID),
 	)
 }
 
