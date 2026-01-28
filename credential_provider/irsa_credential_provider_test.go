@@ -48,6 +48,7 @@ func newIRSACredentialProviderWithMock(tstData irsaCredentialTest) *IRSACredenti
 		region:    testRegion,
 		nameSpace: testNamespace,
 		svcAcc:    testServiceAccount,
+		appID:     "test-app-id",
 		fetcher: newIRSATokenFetcher(
 			testNamespace,
 			testServiceAccount,
@@ -135,4 +136,27 @@ func TestIRSAToken(t *testing.T) {
 var irsaTokenTests []irsaCredentialTest = []irsaCredentialTest{
 	{"IRSA Token Success", false, false, "myRoleARN", true, "", ""},
 	{"IRSA Fetch JWT fail", false, true, "myRoleARN", true, "", "Fake create token"},
+}
+
+func TestNewIRSACredentialProvider_AppID(t *testing.T) {
+	expectedAppID := "test-app-id"
+	k8sClient := fake.NewSimpleClientset().CoreV1()
+
+	provider := NewIRSACredentialProvider(
+		&mockSTS{},
+		testRegion,
+		testNamespace,
+		testServiceAccount,
+		expectedAppID,
+		k8sClient,
+	)
+
+	irsaProvider, ok := provider.(*IRSACredentialProvider)
+	if !ok {
+		t.Fatal("Expected IRSACredentialProvider type")
+	}
+
+	if irsaProvider.appID != expectedAppID {
+		t.Errorf("Expected appID %q, got %q", expectedAppID, irsaProvider.appID)
+	}
 }
