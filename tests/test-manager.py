@@ -53,6 +53,13 @@ for config in CONFIGS.values():
 ARGS = None
 
 
+def get_partition() -> str:
+    """Get AWS partition from current credentials."""
+    sts = boto3.client("sts", region_name=REGION)
+    arn = sts.get_caller_identity()["Arn"]
+    return arn.split(":")[1]  # arn:aws:... or arn:aws-cn:... etc
+
+
 def get_aws_clients() -> tuple[dict[str, Any], dict[str, Any]]:
     """Create and return AWS client dictionaries for secretsmanager and ssm."""
     secretsmanager = {
@@ -162,6 +169,7 @@ def manage_resources(arch: str, auth_type: str, action: str) -> None:
 
 def get_auth_setup(arch: str, auth_type: str) -> str:
     sa_name = f"basic-test-mount-sa-{arch}-{auth_type}"
+    partition = get_partition()
     if auth_type == "irsa":
         return f"""	log "Associating IAM OIDC provider"
     eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $REGION >&3 2>&1
@@ -171,8 +179,8 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
         --name {sa_name} \\
         --namespace $NAMESPACE \\
         --cluster $CLUSTER_NAME \\
-        --attach-policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess \\
-        --attach-policy-arn arn:aws:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess \\
+        --attach-policy-arn arn:{partition}:iam::aws:policy/AmazonSSMReadOnlyAccess \\
+        --attach-policy-arn arn:{partition}:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess \\
         --override-existing-serviceaccounts \\
         --approve \\
         --region $REGION >&3 2>&1"""
