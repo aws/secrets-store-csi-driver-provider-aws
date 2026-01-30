@@ -61,3 +61,6 @@ dnsConfig: {}
 secrets-store-csi-driver:
   install: true
   fullnameOverride: secrets-store-csi-driver
+  tokenRequests:
+    - audience: "sts.amazonaws.com"
+    - audience: "pods.eks.amazonaws.com"

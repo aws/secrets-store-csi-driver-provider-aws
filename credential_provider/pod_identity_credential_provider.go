@@ -13,9 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/endpointcreds"
 
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
-	authv1 "k8s.io/api/authentication/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
+
+	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 )
 
 const (
@@ -29,46 +28,16 @@ var (
 	podIdentityAgentEndpointIPv6 = defaultIPv6Endpoint
 )
 
-type podIdentityTokenFetcher struct {
-	nameSpace, svcAcc, podName string
-	k8sClient                  k8sv1.CoreV1Interface
+// csiTokenProvider implements endpointcreds.AuthTokenProvider using pre-fetched CSI token
+type csiTokenProvider struct {
+	token string
 }
 
-func newPodIdentityTokenFetcher(
-	nameSpace, svcAcc, podName string,
-	k8sClient k8sv1.CoreV1Interface,
-) endpointcreds.AuthTokenProvider {
-	return &podIdentityTokenFetcher{
-		nameSpace: nameSpace,
-		svcAcc:    svcAcc,
-		podName:   podName,
-		k8sClient: k8sClient,
-	}
+func (p *csiTokenProvider) GetToken() (string, error) {
+	return p.token, nil
 }
 
-func (p *podIdentityTokenFetcher) GetToken() (string, error) {
-	tokenSpec := authv1.TokenRequestSpec{
-		Audiences: []string{podIdentityAudience},
-		BoundObjectRef: &authv1.BoundObjectReference{
-			Kind: "Pod",
-			Name: p.podName,
-		},
-	}
-
-	// Use the K8s API to fetch the token associated with service account
-	tokRsp, err := p.k8sClient.ServiceAccounts(p.nameSpace).CreateToken(
-		context.Background(),
-		p.svcAcc,
-		&authv1.TokenRequest{Spec: tokenSpec},
-		metav1.CreateOptions{})
-	if err != nil {
-		return "", err
-	}
-
-	return tokRsp.Status.Token, nil
-}
-
-// PodIdentityCredentialProvider implements CredentialProvider using pod identity
+// PodIdentityCredentialProvider implements ConfigProvider using EKS Pod Identity
 type PodIdentityCredentialProvider struct {
 	region               string
 	preferredAddressType string
@@ -78,30 +47,34 @@ type PodIdentityCredentialProvider struct {
 }
 
 func NewPodIdentityCredentialProvider(
-	region, nameSpace, svcAcc, podName, preferredAddressType string,
+	region, preferredAddressType string,
 	podIdentityHttpTimeout *time.Duration,
-	appID string,
-	k8sClient k8sv1.CoreV1Interface,
+	appID, serviceAccountTokens string,
 ) (ConfigProvider, error) {
 	if region == "" {
 		return nil, fmt.Errorf("region cannot be empty")
 	}
-	if k8sClient == nil {
-		return nil, fmt.Errorf("k8s client cannot be nil")
+
+	token, err := utils.GetTokenForAudience(serviceAccountTokens, podIdentityAudience)
+	if err != nil {
+		klog.Errorf("Pod Identity authentication failed: could not get token for audience %q: %v", podIdentityAudience, err)
+		return nil, fmt.Errorf("failed to get Pod Identity token: %w", err)
 	}
 
-	pod_identity := PodIdentityCredentialProvider{
+	klog.V(2).Infof("Pod Identity token obtained for audience %q", podIdentityAudience)
+
+	provider := &PodIdentityCredentialProvider{
 		region:               region,
 		preferredAddressType: preferredAddressType,
 		appID:                appID,
-		fetcher:              newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
+		fetcher:              &csiTokenProvider{token: token},
 	}
 
 	if podIdentityHttpTimeout != nil {
-		pod_identity.httpClient = awshttp.NewBuildableClient().WithTimeout(*podIdentityHttpTimeout)
+		provider.httpClient = awshttp.NewBuildableClient().WithTimeout(*podIdentityHttpTimeout)
 	}
 
-	return &pod_identity, nil
+	return provider, nil
 }
 
 func parseAddressPreference(preferredAddressType string) string {
@@ -113,31 +86,31 @@ func parseAddressPreference(preferredAddressType string) string {
 	case "ipv6":
 		return "ipv6"
 	default:
-		return "auto" // Default to auto for invalid preferences
+		return "auto"
 	}
 }
 
 func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	var configErr error
 	preference := parseAddressPreference(p.preferredAddressType)
+
 	if preference == "auto" || preference == "ipv4" {
-		config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv4)
+		cfg, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv4)
 		if err != nil {
 			klog.Warningf("IPv4 endpoint attempt failed: %v", err)
 			configErr = err
 		} else {
-			return config, nil
+			return cfg, nil
 		}
 	}
 
 	if preference == "auto" || preference == "ipv6" {
-		config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv6)
-
+		cfg, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv6)
 		if err != nil {
 			klog.Warningf("IPv6 endpoint attempt failed: %v", err)
 			configErr = err
 		} else {
-			return config, nil
+			return cfg, nil
 		}
 	}
 
@@ -148,7 +121,6 @@ func (p *PodIdentityCredentialProvider) getConfigWithEndpoint(ctx context.Contex
 	provider := endpointcreds.New(endpoint,
 		func(opts *endpointcreds.Options) {
 			opts.AuthorizationTokenProvider = p.fetcher
-
 			if p.httpClient != nil {
 				opts.HTTPClient = p.httpClient
 			}
