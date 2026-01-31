@@ -88,7 +88,7 @@ func TestNewAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k8sClient := fake.NewSimpleClientset().CoreV1()
+			k8sClient := fake.NewClientset().CoreV1()
 
 			auth, err := NewAuth(
 				tt.region,
@@ -156,7 +156,7 @@ func TestGetAWSConfig(t *testing.T) {
 				podName:                "somepod",
 				usePodIdentity:         tstData.testPodIdentity,
 				podIdentityHttpTimeout: &timeout,
-				k8sClient:              fake.NewSimpleClientset().CoreV1(),
+				k8sClient:              fake.NewClientset().CoreV1(),
 				stsClient:              &mockSTS{},
 			}
 
@@ -208,7 +208,7 @@ func TestAppID(t *testing.T) {
 				eksAddonVersion:        tt.eksAddonVersion,
 				usePodIdentity:         true,
 				podIdentityHttpTimeout: &timeout,
-				k8sClient:              fake.NewSimpleClientset().CoreV1(),
+				k8sClient:              fake.NewClientset().CoreV1(),
 			}
 
 			// Test getAppID directly

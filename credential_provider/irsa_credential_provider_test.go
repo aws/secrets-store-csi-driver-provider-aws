@@ -32,7 +32,7 @@ func newIRSACredentialProviderWithMock(tstData irsaCredentialTest) *IRSACredenti
 			sa.Annotations = map[string]string{roleArnAnnotationKey: tstData.roleARN}
 		}
 	}
-	clientset := fake.NewSimpleClientset(sa)
+	clientset := fake.NewClientset(sa)
 	if tstData.testToken {
 		k8sClient = &mockK8sV1{
 			CoreV1Interface:  clientset.CoreV1(),
@@ -140,7 +140,7 @@ var irsaTokenTests []irsaCredentialTest = []irsaCredentialTest{
 
 func TestNewIRSACredentialProvider_AppID(t *testing.T) {
 	expectedAppID := "test-app-id"
-	k8sClient := fake.NewSimpleClientset().CoreV1()
+	k8sClient := fake.NewClientset().CoreV1()
 
 	provider := NewIRSACredentialProvider(
 		&mockSTS{},
