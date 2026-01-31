@@ -79,8 +79,8 @@ func setupMockPodIdentityAgent(t *testing.T, isIPv4, shouldFail bool) *httptest.
 
 func newPodIdentityCredentialWithMock(t *testing.T, isIPv4 bool, tstData podIdentityCredentialTest) (*PodIdentityCredentialProvider, chan<- struct{}) {
 	k8sClient := &mockK8sV1{
-		CoreV1Interface:  fake.NewSimpleClientset().CoreV1(),
-		fake:             fake.NewSimpleClientset().CoreV1(),
+		CoreV1Interface:  fake.NewClientset().CoreV1(),
+		fake:             fake.NewClientset().CoreV1(),
 		k8CTOneShotError: tstData.k8CTOneShotError,
 	}
 
@@ -401,7 +401,7 @@ func TestNewPodIdentityCredentialProviderTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k8sClient := fake.NewSimpleClientset().CoreV1()
+			k8sClient := fake.NewClientset().CoreV1()
 
 			provider, err := NewPodIdentityCredentialProvider(
 				testRegion, testNamespace, testServiceAccount, testPodName, "", tt.podIdentityHttpTimeout, "test-app-id", k8sClient)
@@ -436,7 +436,7 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 		{
 			name:                "Empty region",
 			region:              "",
-			k8sClient:           fake.NewSimpleClientset().CoreV1(),
+			k8sClient:           fake.NewClientset().CoreV1(),
 			expectedErrorPrefix: "region cannot be empty",
 		},
 		{
@@ -448,7 +448,7 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 		{
 			name:                "Valid parameters",
 			region:              testRegion,
-			k8sClient:           fake.NewSimpleClientset().CoreV1(),
+			k8sClient:           fake.NewClientset().CoreV1(),
 			expectedErrorPrefix: "",
 		},
 	}
@@ -481,7 +481,7 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 
 func TestNewPodIdentityCredentialProvider_AppID(t *testing.T) {
 	expectedAppID := "test-app-id"
-	k8sClient := fake.NewSimpleClientset().CoreV1()
+	k8sClient := fake.NewClientset().CoreV1()
 
 	provider, err := NewPodIdentityCredentialProvider(
 		testRegion,
