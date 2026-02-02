@@ -4,8 +4,18 @@ on:
   workflow_dispatch:
   push:
     branches: ["main"]
+    paths-ignore:
+      - ".*ignore"
+      - "*.md"
+      - "LICENSE"
+      - "NOTICE"
   pull_request_target:
     types: [labeled]
+    paths-ignore:
+      - ".*ignore"
+      - "*.md"
+      - "LICENSE"
+      - "NOTICE"
 
 concurrency:
   # Only run one workflow at a time to avoid hitting the network interface quota
