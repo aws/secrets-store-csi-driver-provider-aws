@@ -55,7 +55,7 @@ spec:
       hostNetwork: false
       containers:
         - name: provider-aws-installer
-          image: ${PRIVREPO}
+          image: ${PRIVREPO}${PRIVTAG:+:}${PRIVTAG}
           imagePullPolicy: Always
           args:
               - --provider-volume=/var/run/secrets-store-csi-providers
