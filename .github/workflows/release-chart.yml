@@ -3,6 +3,9 @@ name: "Release Helm Chart"
 on:
   workflow_dispatch:
 
+permissions:
+  id-token: write
+
 jobs:
   test:
     uses: ./.github/workflows/go.yml
