@@ -1,7 +1,7 @@
 image:
   repository: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
   pullPolicy: IfNotPresent
-  tag: 2.1.0
+  tag: 2.2.0
 
 awsRegion: ""
 nameOverride: ""
