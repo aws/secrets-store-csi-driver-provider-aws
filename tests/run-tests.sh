@@ -1,5 +1,17 @@
 #!/bin/bash
 
+REGION="${REGION:-us-west-2}"
+USE_ADDON=false
+ADDON_VERSION=""
+
+venv_activate() {
+	[[ -d .venv ]] && source .venv/bin/activate
+}
+
+venv_deactivate() {
+	[[ -d .venv ]] && deactivate
+}
+
 cleanup() {
 	cleanup_generated_files
 	cleanup_secrets
@@ -13,98 +25,232 @@ check_parallel() {
 }
 
 generate_test_files() {
-	echo "Generating test files from templates..."
-	if [[ ! -f "generate-test-files.py" ]]; then
-		echo "Error: generate-test-files.py not found!"
+	if [[ ! -f "test-manager.py" ]]; then
+		echo "Error: test-manager.py not found!"
 		exit 1
 	fi
 
-	python3 generate-test-files.py
+	venv_activate
+	python3 test-manager.py cleanup-files
+
+	ARGS=()
+	if [[ "$USE_ADDON" == "true" ]]; then
+		ARGS+=(--addon)
+	fi
+	if [[ -n "$ADDON_VERSION" ]]; then
+		ARGS+=(--version "$ADDON_VERSION")
+	fi
+
+	echo "Generating test files from templates..."
+	python3 test-manager.py "${ARGS[@]}"
+
 	if [[ $? -ne 0 ]]; then
+		venv_deactivate
 		echo "Error: Failed to generate test files from templates"
 		exit 1
 	fi
+	venv_deactivate
 	echo "Test files generated successfully"
 }
 
 cleanup_generated_files() {
 	echo "Cleaning up generated test files..."
-	rm -f x64-irsa.bats x64-pod-identity.bats arm-irsa.bats arm-pod-identity.bats
-	rm -f BasicTestMountSPC-x64-irsa.yaml BasicTestMountSPC-x64-pod-identity.yaml BasicTestMountSPC-arm-irsa.yaml BasicTestMountSPC-arm-pod-identity.yaml
-	rm -f BasicTestMount-x64-irsa.yaml BasicTestMount-x64-pod-identity.yaml BasicTestMount-arm-irsa.yaml BasicTestMount-arm-pod-identity.yaml
-	echo "Generated test files cleaned up"
+	venv_activate
+	python3 test-manager.py cleanup-files
+	venv_deactivate
 }
 
 delete_cluster() {
 	eksctl delete cluster --name $1 --parallel 25
 }
 
-cleanup_secrets() {
-	echo "Cleaning up secrets and parameters..."
-	python3 generate-test-files.py cleanup-secrets
+check_and_cleanup_clusters() {
+	local targets=("$@")
+	local clusters_to_check=()
+
+	# Determine which clusters to check based on targets
+	for target in "${targets[@]}"; do
+		case "$target" in
+			""|"all")
+				clusters_to_check=("integ-cluster-x64-irsa" "integ-cluster-x64-pod-identity" "integ-cluster-arm-irsa" "integ-cluster-arm-pod-identity")
+				break
+				;;
+			"x64")
+				clusters_to_check+=("integ-cluster-x64-irsa" "integ-cluster-x64-pod-identity")
+				;;
+			"arm")
+				clusters_to_check+=("integ-cluster-arm-irsa" "integ-cluster-arm-pod-identity")
+				;;
+			"irsa")
+				clusters_to_check+=("integ-cluster-x64-irsa" "integ-cluster-arm-irsa")
+				;;
+			"pod-identity")
+				clusters_to_check+=("integ-cluster-x64-pod-identity" "integ-cluster-arm-pod-identity")
+				;;
+			"x64-irsa")
+				clusters_to_check+=("integ-cluster-x64-irsa")
+				;;
+			"x64-pod-identity")
+				clusters_to_check+=("integ-cluster-x64-pod-identity")
+				;;
+			"arm-irsa")
+				clusters_to_check+=("integ-cluster-arm-irsa")
+				;;
+			"arm-pod-identity")
+				clusters_to_check+=("integ-cluster-arm-pod-identity")
+				;;
+		esac
+	done
+
+	# Check if any clusters exist and delete them
+	for cluster in "${clusters_to_check[@]}"; do
+		if eksctl get cluster --name "$cluster" --region "$REGION" >/dev/null 2>&1; then
+			echo "⚠ Cluster $cluster already exists, deleting..."
+			delete_cluster "$cluster"
+		fi
+	done
 }
 
-if [[ "$1" == "clean" ]]; then
+cleanup_secrets() {
+	echo "Cleaning up secrets and parameters..."
+	venv_activate
+	python3 test-manager.py cleanup-secrets
+	venv_deactivate
+}
+
+# Parse arguments - test target must come before flags
+TEST_TARGET=""
+CLEAN_TARGET=""
+
+# Handle clean command specially since it takes two positional args
+if [[ $# -gt 0 ]] && [[ "$1" == "clean" ]]; then
+	TEST_TARGET="clean"
+	shift
+	if [[ $# -gt 0 ]] && [[ "$1" != "--"* ]]; then
+		CLEAN_TARGET="$1"
+		shift
+	fi
+elif [[ $# -gt 0 ]] && [[ "$1" != "--"* ]]; then
+	TEST_TARGET="$1"
+	shift
+fi
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--addon)
+			USE_ADDON=true
+			shift
+			;;
+		--version)
+			ADDON_VERSION="$2"
+			shift 2
+			;;
+		*)
+			echo "Error: Unknown argument '$1' or test target must come before flags"
+			exit 1
+			;;
+	esac
+done
+
+if [[ -n "$ADDON_VERSION" ]] && [[ "$USE_ADDON" != "true" ]]; then
+	echo "Error: --version flag requires --addon flag"
+	exit 1
+fi
+
+# Validate POD_IDENTITY_ROLE_ARN for pod-identity targets
+if [[ "$TEST_TARGET" == *"pod-identity"* ]] || [[ "$TEST_TARGET" == "" ]] || [[ "$TEST_TARGET" == "all" ]]; then
+	if [[ -z "${POD_IDENTITY_ROLE_ARN}" ]]; then
+		echo "Error: POD_IDENTITY_ROLE_ARN environment variable is not set (required for pod-identity tests)"
+		exit 1
+	fi
+fi
+
+if [[ "$TEST_TARGET" == "clean" ]]; then
 	cleanup
 
-	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "pod-identity" || "$2" == "x64-pod-identity" ]]; then
+	CLEAN_TARGET="${CLEAN_TARGET:-all}"
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "x64" || "$CLEAN_TARGET" == "pod-identity" || "$CLEAN_TARGET" == "x64-pod-identity" ]]; then
 		delete_cluster integ-cluster-x64-pod-identity
 	fi
-	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "irsa" || "$2" == "x64-irsa" ]]; then
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "x64" || "$CLEAN_TARGET" == "irsa" || "$CLEAN_TARGET" == "x64-irsa" ]]; then
 		delete_cluster integ-cluster-x64-irsa
 	fi
-	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "pod-identity" || "$2" == "arm-pod-identity" ]]; then
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "arm" || "$CLEAN_TARGET" == "pod-identity" || "$CLEAN_TARGET" == "arm-pod-identity" ]]; then
 		delete_cluster integ-cluster-arm-pod-identity
 	fi
-	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "irsa" || "$2" == "arm-irsa" ]]; then
+	if [[ "$CLEAN_TARGET" == "all" || "$CLEAN_TARGET" == "arm" || "$CLEAN_TARGET" == "irsa" || "$CLEAN_TARGET" == "arm-irsa" ]]; then
 		delete_cluster integ-cluster-arm-irsa
 	fi
 
 	exit $?
 fi
 
+# Validate PRIVREPO image if not using addon
+if [[ "$USE_ADDON" != "true" ]]; then
+	if [[ -z "${PRIVREPO}" ]]; then
+		echo "Error: PRIVREPO environment variable is not set"
+		exit 1
+	fi
+	# Only validate ECR images
+	if [[ "$PRIVREPO" == *".dkr.ecr."*".amazonaws.com/"* ]]; then
+		echo "Validating ECR image: $PRIVREPO"
+		venv_activate
+		python3 test-manager.py validate-image
+		if [[ $? -ne 0 ]]; then
+			venv_deactivate
+			exit 1
+		fi
+		venv_deactivate
+	else
+		echo "Skipping validation for non-ECR registry: $PRIVREPO"
+	fi
+fi
+
+# Check and cleanup any existing clusters for the target
+check_and_cleanup_clusters "$TEST_TARGET"
+
 # Generate test files from templates (this also creates secrets)
 generate_test_files
 
 # Run tests based on argument
-if [[ "$1" == "all" || "$1" == "" ]]; then
+if [[ "$TEST_TARGET" == "all" || "$TEST_TARGET" == "" ]]; then
 	check_parallel
 	echo "Running all tests: x64-irsa, x64-pod-identity, arm-irsa, arm-pod-identity"
 	bats --jobs 4 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats arm-irsa.bats arm-pod-identity.bats
 fi
-if [[ "$1" == "irsa" ]]; then
+if [[ "$TEST_TARGET" == "irsa" ]]; then
 	check_parallel
 	echo "Running IRSA tests: x64-irsa, arm-irsa"
 	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats arm-irsa.bats
 fi
-if [[ "$1" == "pod-identity" ]]; then
+if [[ "$TEST_TARGET" == "pod-identity" ]]; then
 	check_parallel
 	echo "Running Pod Identity tests: x64-pod-identity, arm-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files x64-pod-identity.bats arm-pod-identity.bats
 fi
-if [[ "$1" == "x64" ]]; then
+if [[ "$TEST_TARGET" == "x64" ]]; then
 	check_parallel
 	echo "Running x64 tests: x64-irsa, x64-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats
 fi
-if [[ "$1" == "arm" ]]; then
+if [[ "$TEST_TARGET" == "arm" ]]; then
 	check_parallel
 	echo "Running ARM tests: arm-irsa, arm-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files arm-irsa.bats arm-pod-identity.bats
 fi
-if [[ "$1" == "x64-irsa" ]]; then
+if [[ "$TEST_TARGET" == "x64-irsa" ]]; then
 	echo "Running x64 IRSA test: x64-irsa"
 	bats x64-irsa.bats
 fi
-if [[ "$1" == "x64-pod-identity" ]]; then
+if [[ "$TEST_TARGET" == "x64-pod-identity" ]]; then
 	echo "Running x64 Pod Identity test: x64-pod-identity"
 	bats x64-pod-identity.bats
 fi
-if [[ "$1" == "arm-irsa" ]]; then
+if [[ "$TEST_TARGET" == "arm-irsa" ]]; then
 	echo "Running ARM IRSA test: arm-irsa"
 	bats arm-irsa.bats
 fi
-if [[ "$1" == "arm-pod-identity" ]]; then
+if [[ "$TEST_TARGET" == "arm-pod-identity" ]]; then
 	echo "Running ARM Pod Identity test: arm-pod-identity"
 	bats arm-pod-identity.bats
 fi

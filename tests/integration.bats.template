@@ -22,10 +22,7 @@ log() {
 	echo -e "${{{LOG_COLOR}}}[$TIMESTAMP] [{{ARCH}}-{{AUTH_TYPE}}] $msg${NC}" >&3
 }
 
-if [[ -z "${PRIVREPO}" ]]; then
-	echo "Error: PRIVREPO is not specified" >&2
-	return 1
-fi
+{{PRIVREPO_CHECK}}
 
 if [[ -z "${{{NODE_TYPE_VAR}}}" ]]; then
 	{{NODE_TYPE_VAR}}={{DEFAULT_NODE_TYPE}}
@@ -45,15 +42,11 @@ setup_file() {
 		--node-type ${{NODE_TYPE_VAR}} \
 		--nodes 3 \
 		--region $REGION \
-		--kubeconfig=${{KUBECONFIG_VAR}}
+		--kubeconfig=${{KUBECONFIG_VAR}} >&3 2>&1
+
+{{INSTALL_METHOD}}
 
 {{AUTH_SETUP}}
-
-	log "Adding secrets-store-csi-driver Helm repository"
-	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-
-	log "Installing secrets-store-csi-driver via Helm"
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
 
 	log "Cluster setup completed for $CLUSTER_NAME"
 }
@@ -63,7 +56,7 @@ teardown_file() {
 
 	eksctl delete cluster \
 		--name $CLUSTER_NAME \
-		--region $REGION
+		--region $REGION >&3 2>&1
 
 	log "Cleaning up kubeconfig file"
 	rm -f ${{KUBECONFIG_VAR}}
@@ -95,19 +88,7 @@ validate_jmes_mount() {
 	log "JMES mount validation completed successfully"
 }
 
-@test "Install aws provider" {
-	log "Installing AWS provider"
-
-	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${{KUBECONFIG_VAR}} apply -f -
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
-
-	PROVIDER_POD=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=csi-secrets-store-provider-aws -o jsonpath="{.items[0].metadata.name}")
-	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
-	assert_success
-
-	log "AWS provider installation completed"
-}
+{{INSTALL_PROVIDER_TEST}}
 
 @test "secretproviderclasses crd is established" {
 	log "Verifying secretproviderclasses CRD is established"
