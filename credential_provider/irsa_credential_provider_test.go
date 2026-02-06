@@ -4,159 +4,123 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
-const (
-	roleArnAnnotationKey = "eks.amazonaws.com/role-arn"
-)
+const validTokensJSON = `{
+  "sts.amazonaws.com": {
+    "token": "irsa-test-token",
+    "expirationTimestamp": "2024-01-15T10:30:00Z"
+  },
+  "pods.eks.amazonaws.com": {
+    "token": "pod-identity-test-token",
+    "expirationTimestamp": "2024-01-15T10:30:00Z"
+  }
+}`
 
-func newIRSACredentialProviderWithMock(tstData irsaCredentialTest) *IRSACredentialProvider {
-	var k8sClient k8sv1.CoreV1Interface
-	sa := &corev1.ServiceAccount{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ServiceAccount",
-			APIVersion: "v1",
+func TestNewIRSACredentialProvider(t *testing.T) {
+	tests := []struct {
+		name                 string
+		roleArn              string
+		serviceAccountTokens string
+		wantErr              bool
+		errContains          string
+	}{
+		{
+			name:                 "success",
+			roleArn:              "arn:aws:iam::123456789012:role/test-role",
+			serviceAccountTokens: validTokensJSON,
+			wantErr:              false,
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      testServiceAccount,
-			Namespace: testNamespace,
+		{
+			name:                 "empty role ARN",
+			roleArn:              "",
+			serviceAccountTokens: validTokensJSON,
+			wantErr:              true,
+			errContains:          "IAM role ARN is required",
+		},
+		{
+			name:                 "empty tokens",
+			roleArn:              "arn:aws:iam::123456789012:role/test-role",
+			serviceAccountTokens: "",
+			wantErr:              true,
+			errContains:          "serviceAccount.tokens not provided",
+		},
+		{
+			name:                 "missing sts audience",
+			roleArn:              "arn:aws:iam::123456789012:role/test-role",
+			serviceAccountTokens: `{"pods.eks.amazonaws.com": {"token": "test", "expirationTimestamp": "2024-01-15T10:30:00Z"}}`,
+			wantErr:              true,
+			errContains:          "sts.amazonaws.com",
+		},
+		{
+			name:                 "invalid JSON",
+			roleArn:              "arn:aws:iam::123456789012:role/test-role",
+			serviceAccountTokens: "not json",
+			wantErr:              true,
+			errContains:          "failed to parse",
 		},
 	}
-	if !tstData.k8SAGetOneShotError {
-		if !tstData.testToken {
-			sa.Annotations = map[string]string{roleArnAnnotationKey: tstData.roleARN}
-		}
-	}
-	clientset := fake.NewClientset(sa)
-	if tstData.testToken {
-		k8sClient = &mockK8sV1{
-			CoreV1Interface:  clientset.CoreV1(),
-			fake:             clientset.CoreV1(),
-			k8CTOneShotError: tstData.k8CTOneShotError,
-		}
-	} else {
-		k8sClient = clientset.CoreV1()
-	}
-	return &IRSACredentialProvider{
-		stsClient: &mockSTS{},
-		k8sClient: k8sClient,
-		region:    testRegion,
-		nameSpace: testNamespace,
-		svcAcc:    testServiceAccount,
-		appID:     "test-app-id",
-		fetcher: newIRSATokenFetcher(
-			testNamespace,
-			testServiceAccount,
-			k8sClient,
-		),
-	}
-}
 
-type irsaCredentialTest struct {
-	testName            string
-	k8SAGetOneShotError bool
-	k8CTOneShotError    bool
-	roleARN             string
-	testToken           bool
-	cfgError            string
-	expError            string
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, err := NewIRSACredentialProvider(
+				&mockSTS{},
+				testRegion,
+				tt.roleArn,
+				"test-app-id",
+				tt.serviceAccountTokens,
+			)
 
-var irsaCredentialTests []irsaCredentialTest = []irsaCredentialTest{
-	{"IRSA Success", false, false, "fakeRoleARN", true, "", ""},
-	{"IRSA Missing Role", false, false, "", false, "", "An IAM role must"},
-	{"Fetch svc acc fail", true, false, "fakeRoleARN", false, "not found", ""},
-}
-
-func TestIRSACredentialProvider(t *testing.T) {
-	for _, tstData := range irsaCredentialTests {
-		t.Run(tstData.testName, func(t *testing.T) {
-			provider := newIRSACredentialProviderWithMock(tstData)
-			cfg, err := provider.GetAWSConfig(context.Background())
-			if err != nil {
-				if len(tstData.expError) > 0 && !strings.Contains(err.Error(), tstData.expError) {
-					t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errContains, err.Error())
 				}
 				return
 			}
 
-			_, err = cfg.Credentials.Retrieve(context.Background())
-			if len(tstData.expError) == 0 && err != nil {
-				t.Errorf("%s case: got unexpected cred provider error: %s", tstData.testName, err)
-			}
-			if cfg.Credentials == nil {
-				t.Errorf("%s case: got empty config", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && err == nil {
-				t.Errorf("%s case: expected error but got none", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && !strings.Contains(err.Error(), tstData.expError) {
-				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
-			}
-		})
-	}
-}
-
-func TestIRSAToken(t *testing.T) {
-	for _, tstData := range irsaTokenTests {
-
-		t.Run(tstData.testName, func(t *testing.T) {
-
-			tstAuth := newIRSACredentialProviderWithMock(tstData)
-			fetcher := tstAuth.fetcher
-
-			tokenOut, err := fetcher.GetIdentityToken()
-
-			if len(tstData.expError) == 0 && err != nil {
-				t.Errorf("%s case: got unexpected error: %s", tstData.testName, err)
-			}
-			if len(tstData.expError) != 0 && err == nil {
-				t.Errorf("%s case: expected error but got none", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && !strings.HasPrefix(err.Error(), tstData.expError) {
-				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
-			}
-			if len(tstData.expError) == 0 && len(tokenOut) == 0 {
-				t.Errorf("%s case: got empty token output", tstData.testName)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
 				return
 			}
-			if len(tstData.expError) == 0 && string(tokenOut) != "FAKETOKEN" {
-				t.Errorf("%s case: got bad token output", tstData.testName)
+			if provider == nil {
+				t.Error("expected provider to be non-nil")
 			}
 		})
-
 	}
 }
 
-var irsaTokenTests []irsaCredentialTest = []irsaCredentialTest{
-	{"IRSA Token Success", false, false, "myRoleARN", true, "", ""},
-	{"IRSA Fetch JWT fail", false, true, "myRoleARN", true, "", "Fake create token"},
+func TestCSITokenFetcher(t *testing.T) {
+	fetcher := &csiTokenFetcher{token: "test-token"}
+	token, err := fetcher.GetIdentityToken()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if string(token) != "test-token" {
+		t.Errorf("expected token %q, got %q", "test-token", string(token))
+	}
 }
 
-func TestNewIRSACredentialProvider_AppID(t *testing.T) {
-	expectedAppID := "test-app-id"
-	k8sClient := fake.NewClientset().CoreV1()
-
-	provider := NewIRSACredentialProvider(
+func TestIRSACredentialProvider_GetAWSConfig(t *testing.T) {
+	provider, err := NewIRSACredentialProvider(
 		&mockSTS{},
 		testRegion,
-		testNamespace,
-		testServiceAccount,
-		expectedAppID,
-		k8sClient,
+		"arn:aws:iam::123456789012:role/test-role",
+		"test-app-id",
+		validTokensJSON,
 	)
-
-	irsaProvider, ok := provider.(*IRSACredentialProvider)
-	if !ok {
-		t.Fatal("Expected IRSACredentialProvider type")
+	if err != nil {
+		t.Fatalf("failed to create provider: %v", err)
 	}
 
-	if irsaProvider.appID != expectedAppID {
-		t.Errorf("Expected appID %q, got %q", expectedAppID, irsaProvider.appID)
+	cfg, err := provider.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Credentials == nil {
+		t.Error("expected credentials to be non-nil")
 	}
 }

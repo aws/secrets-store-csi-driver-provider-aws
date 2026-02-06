@@ -53,7 +53,7 @@ setup_file() {
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
 
 	log "Installing secrets-store-csi-driver via Helm"
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true --set tokenRequests[0].audience=sts.amazonaws.com --set tokenRequests[1].audience=pods.eks.amazonaws.com
 
 	log "Cluster setup completed for $CLUSTER_NAME"
 }
@@ -107,6 +107,16 @@ validate_jmes_mount() {
 	assert_success
 
 	log "AWS provider installation completed"
+}
+
+@test "Verify serviceaccounts/token create permission is not granted" {
+	log "Verifying no ClusterRole grants serviceaccounts/token create permission"
+
+	# Check ClusterRoles for serviceaccounts/token create permission
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} get clusterroles -o json | jq -e '[.items[] | select(.rules[]? | select((.resources[]? == \"serviceaccounts/token\" or .resources[]? == \"*\") and (.verbs[]? == \"create\" or .verbs[]? == \"*\")))] | length == 0'"
+	assert_success
+
+	log "Verified: No ClusterRole grants serviceaccounts/token create permission"
 }
 
 @test "secretproviderclasses crd is established" {
