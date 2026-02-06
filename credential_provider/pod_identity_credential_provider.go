@@ -61,7 +61,7 @@ func NewPodIdentityCredentialProvider(
 		return nil, fmt.Errorf("failed to get Pod Identity token: %w", err)
 	}
 
-	klog.V(2).Infof("Pod Identity token obtained for audience %q", podIdentityAudience)
+	klog.Infof("Pod Identity token obtained for audience %q", podIdentityAudience)
 
 	provider := &PodIdentityCredentialProvider{
 		region:               region,
@@ -86,7 +86,7 @@ func parseAddressPreference(preferredAddressType string) string {
 	case "ipv6":
 		return "ipv6"
 	default:
-		return "auto"
+		return "auto" // Default to auto for invalid preferences
 	}
 }
 

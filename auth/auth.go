@@ -100,6 +100,7 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	}
 
 	if err != nil {
+		klog.Errorf("Error setting up credential provider")
 		return aws.Config{}, err
 	}
 
