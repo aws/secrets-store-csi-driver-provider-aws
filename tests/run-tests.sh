@@ -1,6 +1,6 @@
 #!/bin/bash
 
-REGION="${REGION:-us-west-2}"
+# REGION is auto-detected by test-manager.py if not set
 USE_ADDON=false
 ADDON_VERSION=""
 
@@ -103,8 +103,9 @@ check_and_cleanup_clusters() {
 	done
 
 	# Check if any clusters exist and delete them
+	local check_region="${REGION:-$(aws configure get region 2>/dev/null || echo us-west-2)}"
 	for cluster in "${clusters_to_check[@]}"; do
-		if eksctl get cluster --name "$cluster" --region "$REGION" >/dev/null 2>&1; then
+		if eksctl get cluster --name "$cluster" --region "$check_region" >/dev/null 2>&1; then
 			echo "⚠ Cluster $cluster already exists, deleting..."
 			delete_cluster "$cluster"
 		fi

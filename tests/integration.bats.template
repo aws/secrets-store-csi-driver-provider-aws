@@ -8,8 +8,8 @@ PROVIDER_YAML=../deployment/private-installer.yaml
 NAMESPACE=kube-system
 CLUSTER_NAME=integ-cluster-{{ARCH}}-{{AUTH_TYPE}}
 POD_NAME=basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}
-export REGION=us-west-2
-export FAILOVERREGION=us-east-2
+export REGION={{REGION}}
+export FAILOVERREGION={{FAILOVERREGION}}
 export ACCOUNT_NUMBER=$(aws --region $REGION sts get-caller-identity --query Account --output text)
 
 {{LOG_COLOR}}='\033[0;{{COLOR_CODE}}m'

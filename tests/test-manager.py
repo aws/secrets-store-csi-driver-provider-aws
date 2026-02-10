@@ -12,8 +12,33 @@ import botocore.exceptions
 CYAN = "\033[36m"
 RESET = "\033[0m"
 
-REGION = os.environ.get("REGION", "us-west-2")
-FAILOVERREGION = os.environ.get("FAILOVERREGION", "us-east-2")
+
+def get_region_and_failover() -> tuple[str, str]:
+    """Determine region and failover region dynamically based on partition."""
+    session = boto3.session.Session()
+    region = os.environ.get("REGION") or session.region_name or "us-west-2"
+
+    # Allow full override via environment
+    if os.environ.get("FAILOVERREGION"):
+        failover = os.environ["FAILOVERREGION"]
+        print(f"Using regions: {region} (primary), {failover} (failover) [from env]")
+        return region, failover
+
+    # Query EC2 for all regions in this partition
+    try:
+        ec2 = boto3.client("ec2", region_name=region)
+        all_regions = [
+            r["RegionName"] for r in ec2.describe_regions(AllRegions=True)["Regions"]
+        ]
+        failover = next((r for r in all_regions if r != region), region)
+    except Exception:
+        failover = region
+
+    print(f"Using regions: {region} (primary), {failover} (failover)")
+    return region, failover
+
+
+REGION, FAILOVERREGION = get_region_and_failover()
 
 CONFIGS = {
     "x64-irsa": {
@@ -207,6 +232,8 @@ def replace_template_vars(
     kubeconfig_var = config["KUBECONFIG_VAR"]
     replacements = {
         **{f"{{{{{k}}}}}": v for k, v in config.items()},
+        "{{REGION}}": REGION,
+        "{{FAILOVERREGION}}": FAILOVERREGION,
         "{{AUTH_SETUP}}": get_auth_setup(config["ARCH"], config["AUTH_TYPE"]),
         "{{INSTALL_METHOD}}": get_install_method(config),
         "{{POD_IDENTITY_PARAM}}": '\n    usePodIdentity: "true"'
