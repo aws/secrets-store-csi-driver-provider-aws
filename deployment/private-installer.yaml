@@ -11,9 +11,6 @@ metadata:
   name: csi-secrets-store-provider-aws-cluster-role
 rules:
 - apiGroups: [""]
-  resources: ["serviceaccounts/token"]
-  verbs: ["create"]
-- apiGroups: [""]
   resources: ["serviceaccounts"]
   verbs: ["get"]
 - apiGroups: [""]

@@ -2,141 +2,66 @@ package auth
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"k8s.io/client-go/kubernetes/fake"
 )
-
-// Mock STS client
-type mockSTS struct {
-	sts.Client
-}
-
-func (m *mockSTS) AssumeRoleWithWebIdentity(ctx context.Context, params *sts.AssumeRoleWithWebIdentityInput, optFns ...func(*sts.Options)) (*sts.AssumeRoleWithWebIdentityOutput, error) {
-	return nil, fmt.Errorf("fake error for serviceaccount")
-}
-
-type sessionTest struct {
-	testName        string
-	testPodIdentity bool
-	expError        string
-}
-
-var sessionTests []sessionTest = []sessionTest{
-	{
-		testName:        "IRSA",
-		testPodIdentity: false,
-		expError:        "serviceaccounts", // IRSA path will fail at getting service account since using fake client
-	},
-	{
-		testName:        "Pod Identity",
-		testPodIdentity: true,
-		expError:        "", // Pod Identity path succeeds since token is lazy loaded
-	},
-}
 
 func TestNewAuth(t *testing.T) {
 	tests := []struct {
-		name                   string
-		region                 string
-		nameSpace              string
-		svcAcc                 string
-		podName                string
-		preferredAddressType   string
-		usePodIdentity         bool
-		podIdentityHttpTimeout time.Duration
-		expectError            bool
+		name           string
+		region         string
+		usePodIdentity bool
+		expectError    bool
 	}{
 		{
-			name:                   "valid auth with pod identity",
-			region:                 "us-west-2",
-			nameSpace:              "default",
-			svcAcc:                 "test-sa",
-			podName:                "test-pod",
-			preferredAddressType:   "ipv4",
-			usePodIdentity:         true,
-			podIdentityHttpTimeout: 100 * time.Millisecond,
-			expectError:            false,
+			name:           "valid auth with IRSA",
+			region:         "us-west-2",
+			usePodIdentity: false,
+			expectError:    false,
 		},
 		{
-			name:                   "valid auth with IRSA",
-			region:                 "us-east-1",
-			nameSpace:              "kube-system",
-			svcAcc:                 "irsa-sa",
-			podName:                "irsa-pod",
-			preferredAddressType:   "ipv6",
-			usePodIdentity:         false,
-			podIdentityHttpTimeout: 100 * time.Millisecond,
-			expectError:            false,
-		},
-		{
-			name:                   "valid auth with empty preferred address type",
-			region:                 "eu-west-1",
-			nameSpace:              "test-ns",
-			svcAcc:                 "test-sa",
-			podName:                "test-pod",
-			preferredAddressType:   "",
-			usePodIdentity:         true,
-			podIdentityHttpTimeout: 50 * time.Millisecond,
-			expectError:            false,
+			name:           "valid auth with Pod Identity",
+			region:         "us-east-1",
+			usePodIdentity: true,
+			expectError:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k8sClient := fake.NewClientset().CoreV1()
+			timeout := 100 * time.Millisecond
 
 			auth, err := NewAuth(
 				tt.region,
-				tt.nameSpace,
-				tt.svcAcc,
-				tt.podName,
-				tt.preferredAddressType,
+				"default",
+				"test-sa",
+				"",
 				"test-version",
+				"arn:aws:iam::123456789012:role/test-role",
 				tt.usePodIdentity,
-				&tt.podIdentityHttpTimeout,
-				k8sClient,
+				&timeout,
+				"pre-extracted-test-token",
 			)
 
 			if tt.expectError && err == nil {
-				t.Errorf("Expected error but got none")
+				t.Errorf("expected error but got none")
 			}
 			if !tt.expectError && err != nil {
-				t.Errorf("Unexpected error: %v", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 
 			if !tt.expectError && auth != nil {
-				// Verify all fields are set correctly
 				if auth.region != tt.region {
-					t.Errorf("Expected region %s, got %s", tt.region, auth.region)
-				}
-				if auth.nameSpace != tt.nameSpace {
-					t.Errorf("Expected namespace %s, got %s", tt.nameSpace, auth.nameSpace)
-				}
-				if auth.svcAcc != tt.svcAcc {
-					t.Errorf("Expected service account %s, got %s", tt.svcAcc, auth.svcAcc)
-				}
-				if auth.podName != tt.podName {
-					t.Errorf("Expected pod name %s, got %s", tt.podName, auth.podName)
-				}
-				if auth.preferredAddressType != tt.preferredAddressType {
-					t.Errorf("Expected preferred address type %s, got %s", tt.preferredAddressType, auth.preferredAddressType)
+					t.Errorf("expected region %s, got %s", tt.region, auth.region)
 				}
 				if auth.usePodIdentity != tt.usePodIdentity {
-					t.Errorf("Expected usePodIdentity %v, got %v", tt.usePodIdentity, auth.usePodIdentity)
+					t.Errorf("expected usePodIdentity %v, got %v", tt.usePodIdentity, auth.usePodIdentity)
 				}
-				if *auth.podIdentityHttpTimeout != tt.podIdentityHttpTimeout {
-					t.Errorf("Expected podIdentityHttpTimeout %v, got %v", tt.podIdentityHttpTimeout, auth.podIdentityHttpTimeout)
-				}
-				if auth.k8sClient == nil {
-					t.Error("Expected k8sClient to be set")
-				}
-				if auth.stsClient == nil {
-					t.Error("Expected stsClient to be set")
+				if auth.token != "pre-extracted-test-token" {
+					t.Error("expected token to be set")
 				}
 			}
 		})
@@ -144,35 +69,76 @@ func TestNewAuth(t *testing.T) {
 }
 
 func TestGetAWSConfig(t *testing.T) {
-	for _, tstData := range sessionTests {
-		t.Run(tstData.testName, func(t *testing.T) {
+	tests := []struct {
+		name           string
+		usePodIdentity bool
+		token          string
+		roleArn        string
+		wantErr        bool
+		errContains    string
+	}{
+		{
+			name:           "IRSA success",
+			usePodIdentity: false,
+			token:          "irsa-test-token",
+			roleArn:        "arn:aws:iam::123456789012:role/test-role",
+			wantErr:        false,
+		},
+		{
+			name:           "IRSA empty token",
+			usePodIdentity: false,
+			token:          "",
+			roleArn:        "arn:aws:iam::123456789012:role/test-role",
+			wantErr:        true,
+			errContains:    "IRSA token cannot be empty",
+		},
+		{
+			name:           "Pod Identity empty token",
+			usePodIdentity: true,
+			token:          "",
+			roleArn:        "",
+			wantErr:        true,
+			errContains:    "Pod Identity token cannot be empty",
+		},
+	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			timeout := 100 * time.Millisecond
 
 			auth := &Auth{
-				region:                 "someRegion",
-				nameSpace:              "someNamespace",
-				svcAcc:                 "someSvcAcc",
-				podName:                "somepod",
-				usePodIdentity:         tstData.testPodIdentity,
+				region:                 "us-west-2",
+				nameSpace:              "default",
+				svcAcc:                 "test-sa",
+				roleArn:                tt.roleArn,
+				usePodIdentity:         tt.usePodIdentity,
 				podIdentityHttpTimeout: &timeout,
-				k8sClient:              fake.NewClientset().CoreV1(),
-				stsClient:              &mockSTS{},
+				token:                  tt.token,
+			}
+
+			if !tt.usePodIdentity {
+				auth.stsClient = sts.New(sts.Options{Region: "us-west-2"})
 			}
 
 			cfg, err := auth.GetAWSConfig(context.Background())
 
-			if len(tstData.expError) == 0 && err != nil {
-				t.Errorf("%s case: got unexpected auth error: %s", tstData.testName, err)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error but got none")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("expected error containing %q, got %q", tt.errContains, err.Error())
+				}
+				return
 			}
-			if len(tstData.expError) == 0 && cfg.Credentials == nil {
-				t.Errorf("%s case: got empty session", tstData.testName)
+
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
 			}
-			if len(tstData.expError) != 0 && err == nil {
-				t.Errorf("%s case: expected error but got none", tstData.testName)
-			}
-			if len(tstData.expError) != 0 && err != nil && !strings.Contains(err.Error(), tstData.expError) {
-				t.Errorf("%s case: expected error prefix '%s' but got '%s'", tstData.testName, tstData.expError, err.Error())
+			if cfg.Credentials == nil {
+				t.Error("expected credentials to be non-nil")
 			}
 		})
 	}
@@ -198,20 +164,10 @@ func TestAppID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			timeout := 100 * time.Millisecond
-
 			auth := &Auth{
-				region:                 "us-west-2",
-				nameSpace:              "default",
-				svcAcc:                 "test-sa",
-				podName:                "test-pod",
-				eksAddonVersion:        tt.eksAddonVersion,
-				usePodIdentity:         true,
-				podIdentityHttpTimeout: &timeout,
-				k8sClient:              fake.NewClientset().CoreV1(),
+				eksAddonVersion: tt.eksAddonVersion,
 			}
 
-			// Test getAppID directly
 			appID := auth.getAppID()
 			if appID != tt.expectedAppID {
 				t.Errorf("getAppID() = %q, want %q", appID, tt.expectedAppID)

@@ -240,6 +240,9 @@ func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.
 	attrMap["csi.storage.k8s.io/pod.namespace"] = tst.attributes["namespace"]
 	attrMap["csi.storage.k8s.io/serviceAccount.name"] = tst.attributes["accName"]
 
+	// Add CSI tokens for authentication
+	attrMap["csi.storage.k8s.io/serviceAccount.tokens"] = `{"sts.amazonaws.com":{"token":"test-irsa-token","expirationTimestamp":"2099-01-15T10:30:00Z"},"pods.eks.amazonaws.com":{"token":"test-pod-identity-token","expirationTimestamp":"2099-01-15T10:30:00Z"}}`
+
 	region := tst.attributes["region"]
 	if len(region) > 0 && !strings.Contains(region, "Fail") {
 		attrMap["region"] = region
@@ -909,7 +912,7 @@ var mountTests []testCase = []testCase{
 		ssmRsp:     []*ssm.GetParametersOutput{},
 		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "An IAM role must be associated",
+		expErr:     "IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1373,7 +1376,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestParm1", "objectType": "ssmparameter"},
 		},
-		expErr:     "fakeRegion: An IAM role must be associated",
+		expErr:     "IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},

@@ -59,6 +59,7 @@ func parsePodIdentityHttpTimeout(timeoutStr string) *time.Duration {
 func main() {
 
 	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
+	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
 
 	flag.Parse() // Parse command line flags
 
