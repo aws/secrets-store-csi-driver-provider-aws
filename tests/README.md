@@ -1,50 +1,25 @@
 ## Running prow tests
 
 1. Complete the [Private Builds](https://github.com/aws/secrets-store-csi-driver-provider-aws/tree/main#private-builds) section of the README.
-2. Install [bats](https://github.com/bats-core/bats-core).
-3. If running multi-arch/multi-auth tests, install GNU Parallel (`brew install parallel`).
-4. `cd` into the `tests/` directory
-5. Create a Python virtual environment and install `boto3` and `argparse`. The `run-tests.sh` script will automatically activate the virtual environment. E.g. using `uv`:
+2. `cd` into the `tests/` directory
+3. Run the setup script:
 
 ```bash
-uv venv
-uv pip install boto3 argparse
+./setup.sh
 ```
 
-6. Ensure that the `PRIVREPO` environment variable is set (not required if using `--addon` flag, see step 9).
-7. You can set the `NODE_TYPE_*` environment variables to specify the EC2 instance types used for the test clusters (default: `m5.large` for x64, `m6g.large` for ARM).
-8. Create the following IAM role and save it in a shell variable:
+This will:
+- Install [bats](https://github.com/bats-core/bats-core) and GNU Parallel (requires `sudo`)
+- Create a Python virtual environment and install dependencies (`boto3`, `argparse`)
+- Create the IAM role for Pod Identity tests with the required managed policies
+- Output an `export` command to set `POD_IDENTITY_ROLE_ARN`
 
-```bash
-export POD_IDENTITY_ROLE_ARN=$(aws --region "$REGION" --query Role.Arn --output text iam create-role --role-name pod-identity-role --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "Service": "pods.eks.amazonaws.com"
-            },
-            "Action": [
-                "sts:AssumeRole",
-                "sts:TagSession"
-            ]
-        }
-    ]
-}')
-```
+You can also run individual setup steps: `./setup.sh deps`, `./setup.sh venv`, or `./setup.sh iam`
 
-9. Attach the following policies to the role:
-
-```bash
-aws iam attach-role-policy \
-	--role-name pod-identity-role \
-	--policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
-aws iam attach-role-policy \
-	--role-name pod-identity-role \
-	--policy-arn arn:aws:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess
-```
-
-10. Run `./run-tests.sh`
+4. Run the `export POD_IDENTITY_ROLE_ARN=...` command output by the setup script.
+5. Ensure that the `PRIVREPO` environment variable is set (not required if using `--addon` flag).
+6. You can set the `NODE_TYPE_*` environment variables to specify the EC2 instance types used for the test clusters (default: `m5.large` for x64, `m6g.large` for ARM).
+7. Run `./run-tests.sh`
 
 - Running the script without any arguments will run all 4 test cases in parallel (x64 + IRSA, x64 + Pod Identity, ARM + IRSA, ARM + Pod Identity)
 - `./run-tests.sh x64` will run only x64 tests

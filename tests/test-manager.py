@@ -27,10 +27,13 @@ def get_region_and_failover() -> tuple[str, str]:
     # Query EC2 for all regions in this partition
     try:
         ec2 = boto3.client("ec2", region_name=region)
-        all_regions = [
+        all_regions = sorted(
             r["RegionName"] for r in ec2.describe_regions(AllRegions=True)["Regions"]
-        ]
-        failover = next((r for r in all_regions if r != region), region)
+        )
+        # Prefer a region with the same prefix (e.g., us-east-1 -> us-west-2)
+        prefix = region.rsplit("-", 1)[0].rsplit("-", 1)[0]  # "us" from "us-east-1"
+        same_geo = [r for r in all_regions if r.startswith(prefix) and r != region]
+        failover = same_geo[0] if same_geo else next((r for r in all_regions if r != region), region)
     except Exception:
         failover = region
 
