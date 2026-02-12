@@ -132,7 +132,8 @@ jobs:
         run: cd tests && ./run-tests.sh ${{ matrix.arch-short }}-${{ matrix.auth_type }}
         env:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
-          PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build:latest-${{ matrix.arch }}-${{ github.run_id }}
+          PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build
+          PRIVTAG: latest-${{ matrix.arch }}-${{ github.run_id }}
 
       - name: Run cleanup
         if: always()
