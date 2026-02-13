@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
+"""
+Test resource manager for AWS Secrets Store CSI Driver integration tests.
 
-from typing import Any
-import argparse
+Actions:
+  create-secrets   Create test secrets/parameters in AWS
+  cleanup-secrets  Delete test secrets/parameters from AWS
+  validate-image   Validate ECR image from PRIVREPO env var
+  print-regions    Print REGION/FAILOVERREGION as shell exports (for eval)
+"""
+
+import functools
 import os
 import re
 import sys
@@ -9,415 +17,207 @@ import sys
 import boto3
 import botocore.exceptions
 
-CYAN = "\033[36m"
-RESET = "\033[0m"
+SUFFIXES = ["x64-irsa", "x64-pod-identity", "arm-irsa", "arm-pod-identity"]
+
+SECRETS = [
+    ("SecretsManagerTest1", "SecretsManagerTest1Value"),
+    ("SecretsManagerTest2", "SecretsManagerTest2Value"),
+    ("SecretsManagerSync", "SecretUser"),
+    ("SecretsManagerRotationTest", "BeforeRotation"),
+    (
+        "secretsManagerJson",
+        '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}',
+    ),
+]
+
+PARAMETERS = [
+    ("ParameterStoreTest1", "ParameterStoreTest1Value"),
+    ("ParameterStoreTestWithLongName", "ParameterStoreTest2Value"),
+    ("ParameterStoreRotationTest", "BeforeRotation"),
+    (
+        "jsonSsm",
+        '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}',
+    ),
+]
 
 
-def get_region_and_failover() -> tuple[str, str]:
-    """Determine region and failover region dynamically based on partition."""
+# --- Region detection (lazy) ---
+
+
+@functools.cache
+def get_regions() -> tuple[str, str]:
+    """Determine primary and failover region. Cached — only calls AWS once."""
     session = boto3.session.Session()
     region = os.environ.get("REGION") or session.region_name or "us-west-2"
 
-    # Allow full override via environment
     if os.environ.get("FAILOVERREGION"):
-        failover = os.environ["FAILOVERREGION"]
-        print(f"Using regions: {region} (primary), {failover} (failover) [from env]")
-        return region, failover
+        return region, os.environ["FAILOVERREGION"]
 
-    # Query EC2 for all regions in this partition
     try:
         ec2 = boto3.client("ec2", region_name=region)
         all_regions = sorted(
             r["RegionName"] for r in ec2.describe_regions(AllRegions=True)["Regions"]
         )
-        # Prefer a region with the same prefix (e.g., us-east-1 -> us-west-2)
         prefix = region.rsplit("-", 1)[0].rsplit("-", 1)[0]  # "us" from "us-east-1"
         same_geo = [r for r in all_regions if r.startswith(prefix) and r != region]
-        failover = same_geo[0] if same_geo else next((r for r in all_regions if r != region), region)
+        failover = (
+            same_geo[0]
+            if same_geo
+            else next((r for r in all_regions if r != region), region)
+        )
     except Exception:
         failover = region
 
-    print(f"Using regions: {region} (primary), {failover} (failover)")
     return region, failover
 
 
-REGION, FAILOVERREGION = get_region_and_failover()
-
-CONFIGS = {
-    "x64-irsa": {
-        "ARCH": "x64",
-        "AUTH_TYPE": "irsa",
-        "LOG_COLOR": "CYAN",
-        "COLOR_CODE": "36",
-    },
-    "x64-pod-identity": {
-        "ARCH": "x64",
-        "AUTH_TYPE": "pod-identity",
-        "LOG_COLOR": "MAGENTA",
-        "COLOR_CODE": "35",
-    },
-    "arm-irsa": {
-        "ARCH": "arm",
-        "AUTH_TYPE": "irsa",
-        "LOG_COLOR": "BLUE",
-        "COLOR_CODE": "34",
-    },
-    "arm-pod-identity": {
-        "ARCH": "arm",
-        "AUTH_TYPE": "pod-identity",
-        "LOG_COLOR": "YELLOW",
-        "COLOR_CODE": "33",
-    },
-}
-
-# Add computed fields to each config
-for config in CONFIGS.values():
-    arch_upper = config["ARCH"].upper()
-    auth_upper = config["AUTH_TYPE"].upper().replace("-", "_")
-    config["NODE_TYPE_VAR"] = f"NODE_TYPE_{arch_upper}_{auth_upper}"
-    config["DEFAULT_NODE_TYPE"] = "m6g.large" if config["ARCH"] == "arm" else "m5.large"
-    config["KUBECONFIG_VAR"] = f"KUBECONFIG_FILE_{arch_upper}_{auth_upper}"
-
-ARGS = None
+# --- AWS helpers ---
 
 
-def get_partition() -> str:
-    """Get AWS partition from current credentials."""
-    sts = boto3.client("sts", region_name=REGION)
-    arn = sts.get_caller_identity()["Arn"]
-    return arn.split(":")[1]  # arn:aws:... or arn:aws-cn:... etc
+@functools.cache
+def get_clients(service: str) -> dict:
+    """Cached boto3 clients for both regions."""
+    region, failover = get_regions()
+    return {r: boto3.client(service, region_name=r) for r in [region, failover]}
 
 
-def get_aws_clients() -> tuple[dict[str, Any], dict[str, Any]]:
-    """Create and return AWS client dictionaries for secretsmanager and ssm."""
-    secretsmanager = {
-        r: boto3.client("secretsmanager", region_name=r)
-        for r in [REGION, FAILOVERREGION]
-    }
-    ssm = {r: boto3.client("ssm", region_name=r) for r in [REGION, FAILOVERREGION]}
-    return secretsmanager, ssm
-
-
-def aws_operation(
-    client: dict[str, Any],
-    operation: str,
-    name: str,
-    region: str,
-    exists_code: str,
-    **kwargs,
+def aws_op(
+    service: str, operation: str, region: str, ignore_code: str, **kwargs
 ) -> None:
+    """Execute an AWS operation, ignoring a specific error code."""
+    client = get_clients(service)[region]
     try:
-        print(f"  {operation}: {name} in {region}")
-        getattr(client[region], operation)(**kwargs)
+        getattr(client, operation)(**kwargs)
     except botocore.exceptions.ClientError as e:
-        if e.response["Error"]["Code"] == exists_code:
-            print(f"  Already exists/not found: {name} in {region}")
+        if e.response["Error"]["Code"] == ignore_code:
+            return
+        raise
+
+
+def ensure_secret(region: str, name: str, value: str) -> None:
+    """Create a secret or reset its value if it already exists."""
+    client = get_clients("secretsmanager")[region]
+    try:
+        client.create_secret(Name=name, SecretString=value)
+        print(f"  + secret {name} ({region})")
+    except botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceExistsException":
+            client.put_secret_value(SecretId=name, SecretString=value)
+            print(f"  ↻ secret {name} ({region}) [reset]")
         else:
             raise
 
 
-def manage_resources(arch: str, auth_type: str, action: str) -> None:
-    suffix = f"{arch}-{auth_type}"
+# --- Secret/parameter management ---
+
+
+def manage_secrets(action: str) -> None:
+    region, failover = get_regions()
+    verb = "Creating" if action == "create" else "Cleaning up"
+    resource_count = len(SUFFIXES) * 2 * (len(SECRETS) + len(PARAMETERS))
+    print(f"{verb} {resource_count} test resources across {region}, {failover}...")
+
+    for suffix in SUFFIXES:
+        for r in [region, failover]:
+            for base_name, value in SECRETS:
+                name = f"{base_name}-{suffix}"
+                if action == "create":
+                    ensure_secret(r, name, value)
+                else:
+                    aws_op(
+                        "secretsmanager",
+                        "delete_secret",
+                        r,
+                        "ResourceNotFoundException",
+                        SecretId=name,
+                        ForceDeleteWithoutRecovery=True,
+                    )
+                    print(f"  - secret {name} ({r})")
+
+            for base_name, value in PARAMETERS:
+                name = f"{base_name}-{suffix}"
+                if action == "create":
+                    aws_op(
+                        "ssm",
+                        "put_parameter",
+                        r,
+                        "",
+                        Name=name,
+                        Value=value,
+                        Type="SecureString",
+                        Overwrite=True,
+                    )
+                    print(f"  + parameter {name} ({r})")
+                else:
+                    aws_op("ssm", "delete_parameter", r, "ParameterNotFound", Name=name)
+                    print(f"  - parameter {name} ({r})")
+
     print(
-        f"{'Creating' if action == 'create' else 'Cleaning up'} resources for {suffix}..."
+        f"All resources {'created' if action == 'create' else 'cleaned up'} successfully"
     )
 
-    secretsmanager, ssm = get_aws_clients()
 
-    resources = {
-        "secrets": [
-            ("SecretsManagerTest1", "SecretsManagerTest1Value"),
-            ("SecretsManagerTest2", "SecretsManagerTest2Value"),
-            ("SecretsManagerSync", "SecretUser"),
-            ("SecretsManagerRotationTest", "BeforeRotation"),
-            (
-                "secretsManagerJson",
-                '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}',
-            ),
-        ],
-        "parameters": [
-            ("ParameterStoreTest1", "ParameterStoreTest1Value"),
-            ("ParameterStoreTestWithLongName", "ParameterStoreTest2Value"),
-            ("ParameterStoreRotationTest", "BeforeRotation"),
-            (
-                "jsonSsm",
-                '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}',
-            ),
-        ],
-    }
-
-    for region in [REGION, FAILOVERREGION]:
-        for base_name, value in resources["secrets"]:
-            name = f"{base_name}-{suffix}"
-            if action == "create":
-                aws_operation(
-                    secretsmanager,
-                    "create_secret",
-                    name,
-                    region,
-                    "ResourceExistsException",
-                    Name=name,
-                    SecretString=value,
-                )
-            else:
-                aws_operation(
-                    secretsmanager,
-                    "delete_secret",
-                    name,
-                    region,
-                    "",
-                    SecretId=name,
-                    ForceDeleteWithoutRecovery=True,
-                )
-
-        for base_name, value in resources["parameters"]:
-            name = f"{base_name}-{suffix}"
-            if action == "create":
-                aws_operation(
-                    ssm,
-                    "put_parameter",
-                    name,
-                    region,
-                    "ParameterAlreadyExists",
-                    Name=name,
-                    Value=value,
-                    Type="SecureString",
-                    Overwrite=False,
-                )
-            else:
-                aws_operation(
-                    ssm,
-                    "delete_parameter",
-                    name,
-                    region,
-                    "ParameterNotFound",
-                    Name=name,
-                )
+# --- Image validation ---
 
 
-def get_auth_setup(arch: str, auth_type: str) -> str:
-    sa_name = f"basic-test-mount-sa-{arch}-{auth_type}"
-    partition = get_partition()
-    if auth_type == "irsa":
-        return f"""	log "Associating IAM OIDC provider"
-    eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $REGION >&3 2>&1
+def validate_image() -> None:
+    image_uri = os.environ.get("PRIVREPO")
+    if not image_uri:
+        print("Error: PRIVREPO environment variable not set")
+        sys.exit(1)
 
-    log "Creating IAM service account for IRSA"
-    eksctl create iamserviceaccount \\
-        --name {sa_name} \\
-        --namespace $NAMESPACE \\
-        --cluster $CLUSTER_NAME \\
-        --attach-policy-arn arn:{partition}:iam::aws:policy/AmazonSSMReadOnlyAccess \\
-        --attach-policy-arn arn:{partition}:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess \\
-        --override-existing-serviceaccounts \\
-        --approve \\
-        --region $REGION >&3 2>&1"""
+    match = re.match(
+        r"(\d+)\.dkr\.ecr\.([^.]+)\.amazonaws\.com/([^:]+)(?::(.+))?", image_uri
+    )
+    if not match:
+        print(f"Error: Invalid ECR image URI format: {image_uri}")
+        sys.exit(1)
 
-    return f"""	log "Creating EKS Pod Identity addon"
-    eksctl create addon --name eks-pod-identity-agent --cluster $CLUSTER_NAME --region $REGION >&3 2>&1
+    _, ecr_region, repo, tag = match.groups()
+    ecr = boto3.client("ecr", region_name=ecr_region)
 
-    log "Creating Pod Identity association"
-    eksctl create podidentityassociation \\
-        --cluster $CLUSTER_NAME \\
-        --namespace $NAMESPACE \\
-        --region $REGION \\
-        --service-account-name {sa_name} \\
-        --role-arn $POD_IDENTITY_ROLE_ARN \\
-        --create-service-account true >&3 2>&1"""
-
-
-def replace_template_vars(
-    template_file: str, output_file: str, config: dict[str, Any]
-) -> None:
-    with open(template_file, encoding="utf-8") as f:
-        content = f.read()
-
-    kubeconfig_var = config["KUBECONFIG_VAR"]
-    replacements = {
-        **{f"{{{{{k}}}}}": v for k, v in config.items()},
-        "{{REGION}}": REGION,
-        "{{FAILOVERREGION}}": FAILOVERREGION,
-        "{{AUTH_SETUP}}": get_auth_setup(config["ARCH"], config["AUTH_TYPE"]),
-        "{{INSTALL_METHOD}}": get_install_method(config),
-        "{{POD_IDENTITY_PARAM}}": '\n    usePodIdentity: "true"'
-        if config["AUTH_TYPE"] == "pod-identity"
-        else "",
-        "{{PRIVREPO_CHECK}}": ""
-        if ARGS.addon
-        else """if [[ -z "${PRIVREPO}" ]]; then
-	echo "Error: PRIVREPO is not specified" >&2
-	return 1
-fi""",
-        "{{INSTALL_PROVIDER_TEST}}": ""
-        if ARGS.addon
-        else f"""@test "Install aws provider" {{
-	log "Installing AWS provider"
-
-	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${kubeconfig_var} apply -f -
-	cmd="kubectl --kubeconfig=${kubeconfig_var} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
-
-	PROVIDER_POD=$(kubectl --kubeconfig=${kubeconfig_var} --namespace $NAMESPACE get pod -l app=csi-secrets-store-provider-aws -o jsonpath="{{.items[0].metadata.name}}")
-	run kubectl --kubeconfig=${kubeconfig_var} --namespace $NAMESPACE get pod/$PROVIDER_POD
-	assert_success
-
-	log "AWS provider installation completed"
-}}""",
-    }
-
-    for old, new in replacements.items():
-        content = content.replace(old, new)
-
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write(content)
+    try:
+        kwargs = {"repositoryName": repo, "maxResults": 1}
+        if tag:
+            kwargs["imageIds"] = [{"imageTag": tag}]
+        response = ecr.describe_images(**kwargs)
+        if not response["imageDetails"]:
+            print(f"Error: No images found in repository: {image_uri}")
+            sys.exit(1)
+        image = response["imageDetails"][0]
+        tags = image.get("imageTags", ["<untagged>"])
+        display = f"{image_uri}:{tags[0]}" if not tag else image_uri
+        print(f"✓ Image validated: {display} (digest: {image['imageDigest']})")
+    except botocore.exceptions.ClientError as e:
+        print(f"Error validating image: {e}")
+        sys.exit(1)
 
 
-def get_install_method(config: dict[str, Any]) -> str:
-    if ARGS.addon:
-        version_flag = f" --addon-version {ARGS.version}" if ARGS.version else ""
-        return f"""	log "Installing AWS Secrets Store CSI Driver Provider via EKS addon"
-	aws eks create-addon --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider --configuration-values "file://addon_config_values.yaml"{version_flag} --region $REGION >&3 2>&1"""
-
-    kubeconfig_var = config["KUBECONFIG_VAR"]
-    return f"""	log "Adding secrets-store-csi-driver Helm repository"
-	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
-
-	log "Installing secrets-store-csi-driver via Helm"
-	helm --kubeconfig=${kubeconfig_var} --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true
-	if [[ $? -ne 0 ]]; then
-		echo "Error: Helm install failed" >&2
-		return 1
-	fi"""
+# --- Main ---
 
 
 def main() -> None:
-    global ARGS
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "action",
-        nargs="?",
-        default="default",
-        choices=[
-            "create-secrets",
-            "cleanup-secrets",
-            "cleanup-files",
-            "generate-files",
-            "validate-image",
-            "default",
-        ],
-    )
-    parser.add_argument("--addon", action="store_true")
-    parser.add_argument("--version")
-    ARGS = parser.parse_args()
-
-    if ARGS.action == "validate-image":
-        image_uri = os.environ.get("PRIVREPO")
-        if not image_uri:
-            print("Error: PRIVREPO environment variable not set")
-            sys.exit(1)
-
-        # Parse ECR URI: account.dkr.ecr.region.amazonaws.com/repo or account.dkr.ecr.region.amazonaws.com/repo:tag
-        match = re.match(
-            r"(\d+)\.dkr\.ecr\.([^.]+)\.amazonaws\.com/([^:]+)(?::(.+))?", image_uri
-        )
-        if not match:
-            print(f"Error: Invalid ECR image URI format: {image_uri}")
-            sys.exit(1)
-
-        _, region, repo, tag = match.groups()
-
-        ecr = boto3.client("ecr", region_name=region)
-        try:
-            # If no tag specified, get the latest image
-            if tag:
-                response = ecr.describe_images(
-                    repositoryName=repo, imageIds=[{"imageTag": tag}]
-                )
-            else:
-                response = ecr.describe_images(repositoryName=repo, maxResults=1)
-
-            if response["imageDetails"]:
-                image = response["imageDetails"][0]
-                pushed_at = image["imagePushedAt"]
-                digest = image["imageDigest"]
-                image_tags = image.get("imageTags", ["<untagged>"])
-                display_uri = f"{image_uri}:{image_tags[0]}" if not tag else image_uri
-                print(f"✓ Image validated: {display_uri}")
-                print(f"  Digest: {digest}")
-                print(f"  Pushed at: {pushed_at}")
-            else:
-                print(f"Error: No images found in repository: {image_uri}")
-                sys.exit(1)
-        except ecr.exceptions.RepositoryNotFoundException:
-            print(f"Error: Repository not found: {repo}")
-            sys.exit(1)
-        except botocore.exceptions.ClientError as e:
-            print(f"Error validating image: {e}")
-            sys.exit(1)
-        return
-
-    if ARGS.action == "cleanup-files":
-        files = [
-            "x64-irsa.bats",
-            "x64-pod-identity.bats",
-            "arm-irsa.bats",
-            "arm-pod-identity.bats",
-            "BasicTestMountSPC-x64-irsa.yaml",
-            "BasicTestMountSPC-x64-pod-identity.yaml",
-            "BasicTestMountSPC-arm-irsa.yaml",
-            "BasicTestMountSPC-arm-pod-identity.yaml",
-            "BasicTestMount-x64-irsa.yaml",
-            "BasicTestMount-x64-pod-identity.yaml",
-            "BasicTestMount-arm-irsa.yaml",
-            "BasicTestMount-arm-pod-identity.yaml",
-        ]
-        for f in files:
-            if os.path.exists(f):
-                os.remove(f)
-                print(f"Removed {f}")
-        print("Generated files cleaned up")
-        return
-
-    if ARGS.action in ["create-secrets", "cleanup-secrets"]:
-        op = "create" if ARGS.action == "create-secrets" else "cleanup"
+    if len(sys.argv) < 2:
         print(
-            f"{'Creating' if op == 'create' else 'Cleaning up'} secrets for all test configurations..."
+            "Usage: test-manager.py <create-secrets|cleanup-secrets|validate-image|print-regions>"
         )
-        for config in CONFIGS.values():
-            manage_resources(config["ARCH"], config["AUTH_TYPE"], op)
-        print(
-            f"All secrets {'created' if op == 'create' else 'cleaned up'} successfully"
-        )
-        return
+        sys.exit(1)
 
-    if ARGS.action != "generate-files":
-        for config in CONFIGS.values():
-            manage_resources(config["ARCH"], config["AUTH_TYPE"], "create")
+    action = sys.argv[1]
 
-    for name, config in CONFIGS.items():
-        arch, auth = config["ARCH"], config["AUTH_TYPE"]
-        replace_template_vars("integration.bats.template", f"{name}.bats", config)
-        replace_template_vars(
-            "BasicTestMountSPC.yaml.template",
-            f"BasicTestMountSPC-{arch}-{auth}.yaml",
-            config,
-        )
-        replace_template_vars(
-            "BasicTestMount.yaml.template", f"BasicTestMount-{arch}-{auth}.yaml", config
-        )
-
-    print(
-        f"\nAll test files generated successfully\n"
-        f"{CYAN}Usage:\n"
-        f"  ./test-manager.py                 # Generate files and create secrets\n"
-        f"  ./test-manager.py --addon         # Generate files with EKS addon installation\n"
-        f"  ./test-manager.py --addon --version v2.1.1-eksbuild.1  # Generate with specific addon version\n"
-        f"  ./test-manager.py generate-files  # Generate files only\n"
-        f"  ./test-manager.py create-secrets  # Create secrets only\n"
-        f"  ./test-manager.py cleanup-secrets # Cleanup secrets only\n"
-        f"  ./test-manager.py cleanup-files   # Cleanup generated files only\n"
-        f"  ./test-manager.py validate-image  # Validate ECR image from PRIVREPO env var{RESET}"
-    )
+    if action == "print-regions":
+        region, failover = get_regions()
+        # Output shell-eval-able exports
+        print(f'export REGION="{region}" FAILOVERREGION="{failover}"')
+    elif action == "create-secrets":
+        manage_secrets("create")
+    elif action == "cleanup-secrets":
+        manage_secrets("cleanup")
+    elif action == "validate-image":
+        validate_image()
+    else:
+        print(f"Error: Unknown action '{action}'")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

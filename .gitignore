@@ -22,3 +22,8 @@ _output
 .idea/
 
 ./secrets-store-csi-driver-provider-aws
+
+# Integration test logs
+tests/logs/
+
+.kiro/
