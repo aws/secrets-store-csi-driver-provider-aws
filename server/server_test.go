@@ -23,7 +23,6 @@ import (
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 )
 
@@ -2854,7 +2853,7 @@ func TestDriverVersion(t *testing.T) {
 	if ver == nil {
 		t.Fatalf("TestDriverVersion: got empty response")
 	}
-	if ver.RuntimeName != auth.ProviderName {
+	if ver.RuntimeName != ProviderName {
 		t.Fatalf("TestDriverVersion: wrong RuntimeName: %s", ver.RuntimeName)
 	}
 }

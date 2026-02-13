@@ -20,7 +20,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
-	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
+	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 )
@@ -29,6 +29,8 @@ import (
 var Version string
 
 const (
+	ProviderName = "secrets-store-csi-driver-provider-aws"
+
 	namespaceAttrib            = "csi.storage.k8s.io/pod.namespace"
 	acctAttrib                 = "csi.storage.k8s.io/serviceAccount.name"
 	podnameAttrib              = "csi.storage.k8s.io/pod.name"
@@ -42,6 +44,9 @@ const (
 	preferredAddressTypeAttrib = "preferredAddressType"
 	roleArnAnnotation          = "eks.amazonaws.com/role-arn"
 )
+
+// ProviderVersion is injected at build time from the Makefile.
+var ProviderVersion = "unknown"
 
 // CSIDriverProviderServer implements the Secrets Store CSI Driver provider for AWS.
 type CSIDriverProviderServer struct {
@@ -68,6 +73,15 @@ func NewServer(
 		podIdentityHttpTimeout: podIdentityHttpTimeout,
 		eksAddonVersion:        eksAddonVersion,
 	}, nil
+}
+
+// appID returns the User-Agent app identifier string.
+func (s *CSIDriverProviderServer) appID() string {
+	version := ProviderVersion
+	if s.eksAddonVersion != "" {
+		version = s.eksAddonVersion
+	}
+	return ProviderName + "-" + version
 }
 
 // Mount handles each incoming mount request. It fetches secrets from AWS
@@ -104,10 +118,6 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	parsedTokens, err := utils.ParseServiceAccountTokens(serviceAccountTokens)
 	if err != nil {
 		return nil, fmt.Errorf("CSI token error: %w - ensure tokenRequests is configured in CSIDriver spec", err)
-	}
-
-	if preferredAddressType != "ipv4" && preferredAddressType != "ipv6" && preferredAddressType != "auto" && preferredAddressType != "" {
-		return nil, fmt.Errorf("invalid preferred address type: %s", preferredAddressType)
 	}
 
 	curVersions := req.GetCurrentObjectVersion()
@@ -158,7 +168,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, s.eksAddonVersion, regions, usePodIdentity, preferredAddressType, s.podIdentityHttpTimeout, roleArn, token)
+	awsConfigs, err := s.getAwsConfigs(ctx, regions, usePodIdentity, preferredAddressType, roleArn, token)
 	if err != nil {
 		return nil, err
 	}
@@ -242,29 +252,38 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 }
 
 // getAwsConfigs builds an AWS config for each lookup region using the pod's credentials.
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, eksAddonVersion string, lookupRegionList []string, usePodIdentity bool, preferredAddressType string, podIdentityHttpTimeout *time.Duration, roleArn, token string) (response []aws.Config, err error) {
-	var awsConfigsList []aws.Config
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token string) ([]aws.Config, error) {
+	var configs []aws.Config
+	appID := s.appID()
 
-	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, preferredAddressType, eksAddonVersion, roleArn, usePodIdentity, podIdentityHttpTimeout, token)
+	for _, region := range regions {
+		var credProvider credential_provider.ConfigProvider
+		var err error
+
+		if usePodIdentity {
+			credProvider, err = credential_provider.NewPodIdentityCredentialProvider(region, preferredAddressType, s.podIdentityHttpTimeout, appID, token)
+		} else {
+			credProvider, err = credential_provider.NewIRSACredentialProvider(region, roleArn, appID, token)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsConfig, err := awsAuth.GetAWSConfig(ctx)
+
+		cfg, err := credProvider.GetAWSConfig(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsConfigsList = append(awsConfigsList, awsConfig)
+		configs = append(configs, cfg)
 	}
 
-	return awsConfigsList, nil
+	return configs, nil
 }
 
 // Version returns the provider plugin version information.
 func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.VersionRequest) (*v1alpha1.VersionResponse, error) {
 	return &v1alpha1.VersionResponse{
 		Version:        "v1alpha1",
-		RuntimeName:    auth.ProviderName,
+		RuntimeName:    ProviderName,
 		RuntimeVersion: Version,
 	}, nil
 }

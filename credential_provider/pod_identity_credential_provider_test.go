@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -36,64 +35,14 @@ func TestParseAddressPreference(t *testing.T) {
 }
 
 func TestNewPodIdentityCredentialProvider(t *testing.T) {
-	tests := []struct {
-		name        string
-		region      string
-		token       string
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name:    "success",
-			region:  testRegion,
-			token:   "pod-identity-test-token",
-			wantErr: false,
-		},
-		{
-			name:        "empty region",
-			region:      "",
-			token:       "pod-identity-test-token",
-			wantErr:     true,
-			errContains: "region cannot be empty",
-		},
-		{
-			name:        "empty token",
-			region:      testRegion,
-			token:       "",
-			wantErr:     true,
-			errContains: "Pod Identity token cannot be empty",
-		},
+	provider, err := NewPodIdentityCredentialProvider(
+		testRegion, "", nil, "test-app-id", "pod-identity-test-token",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			provider, err := NewPodIdentityCredentialProvider(
-				tt.region,
-				"",
-				nil,
-				"test-app-id",
-				tt.token,
-			)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error but got none")
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("expected error containing %q, got %q", tt.errContains, err.Error())
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-				return
-			}
-			if provider == nil {
-				t.Error("expected provider to be non-nil")
-			}
-		})
+	if provider == nil {
+		t.Fatal("expected provider to be non-nil")
 	}
 }
 
@@ -112,11 +61,7 @@ func TestNewPodIdentityCredentialProviderTimeout(t *testing.T) {
 	oneHundredMs := 100 * time.Millisecond
 
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion,
-		"",
-		&oneHundredMs,
-		"test-app-id",
-		"pod-identity-test-token",
+		testRegion, "", &oneHundredMs, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -171,11 +116,7 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_IPv4(t *testing.T) {
 	podIdentityAgentEndpointIPv4 = mockServer.URL
 
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion,
-		"ipv4",
-		nil,
-		"test-app-id",
-		"pod-identity-test-token",
+		testRegion, "ipv4", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("failed to create provider: %v", err)
@@ -206,11 +147,7 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_IPv6(t *testing.T) {
 	podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1" // Force IPv4 to fail
 
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion,
-		"ipv6",
-		nil,
-		"test-app-id",
-		"pod-identity-test-token",
+		testRegion, "ipv6", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("failed to create provider: %v", err)

@@ -6,13 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/klog/v2"
-
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/endpointcreds"
 
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -43,20 +42,13 @@ type PodIdentityCredentialProvider struct {
 	httpClient           *awshttp.BuildableClient
 }
 
+// NewPodIdentityCredentialProvider creates a credential provider for EKS Pod Identity.
+// Callers must ensure region and token are non-empty.
 func NewPodIdentityCredentialProvider(
 	region, preferredAddressType string,
 	podIdentityHttpTimeout *time.Duration,
 	appID, token string,
 ) (ConfigProvider, error) {
-	if region == "" {
-		return nil, fmt.Errorf("region cannot be empty")
-	}
-	if token == "" {
-		return nil, fmt.Errorf("Pod Identity token cannot be empty")
-	}
-
-	klog.Infof("Pod Identity token obtained for region %s", region)
-
 	provider := &PodIdentityCredentialProvider{
 		region:               region,
 		preferredAddressType: preferredAddressType,
