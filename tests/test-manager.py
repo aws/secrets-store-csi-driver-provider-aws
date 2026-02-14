@@ -95,15 +95,20 @@ def aws_op(
 
 
 def ensure_secret(region: str, name: str, value: str) -> None:
-    """Create a secret or reset its value if it already exists."""
+    """Create a secret or reset its value if it already exists or is pending deletion."""
     client = get_clients("secretsmanager")[region]
     try:
         client.create_secret(Name=name, SecretString=value)
         print(f"  + secret {name} ({region})")
     except botocore.exceptions.ClientError as e:
-        if e.response["Error"]["Code"] == "ResourceExistsException":
+        code = e.response["Error"]["Code"]
+        if code == "ResourceExistsException":
             client.put_secret_value(SecretId=name, SecretString=value)
             print(f"  ↻ secret {name} ({region}) [reset]")
+        elif code == "InvalidRequestException" and "scheduled for deletion" in str(e):
+            client.restore_secret(SecretId=name)
+            client.put_secret_value(SecretId=name, SecretString=value)
+            print(f"  ↻ secret {name} ({region}) [restored]")
         else:
             raise
 
@@ -111,10 +116,12 @@ def ensure_secret(region: str, name: str, value: str) -> None:
 # --- Secret/parameter management ---
 
 
-def manage_secrets(action: str) -> None:
+def manage_secrets(action: str, suffixes: list[str] | None = None) -> None:
+    if suffixes is None:
+        suffixes = SUFFIXES
     region, failover = get_regions()
     verb = "Creating" if action == "create" else "Cleaning up"
-    resource_count = len(SUFFIXES) * 2 * (len(SECRETS) + len(PARAMETERS))
+    resource_count = len(suffixes) * 2 * (len(SECRETS) + len(PARAMETERS))
     print(f"{verb} {resource_count} test resources across {region}, {failover}...")
 
     for suffix in SUFFIXES:
@@ -207,12 +214,10 @@ def main() -> None:
 
     if action == "print-regions":
         region, failover = get_regions()
-        # Output shell-eval-able exports
         print(f'export REGION="{region}" FAILOVERREGION="{failover}"')
-    elif action == "create-secrets":
-        manage_secrets("create")
-    elif action == "cleanup-secrets":
-        manage_secrets("cleanup")
+    elif action in ("create-secrets", "cleanup-secrets"):
+        suffixes = sys.argv[2:] or None  # e.g. test-manager.py create-secrets x64-irsa x64-pod-identity
+        manage_secrets("create" if "create" in action else "cleanup", suffixes)
     elif action == "validate-image":
         validate_image()
     else:

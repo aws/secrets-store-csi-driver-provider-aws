@@ -253,9 +253,11 @@ cleanup_cluster() {
 }
 
 cleanup_secrets() {
+	local targets="${1:-}"
 	echo "Cleaning up secrets and parameters..."
 	detect_regions
-	python3 test-manager.py cleanup-secrets
+	# shellcheck disable=SC2086
+	python3 test-manager.py cleanup-secrets $targets
 }
 
 # --- Argument parsing ---
@@ -302,8 +304,10 @@ fi
 
 if [[ "$TEST_TARGET" == "clean" ]]; then
 	detect_regions
-	cleanup_secrets
-	cleanup_stale_resources "${REGION}" $(resolve_targets "${CLEAN_TARGETS:-all}")
+	local_targets=$(resolve_targets "${CLEAN_TARGETS:-all}")
+	cleanup_secrets "$local_targets"
+	# shellcheck disable=SC2086
+	cleanup_stale_resources "${REGION}" $local_targets
 	exit 0
 fi
 
@@ -317,7 +321,9 @@ preflight "$REGION" $targets
 validate_image
 
 # Create secrets
-python3 test-manager.py create-secrets
+# Create secrets for the targets we're about to test
+# shellcheck disable=SC2086
+python3 test-manager.py create-secrets $targets
 
 # Set up log directory
 LOG_DIR="logs/$(date +'%Y-%m-%d_%H-%M-%S')"
