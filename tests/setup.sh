@@ -14,33 +14,54 @@ get_partition() {
 }
 
 setup_deps() {
-    echo "Installing dependencies..."
+    echo "Checking required tools..."
 
-    if [[ "$(uname)" == "Darwin" ]]; then
-        install_cmd="brew install"
-        bats_pkg="bats-core"
-    elif command -v apt-get &>/dev/null; then
-        install_cmd="sudo apt-get install -y"
-        bats_pkg="bats"
-    elif command -v yum &>/dev/null; then
-        if ! yum repolist enabled 2>/dev/null | grep -q epel; then
-            echo "Enabling EPEL repository..."
-            sudo yum install -y epel-release
+    local missing=()
+    for tool in aws eksctl kubectl bats envsubst python3; do
+        if command -v "$tool" &>/dev/null; then
+            echo "  ✓ $tool"
+        else
+            missing+=("$tool")
+            echo "  ✗ $tool"
         fi
-        install_cmd="sudo yum install -y"
-        bats_pkg="bats"
-    else
-        echo "Error: Unsupported package manager. Install bats manually."
+    done
+
+    # bats can be auto-installed
+    if [[ " ${missing[*]} " == *" bats "* ]]; then
+        echo ""
+        echo "Installing bats..."
+        if [[ "$(uname)" == "Darwin" ]]; then
+            brew install bats-core
+        elif command -v apt-get &>/dev/null; then
+            sudo apt-get install -y bats
+        elif command -v yum &>/dev/null; then
+            yum repolist enabled 2>/dev/null | grep -q epel || sudo yum install -y epel-release
+            sudo yum install -y bats
+        else
+            echo "Error: Install bats manually: https://github.com/bats-core/bats-core"
+            exit 1
+        fi
+        echo "  ✓ bats (installed)"
+        missing=("${missing[@]/bats}")
+    fi
+
+    # Remove empty entries
+    local still_missing=()
+    for tool in "${missing[@]}"; do
+        [[ -n "$tool" ]] && still_missing+=("$tool")
+    done
+
+    if [[ ${#still_missing[@]} -gt 0 ]]; then
+        echo ""
+        echo "Missing tools that must be installed manually: ${still_missing[*]}"
+        echo "  aws:      https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+        echo "  eksctl:   https://eksctl.io/installation/"
+        echo "  kubectl:  https://kubernetes.io/docs/tasks/tools/"
+        echo "  envsubst: Part of GNU gettext (brew install gettext / apt install gettext)"
         exit 1
     fi
 
-    if ! command -v bats &>/dev/null; then
-        echo "Installing bats..."
-        $install_cmd "$bats_pkg"
-        echo "✓ Installed bats"
-    else
-        echo "✓ bats already installed"
-    fi
+    echo "✓ All required tools available"
 }
 
 setup_venv() {

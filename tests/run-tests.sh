@@ -68,12 +68,11 @@ target_needs_pod_identity() {
 
 check_tools() {
 	local missing=()
-	for tool in aws eksctl kubectl bats; do
+	for tool in aws eksctl kubectl bats envsubst; do
 		command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 	done
 	if [[ "$USE_ADDON" != "true" ]]; then
 		command -v helm >/dev/null 2>&1 || missing+=("helm")
-		command -v envsubst >/dev/null 2>&1 || missing+=("envsubst")
 	fi
 	if [[ ${#missing[@]} -gt 0 ]]; then
 		echo "Error: Missing required tools: ${missing[*]}"
