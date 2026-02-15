@@ -106,9 +106,9 @@ def ensure_secret(region: str, name: str, value: str) -> None:
             client.put_secret_value(SecretId=name, SecretString=value)
             print(f"  ↻ secret {name} ({region}) [reset]")
         elif code == "InvalidRequestException" and "scheduled for deletion" in str(e):
-            client.restore_secret(SecretId=name)
-            client.put_secret_value(SecretId=name, SecretString=value)
-            print(f"  ↻ secret {name} ({region}) [restored]")
+            client.delete_secret(SecretId=name, ForceDeleteWithoutRecovery=True)
+            client.create_secret(Name=name, SecretString=value)
+            print(f"  ↻ secret {name} ({region}) [recreated]")
         else:
             raise
 
@@ -124,7 +124,7 @@ def manage_secrets(action: str, suffixes: list[str] | None = None) -> None:
     resource_count = len(suffixes) * 2 * (len(SECRETS) + len(PARAMETERS))
     print(f"{verb} {resource_count} test resources across {region}, {failover}...")
 
-    for suffix in SUFFIXES:
+    for suffix in suffixes:
         for r in [region, failover]:
             for base_name, value in SECRETS:
                 name = f"{base_name}-{suffix}"
