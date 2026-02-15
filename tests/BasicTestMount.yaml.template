@@ -5,7 +5,7 @@ metadata:
 spec:
   serviceAccountName: basic-test-mount-sa-${ARCH}-${AUTH_TYPE}
   containers:
-    - image: k8s.gcr.io/e2e-test-images/busybox:1.29
+    - image: public.ecr.aws/docker/library/busybox:1.36
       name: busybox
       imagePullPolicy: IfNotPresent
       command:
