@@ -1,3 +1,33 @@
+# Comprehensive addon config exercising every schema property.
+# This catches schema typos that would cause 500s on create-addon.
+podLabels:
+  integ-test: "true"
+podAnnotations:
+  integ-test-annotation: "true"
+tolerations:
+  - operator: Exists
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    cpu: 50m
+    memory: 100Mi
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: eks.amazonaws.com/compute-type
+              operator: NotIn
+              values:
+                - fargate
+nodeSelector: {}
+dnsConfig: {}
+port: 8989
+driverWritesSecrets: false
+useFipsEndpoint: false
+priorityClassName: ""
 secrets-store-csi-driver:
   enableSecretRotation: true
   rotationPollInterval: 15s

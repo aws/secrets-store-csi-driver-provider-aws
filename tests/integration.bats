@@ -80,6 +80,8 @@ install_driver() {
 		log "Installing via EKS addon"
 		aws eks create-addon --cluster-name "$CLUSTER_NAME" --addon-name aws-secrets-store-csi-driver-provider \
 			--configuration-values "file://addon_config_values.yaml" $version_flag --region "$REGION" >&3 2>&1
+		aws eks wait addon-active --cluster-name "$CLUSTER_NAME" --addon-name aws-secrets-store-csi-driver-provider \
+			--region "$REGION" >&3 2>&1
 	else
 		log "Installing secrets-store-csi-driver via Helm"
 		helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -158,6 +160,38 @@ validate_jmes_mount() {
 }
 
 # --- Tests ---
+
+@test "addon config schema options applied" {
+	[[ "$USE_ADDON" != "true" ]] && skip "Only applies to addon installs"
+	log "Verifying addon config schema options"
+
+	local addon_ns="aws-secrets-manager"
+	local ds="daemonset/aws-secrets-store-csi-driver-provider"
+	dskctl() { kubectl --kubeconfig="$KUBECONFIG_FILE" --namespace "$addon_ns" "$@"; }
+
+	# podLabels
+	result=$(dskctl get "$ds" -o jsonpath='{.spec.template.metadata.labels.integ-test}')
+	[[ "$result" == "true" ]]
+
+	# podAnnotations
+	result=$(dskctl get "$ds" -o jsonpath='{.spec.template.metadata.annotations.integ-test-annotation}')
+	[[ "$result" == "true" ]]
+
+	# resources
+	result=$(dskctl get "$ds" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}')
+	[[ "$result" == "50m" ]]
+
+	result=$(dskctl get "$ds" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.memory}')
+	[[ "$result" == "100Mi" ]]
+
+	# tolerations
+	result=$(dskctl get "$ds" -o jsonpath='{.spec.template.spec.tolerations[?(@.operator=="Exists")].operator}')
+	[[ "$result" == "Exists" ]]
+
+	# port (appears as a container arg)
+	run dskctl get "$ds" -o jsonpath='{.spec.template.spec.containers[0].args}'
+	assert_success
+}
 
 @test "Install aws provider" {
 	[[ "$USE_ADDON" == "true" ]] && skip "Provider installed via addon"
