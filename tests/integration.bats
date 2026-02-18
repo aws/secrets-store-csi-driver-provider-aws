@@ -207,7 +207,14 @@ validate_jmes_mount() {
 	log "Installing AWS provider"
 
 	local image="${PRIVREPO}${PRIVTAG:+:${PRIVTAG}}"
-	sed "s|\${PRIVREPO}\${PRIVTAG:+:}\${PRIVTAG}|${image}|" "$PROVIDER_YAML" | kctl apply -f -
+	local yaml
+	yaml=$(sed "s|\${PRIVREPO}\${PRIVTAG:+:}\${PRIVTAG}|${image}|" "$PROVIDER_YAML")
+	if [[ -n "${GHCR_TOKEN:-}" ]]; then
+		yaml=$(echo "$yaml" | sed '/hostNetwork: false/a\
+      imagePullSecrets:\
+        - name: ghcr-credentials')
+	fi
+	echo "$yaml" | kctl apply -f -
 	kctl wait --for=condition=Ready --timeout="$WAIT_LONG" pod -l app=csi-secrets-store-provider-aws
 
 	run kctl get pod -l app=csi-secrets-store-provider-aws

@@ -56,8 +56,6 @@ spec:
     spec:
       serviceAccountName: csi-secrets-store-provider-aws
       hostNetwork: false
-      imagePullSecrets:
-        - name: ghcr-credentials
       containers:
         - name: provider-aws-installer
           image: ${PRIVREPO}${PRIVTAG:+:}${PRIVTAG}
