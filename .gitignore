@@ -22,3 +22,5 @@ _output
 .idea/
 
 ./secrets-store-csi-driver-provider-aws
+
+.kiro/
