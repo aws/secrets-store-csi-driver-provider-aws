@@ -104,6 +104,15 @@ setup_file() {
 	install_driver
 	setup_auth
 
+	# Create ghcr.io pull secret for private test images
+	if [[ -n "${GHCR_TOKEN:-}" ]]; then
+		log "Creating ghcr.io image pull secret"
+		kctl create secret docker-registry ghcr-credentials \
+			--docker-server=ghcr.io \
+			--docker-username=github \
+			--docker-password="$GHCR_TOKEN"
+	fi
+
 	log "Cluster setup completed"
 }
 
