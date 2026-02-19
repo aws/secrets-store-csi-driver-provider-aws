@@ -134,7 +134,12 @@ jobs:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
           PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build
           PRIVTAG: latest-${{ matrix.arch }}-${{ github.run_id }}
+          REGION: us-west-2
+          FAILOVERREGION: us-east-2
 
       - name: Run cleanup
         if: always()
         run: cd tests && ./run-tests.sh clean ${{ matrix.arch-short }}-${{ matrix.auth_type }}
+        env:
+          REGION: us-west-2
+          FAILOVERREGION: us-east-2
