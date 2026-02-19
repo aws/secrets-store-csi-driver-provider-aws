@@ -1,11 +1,11 @@
 kind: Pod
 apiVersion: v1
 metadata:
-  name: basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}
+  name: basic-test-mount-${ARCH}-${AUTH_TYPE}
 spec:
-  serviceAccountName: basic-test-mount-sa-{{ARCH}}-{{AUTH_TYPE}}
+  serviceAccountName: basic-test-mount-sa-${ARCH}-${AUTH_TYPE}
   containers:
-    - image: k8s.gcr.io/e2e-test-images/busybox:1.29
+    - image: public.ecr.aws/docker/library/busybox:1.36
       name: busybox
       imagePullPolicy: IfNotPresent
       command:
@@ -21,4 +21,4 @@ spec:
         driver: secrets-store.csi.k8s.io
         readOnly: true
         volumeAttributes:
-          secretProviderClass: "basic-test-mount-spc-{{ARCH}}-{{AUTH_TYPE}}"
+          secretProviderClass: "basic-test-mount-spc-${ARCH}-${AUTH_TYPE}"

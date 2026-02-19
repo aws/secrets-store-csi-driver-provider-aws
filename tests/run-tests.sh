@@ -1,112 +1,342 @@
 #!/bin/bash
+set -euo pipefail
 
-cleanup() {
-	cleanup_generated_files
-	cleanup_secrets
+# --- Configuration ---
+
+PIDS=()
+LOG_DIR=""
+
+# Activate venv if boto3 isn't already available
+if ! python3 -c "import boto3" 2>/dev/null; then
+	if [[ -f .venv/bin/activate ]]; then
+		source .venv/bin/activate
+	else
+		echo "Error: boto3 not found. Run ./setup.sh or activate the venv manually."
+		exit 1
+	fi
+fi
+
+# --- Cleanup on exit/interrupt ---
+
+on_exit() {
+	local exit_code=$?
+	if [[ ${#PIDS[@]} -gt 0 ]]; then
+		echo "Stopping background processes..."
+		for pid in "${PIDS[@]}"; do
+			kill "$pid" 2>/dev/null && wait "$pid" 2>/dev/null || true
+		done
+	fi
+	if [[ -n "$LOG_DIR" ]] && [[ -d "$LOG_DIR" ]]; then
+		echo ""
+		echo "Test logs: $LOG_DIR"
+	fi
+	[[ -d .venv ]] && deactivate 2>/dev/null || true
+	exit $exit_code
+}
+trap on_exit EXIT INT TERM
+
+# --- Region detection ---
+
+detect_regions() {
+	if [[ -n "${REGION:-}" ]] && [[ -n "${FAILOVERREGION:-}" ]]; then
+		return
+	fi
+	eval "$(python3 test-manager.py print-regions)"
 }
 
-check_parallel() {
-	if ! command -v parallel >/dev/null 2>&1; then
-		echo "GNU parallel not found. Please install: \`brew install parallel\`"
+# --- Target resolution ---
+
+resolve_targets() {
+	case "$1" in
+		""|all)           echo "x64-irsa x64-pod-identity arm-irsa arm-pod-identity" ;;
+		x64)              echo "x64-irsa x64-pod-identity" ;;
+		arm)              echo "arm-irsa arm-pod-identity" ;;
+		irsa)             echo "x64-irsa arm-irsa" ;;
+		pod-identity)     echo "x64-pod-identity arm-pod-identity" ;;
+		x64-irsa|x64-pod-identity|arm-irsa|arm-pod-identity) echo "$1" ;;
+		*) echo "Error: Unknown target '$1'" >&2; exit 1 ;;
+	esac
+}
+
+target_needs_pod_identity() {
+	[[ "$(resolve_targets "$1")" == *"pod-identity"* ]]
+}
+
+# --- Preflight checks ---
+
+check_tools() {
+	local missing=()
+	for tool in aws eksctl kubectl bats helm envsubst; do
+		command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+	done
+	if [[ ${#missing[@]} -gt 0 ]]; then
+		echo "Error: Missing required tools: ${missing[*]}"
 		exit 1
 	fi
 }
 
-generate_test_files() {
-	echo "Generating test files from templates..."
-	if [[ ! -f "generate-test-files.py" ]]; then
-		echo "Error: generate-test-files.py not found!"
+check_aws_credentials() {
+	if ! aws sts get-caller-identity >/dev/null 2>&1; then
+		echo "Error: AWS credentials not configured or expired"
 		exit 1
 	fi
+}
 
-	python3 generate-test-files.py
-	if [[ $? -ne 0 ]]; then
-		echo "Error: Failed to generate test files from templates"
+# Clean up stale EKS clusters and orphaned CFN stacks for the given targets.
+# Waits for in-progress operations and handles termination protection.
+cleanup_stale_resources() {
+	local region="$1"
+	shift
+	for target in "$@"; do
+		local name="integ-cluster-${target}"
+
+		# EKS cluster
+		local status
+		status=$(aws eks describe-cluster --name "$name" --region "$region" \
+			--query 'cluster.status' --output text 2>/dev/null) || status=""
+		if [[ "$status" == "DELETING" ]]; then
+			echo "⏳ Cluster $name is deleting, waiting..."
+			aws eks wait cluster-deleted --name "$name" --region "$region" 2>/dev/null || true
+		elif [[ -n "$status" ]]; then
+			echo "⚠ Cluster $name exists (status: $status), deleting..."
+			eksctl delete cluster --name "$name" --parallel 25 || true
+			aws eks wait cluster-deleted --name "$name" --region "$region" 2>/dev/null || true
+		fi
+
+		# Orphaned CFN stacks (eksctl creates eksctl-<name>-cluster and eksctl-<name>-nodegroup-*)
+		local stack_prefix="eksctl-${name}"
+		local stacks
+		stacks=$(aws cloudformation list-stacks --region "$region" \
+			--query "StackSummaries[?starts_with(StackName,'${stack_prefix}') && StackStatus!='DELETE_COMPLETE'].[StackName,StackStatus]" \
+			--output text 2>/dev/null) || stacks=""
+
+		while IFS=$'\t' read -r stack_name stack_status; do
+			[[ -z "$stack_name" ]] && continue
+
+			if [[ "$stack_status" == *"IN_PROGRESS"* ]]; then
+				echo "⏳ Stack $stack_name ($stack_status), waiting..."
+				aws cloudformation wait stack-"${stack_status%%_*}"-complete \
+					--stack-name "$stack_name" --region "$region" 2>/dev/null || true
+				# Re-check — it may have completed or rolled back
+				stack_status=$(aws cloudformation describe-stacks --stack-name "$stack_name" --region "$region" \
+					--query 'Stacks[0].StackStatus' --output text 2>/dev/null) || continue
+			fi
+
+			if [[ "$stack_status" != "DELETE_COMPLETE" && "$stack_status" != *"IN_PROGRESS"* ]]; then
+				echo "⚠ Cleaning up stack $stack_name ($stack_status)..."
+				aws cloudformation update-termination-protection --no-enable-termination-protection \
+					--stack-name "$stack_name" --region "$region" 2>/dev/null || true
+				aws cloudformation delete-stack --stack-name "$stack_name" --region "$region" 2>/dev/null || true
+				aws cloudformation wait stack-delete-complete --stack-name "$stack_name" --region "$region" 2>/dev/null || true
+			fi
+		done <<< "$stacks"
+	done
+}
+
+check_vpc_capacity() {
+	local region="$1"
+	local needed="$2"
+
+	local vpc_limit
+	vpc_limit=$(aws service-quotas get-service-quota --service-code vpc --quota-code L-F678F1CE \
+		--query 'Quota.Value' --output text --region "$region" 2>/dev/null) || vpc_limit=5
+	# service-quotas returns a float like "5.0"
+	vpc_limit=${vpc_limit%.*}
+
+	local vpc_count
+	vpc_count=$(aws ec2 describe-vpcs --region "$region" --query 'length(Vpcs)' --output text)
+
+	local available=$((vpc_limit - vpc_count))
+	echo "VPC capacity: ${vpc_count}/${vpc_limit} used, ${available} available, ${needed} needed"
+
+	if [[ $available -lt $needed ]]; then
+		echo "Error: Not enough VPC capacity. Need $needed free VPCs but only $available available (limit: $vpc_limit)."
+		echo "  Run './run-tests.sh clean' to remove stale test clusters, or request a VPC limit increase."
 		exit 1
 	fi
-	echo "Test files generated successfully"
 }
 
-cleanup_generated_files() {
-	echo "Cleaning up generated test files..."
-	rm -f x64-irsa.bats x64-pod-identity.bats arm-irsa.bats arm-pod-identity.bats
-	rm -f BasicTestMountSPC-x64-irsa.yaml BasicTestMountSPC-x64-pod-identity.yaml BasicTestMountSPC-arm-irsa.yaml BasicTestMountSPC-arm-pod-identity.yaml
-	rm -f BasicTestMount-x64-irsa.yaml BasicTestMount-x64-pod-identity.yaml BasicTestMount-arm-irsa.yaml BasicTestMount-arm-pod-identity.yaml
-	echo "Generated test files cleaned up"
+preflight() {
+	local region="$1"
+	shift
+	local targets=("$@")
+	local target_count=${#targets[@]}
+
+	echo "=== Preflight checks ==="
+
+	echo "Checking tools..."
+	check_tools
+
+	echo "Checking AWS credentials..."
+	check_aws_credentials
+
+	echo "Cleaning up stale resources..."
+	cleanup_stale_resources "$region" "${targets[@]}"
+
+	echo "Checking VPC capacity..."
+	check_vpc_capacity "$region" "$target_count"
+
+	echo "=== Preflight passed ==="
+	echo ""
 }
 
-delete_cluster() {
-	eksctl delete cluster --name $1 --parallel 25
+# --- Test execution ---
+
+run_test() {
+	local arch=$1 auth_type=$2
+	local label="${arch}-${auth_type}"
+	local parallel="${3:-false}"
+	detect_regions
+
+	local log_file="${LOG_DIR}/${label}.log"
+	echo "Starting ${label} tests (log: ${log_file})..."
+
+	if [[ "$parallel" == "true" ]]; then
+		ARCH="$arch" AUTH_TYPE="$auth_type" \
+			REGION="$REGION" FAILOVERREGION="$FAILOVERREGION" \
+			POD_IDENTITY_ROLE_ARN="${POD_IDENTITY_ROLE_ARN:-}" \
+			PRIVREPO="${PRIVREPO:-}" PRIVTAG="${PRIVTAG:-}" \
+			bats integration.bats >"$log_file" 2>&1
+		local rc=$?
+		if [[ $rc -eq 0 ]]; then
+			echo "✓ ${label} passed"
+		else
+			echo "✗ ${label} FAILED (see ${log_file})"
+		fi
+		return $rc
+	else
+		ARCH="$arch" AUTH_TYPE="$auth_type" \
+			REGION="$REGION" FAILOVERREGION="$FAILOVERREGION" \
+			POD_IDENTITY_ROLE_ARN="${POD_IDENTITY_ROLE_ARN:-}" \
+			PRIVREPO="${PRIVREPO:-}" PRIVTAG="${PRIVTAG:-}" \
+			bats integration.bats 2>&1 | tee "$log_file"
+	fi
+}
+
+run_parallel() {
+	for target in "$@"; do
+		run_test "${target%%-*}" "${target#*-}" true &
+		PIDS+=($!)
+	done
+	local failed=0
+	for pid in "${PIDS[@]}"; do
+		wait "$pid" || failed=1
+	done
+	return $failed
+}
+
+validate_image() {
+	if [[ -z "${PRIVREPO:-}" ]]; then
+		return
+	fi
+	if [[ "$PRIVREPO" == *".dkr.ecr."*".amazonaws.com/"* ]]; then
+		echo "Validating ECR image: $PRIVREPO"
+		python3 test-manager.py validate-image
+	fi
+}
+
+cleanup_cluster() {
+	local name="integ-cluster-$1"
+	local region="${REGION:-$(aws configure get region 2>/dev/null || echo us-west-2)}"
+	if eksctl get cluster --name "$name" --region "$region" >/dev/null 2>&1; then
+		echo "Deleting cluster $name..."
+		eksctl delete cluster --name "$name" --parallel 25 || echo "⚠ Failed to delete $name (may need manual cleanup)"
+	fi
 }
 
 cleanup_secrets() {
+	local targets="${1:-}"
 	echo "Cleaning up secrets and parameters..."
-	python3 generate-test-files.py cleanup-secrets
+	detect_regions
+	# shellcheck disable=SC2086
+	python3 test-manager.py cleanup-secrets $targets
 }
 
-if [[ "$1" == "clean" ]]; then
-	cleanup
+# --- Argument parsing ---
 
-	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "pod-identity" || "$2" == "x64-pod-identity" ]]; then
-		delete_cluster integ-cluster-x64-pod-identity
+TEST_TARGET=""
+CLEAN_TARGETS=""
+
+if [[ $# -gt 0 ]] && [[ "$1" == "clean" ]]; then
+	TEST_TARGET="clean"
+	shift
+	[[ $# -gt 0 ]] && [[ "$1" != "--"* ]] && { CLEAN_TARGETS="$1"; shift; }
+elif [[ $# -gt 0 ]] && [[ "$1" != "--"* ]]; then
+	TEST_TARGET="$1"
+	shift
+fi
+
+if [[ $# -gt 0 ]]; then
+	echo "Error: Unknown argument '$1'"
+	exit 1
+fi
+
+# --- Validation (skip for clean) ---
+
+if [[ "$TEST_TARGET" != "clean" ]]; then
+	if target_needs_pod_identity "${TEST_TARGET:-}"; then
+		if [[ -z "${POD_IDENTITY_ROLE_ARN:-}" ]]; then
+			echo "Error: POD_IDENTITY_ROLE_ARN is required for pod-identity tests"
+			exit 1
+		fi
 	fi
-	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "irsa" || "$2" == "x64-irsa" ]]; then
-		delete_cluster integ-cluster-x64-irsa
+
+	if [[ -z "${PRIVREPO:-}" ]]; then
+		echo "Error: PRIVREPO environment variable is not set"
+		exit 1
 	fi
-	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "pod-identity" || "$2" == "arm-pod-identity" ]]; then
-		delete_cluster integ-cluster-arm-pod-identity
-	fi
-	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "irsa" || "$2" == "arm-irsa" ]]; then
-		delete_cluster integ-cluster-arm-irsa
-	fi
-
-	exit $?
 fi
 
-# Generate test files from templates (this also creates secrets)
-generate_test_files
+# --- Execute ---
 
-# Run tests based on argument
-if [[ "$1" == "all" || "$1" == "" ]]; then
-	check_parallel
-	echo "Running all tests: x64-irsa, x64-pod-identity, arm-irsa, arm-pod-identity"
-	bats --jobs 4 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats arm-irsa.bats arm-pod-identity.bats
-fi
-if [[ "$1" == "irsa" ]]; then
-	check_parallel
-	echo "Running IRSA tests: x64-irsa, arm-irsa"
-	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats arm-irsa.bats
-fi
-if [[ "$1" == "pod-identity" ]]; then
-	check_parallel
-	echo "Running Pod Identity tests: x64-pod-identity, arm-pod-identity"
-	bats --jobs 2 --no-parallelize-within-files x64-pod-identity.bats arm-pod-identity.bats
-fi
-if [[ "$1" == "x64" ]]; then
-	check_parallel
-	echo "Running x64 tests: x64-irsa, x64-pod-identity"
-	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats
-fi
-if [[ "$1" == "arm" ]]; then
-	check_parallel
-	echo "Running ARM tests: arm-irsa, arm-pod-identity"
-	bats --jobs 2 --no-parallelize-within-files arm-irsa.bats arm-pod-identity.bats
-fi
-if [[ "$1" == "x64-irsa" ]]; then
-	echo "Running x64 IRSA test: x64-irsa"
-	bats x64-irsa.bats
-fi
-if [[ "$1" == "x64-pod-identity" ]]; then
-	echo "Running x64 Pod Identity test: x64-pod-identity"
-	bats x64-pod-identity.bats
-fi
-if [[ "$1" == "arm-irsa" ]]; then
-	echo "Running ARM IRSA test: arm-irsa"
-	bats arm-irsa.bats
-fi
-if [[ "$1" == "arm-pod-identity" ]]; then
-	echo "Running ARM Pod Identity test: arm-pod-identity"
-	bats arm-pod-identity.bats
+if [[ "$TEST_TARGET" == "clean" ]]; then
+	detect_regions
+	local_targets=$(resolve_targets "${CLEAN_TARGETS:-all}")
+	cleanup_secrets "$local_targets"
+	# shellcheck disable=SC2086
+	cleanup_stale_resources "${REGION}" $local_targets
+	exit 0
 fi
 
-cleanup
+detect_regions
+targets=$(resolve_targets "${TEST_TARGET:-all}")
+
+# Preflight: check tools, credentials, clean stale resources, verify VPC capacity
+# shellcheck disable=SC2086
+preflight "$REGION" $targets
+
+validate_image
+
+# Create secrets
+# Create secrets for the targets we're about to test
+# shellcheck disable=SC2086
+python3 test-manager.py create-secrets $targets
+
+# Set up log directory
+LOG_DIR="logs/$(date +'%Y-%m-%d_%H-%M-%S')"
+mkdir -p "$LOG_DIR"
+echo "Test logs: $LOG_DIR"
+
+# Run tests
+target_count=$(echo "$targets" | wc -w)
+
+if [[ $target_count -eq 1 ]]; then
+	run_test "${targets%%-*}" "${targets#*-}"
+	rc=$?
+else
+	# shellcheck disable=SC2086
+	run_parallel $targets
+	rc=$?
+fi
+
+# Dump logs to stdout (for CI/GitHub Actions)
+echo ""
+echo "=== Test Results ==="
+for f in "$LOG_DIR"/*.log; do
+	[[ -f "$f" ]] || continue
+	echo ""
+	echo "--- $(basename "$f") ---"
+	cat "$f"
+done
+
+exit $rc
