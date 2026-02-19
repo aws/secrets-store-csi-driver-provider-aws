@@ -1,6 +1,6 @@
 ## Running integration tests
 
-1. Build and push a provider image (see [Private Builds](https://github.com/aws/secrets-store-csi-driver-provider-aws/tree/main#private-builds) in the main README).
+1. Build and push a provider image (see [Private Builds](https://github.com/aws/secrets-store-csi-driver-provider-aws/tree/main#private-builds) in the main README). Not required if using `--addon`.
 2. `cd` into the `tests/` directory.
 3. Run the setup script:
 
@@ -25,7 +25,7 @@ You can also run individual setup steps: `./setup.sh deps`, `./setup.sh venv`, o
    source .venv/bin/activate.fish     # fish
    ```
    `run-tests.sh` will auto-activate the bash venv as a fallback if boto3 isn't already importable.
-6. Ensure that the `PRIVREPO` environment variable is set.
+6. Ensure that the `PRIVREPO` environment variable is set (not required if using `--addon` flag).
 7. Run `./run-tests.sh`
 
 ### Test targets
@@ -41,6 +41,18 @@ You can also run individual setup steps: `./setup.sh deps`, `./setup.sh venv`, o
 | `./run-tests.sh x64-pod-identity` | Single test                         |
 | `./run-tests.sh arm-irsa`         | Single test                         |
 | `./run-tests.sh arm-pod-identity` | Single test                         |
+
+### Flags
+
+- `--addon` — Install via EKS add-on instead of Helm (skips `PRIVREPO` requirement)
+- `--version <ver>` — Specify EKS add-on version (requires `--addon`)
+
+Examples:
+
+```bash
+./run-tests.sh --addon
+./run-tests.sh x64-irsa --addon --version v2.1.1-eksbuild.1
+```
 
 ### Cleanup
 
@@ -66,7 +78,7 @@ If any test fails, diagnostics (pod status, describe, logs, events) are captured
 
 | Variable                | Required                     | Description                                                          |
 | ----------------------- | ---------------------------- | -------------------------------------------------------------------- |
-| `PRIVREPO`              | Yes                          | Container image URI for the provider                                 |
+| `PRIVREPO`              | Yes (unless `--addon`)       | Container image URI for the provider                                 |
 | `PRIVTAG`               | No                           | Image tag (appended to PRIVREPO with `:` separator)                  |
 | `POD_IDENTITY_ROLE_ARN` | Yes (for pod-identity tests) | IAM role ARN for Pod Identity                                        |
 | `REGION`                | No                           | Primary AWS region (auto-detected)                                   |

@@ -3,6 +3,8 @@ set -euo pipefail
 
 # --- Configuration ---
 
+USE_ADDON=false
+ADDON_VERSION=""
 PIDS=()
 LOG_DIR=""
 
@@ -66,9 +68,12 @@ target_needs_pod_identity() {
 
 check_tools() {
 	local missing=()
-	for tool in aws eksctl kubectl bats helm envsubst; do
+	for tool in aws eksctl kubectl bats envsubst; do
 		command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 	done
+	if [[ "$USE_ADDON" != "true" ]]; then
+		command -v helm >/dev/null 2>&1 || missing+=("helm")
+	fi
 	if [[ ${#missing[@]} -gt 0 ]]; then
 		echo "Error: Missing required tools: ${missing[*]}"
 		exit 1
@@ -194,6 +199,7 @@ run_test() {
 	if [[ "$parallel" == "true" ]]; then
 		ARCH="$arch" AUTH_TYPE="$auth_type" \
 			REGION="$REGION" FAILOVERREGION="$FAILOVERREGION" \
+			USE_ADDON="$USE_ADDON" ADDON_VERSION="$ADDON_VERSION" \
 			POD_IDENTITY_ROLE_ARN="${POD_IDENTITY_ROLE_ARN:-}" \
 			PRIVREPO="${PRIVREPO:-}" PRIVTAG="${PRIVTAG:-}" \
 			bats integration.bats >"$log_file" 2>&1
@@ -207,6 +213,7 @@ run_test() {
 	else
 		ARCH="$arch" AUTH_TYPE="$auth_type" \
 			REGION="$REGION" FAILOVERREGION="$FAILOVERREGION" \
+			USE_ADDON="$USE_ADDON" ADDON_VERSION="$ADDON_VERSION" \
 			POD_IDENTITY_ROLE_ARN="${POD_IDENTITY_ROLE_ARN:-}" \
 			PRIVREPO="${PRIVREPO:-}" PRIVTAG="${PRIVTAG:-}" \
 			bats integration.bats 2>&1 | tee "$log_file"
@@ -226,7 +233,7 @@ run_parallel() {
 }
 
 validate_image() {
-	if [[ -z "${PRIVREPO:-}" ]]; then
+	if [[ "$USE_ADDON" == "true" ]] || [[ -z "${PRIVREPO:-}" ]]; then
 		return
 	fi
 	if [[ "$PRIVREPO" == *".dkr.ecr."*".amazonaws.com/"* ]]; then
@@ -266,10 +273,15 @@ elif [[ $# -gt 0 ]] && [[ "$1" != "--"* ]]; then
 	shift
 fi
 
-if [[ $# -gt 0 ]]; then
-	echo "Error: Unknown argument '$1'"
-	exit 1
-fi
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--addon)   USE_ADDON=true; shift ;;
+		--version) ADDON_VERSION="$2"; shift 2 ;;
+		*)         echo "Error: Unknown argument '$1'"; exit 1 ;;
+	esac
+done
+
+[[ -n "$ADDON_VERSION" ]] && [[ "$USE_ADDON" != "true" ]] && { echo "Error: --version requires --addon"; exit 1; }
 
 # --- Validation (skip for clean) ---
 
@@ -281,7 +293,7 @@ if [[ "$TEST_TARGET" != "clean" ]]; then
 		fi
 	fi
 
-	if [[ -z "${PRIVREPO:-}" ]]; then
+	if [[ "$USE_ADDON" != "true" ]] && [[ -z "${PRIVREPO:-}" ]]; then
 		echo "Error: PRIVREPO environment variable is not set"
 		exit 1
 	fi
