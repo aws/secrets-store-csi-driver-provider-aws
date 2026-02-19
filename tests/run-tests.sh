@@ -202,6 +202,7 @@ run_test() {
 			USE_ADDON="$USE_ADDON" ADDON_VERSION="$ADDON_VERSION" \
 			POD_IDENTITY_ROLE_ARN="${POD_IDENTITY_ROLE_ARN:-}" \
 			PRIVREPO="${PRIVREPO:-}" PRIVTAG="${PRIVTAG:-}" \
+			GHCR_TOKEN="${GHCR_TOKEN:-}" \
 			bats integration.bats >"$log_file" 2>&1
 		local rc=$?
 		if [[ $rc -eq 0 ]]; then
@@ -216,6 +217,7 @@ run_test() {
 			USE_ADDON="$USE_ADDON" ADDON_VERSION="$ADDON_VERSION" \
 			POD_IDENTITY_ROLE_ARN="${POD_IDENTITY_ROLE_ARN:-}" \
 			PRIVREPO="${PRIVREPO:-}" PRIVTAG="${PRIVTAG:-}" \
+			GHCR_TOKEN="${GHCR_TOKEN:-}" \
 			bats integration.bats 2>&1 | tee "$log_file"
 	fi
 }
