@@ -1,5 +1,10 @@
 #!/bin/bash
 
+cleanup() {
+	cleanup_generated_files
+	cleanup_secrets
+}
+
 check_parallel() {
 	if ! command -v parallel >/dev/null 2>&1; then
 		echo "GNU parallel not found. Please install: \`brew install parallel\`"
@@ -30,14 +35,33 @@ cleanup_generated_files() {
 	echo "Generated test files cleaned up"
 }
 
+delete_cluster() {
+	eksctl delete cluster --name $1 --parallel 25
+}
+
 cleanup_secrets() {
 	echo "Cleaning up secrets and parameters..."
 	python3 generate-test-files.py cleanup-secrets
 }
 
-# Trap to ensure cleanup happens even if script is interrupted
-trap cleanup_generated_files EXIT
-trap cleanup_secrets EXIT
+if [[ "$1" == "clean" ]]; then
+	cleanup
+
+	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "pod-identity" || "$2" == "x64-pod-identity" ]]; then
+		delete_cluster integ-cluster-x64-pod-identity
+	fi
+	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "irsa" || "$2" == "x64-irsa" ]]; then
+		delete_cluster integ-cluster-x64-irsa
+	fi
+	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "pod-identity" || "$2" == "arm-pod-identity" ]]; then
+		delete_cluster integ-cluster-arm-pod-identity
+	fi
+	if [[ "$2" == "all" || "$2" == "arm" || "$2" == "irsa" || "$2" == "arm-irsa" ]]; then
+		delete_cluster integ-cluster-arm-irsa
+	fi
+
+	exit $?
+fi
 
 # Generate test files from templates (this also creates secrets)
 generate_test_files
@@ -85,4 +109,4 @@ if [[ "$1" == "arm-pod-identity" ]]; then
 	bats arm-pod-identity.bats
 fi
 
-cleanup_generated_files
+cleanup

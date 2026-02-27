@@ -201,7 +201,7 @@ func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTim
 		node.ObjectMeta.Labels = map[string]string{"topology.kubernetes.io/region": nodeRegion}
 	}
 
-	clientset := fake.NewSimpleClientset(sa, pod, node)
+	clientset := fake.NewClientset(sa, pod, node)
 
 	return &CSIDriverProviderServer{
 		secretProviderFactory:  factory,

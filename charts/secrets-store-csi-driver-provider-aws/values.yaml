@@ -1,7 +1,7 @@
 image:
   repository: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
   pullPolicy: IfNotPresent
-  tag: 2.1.0
+  tag: 2.2.1
 
 awsRegion: ""
 nameOverride: ""
@@ -11,10 +11,19 @@ kubeletPath: "/var/lib/kubelet"
 
 driverWritesSecrets: false
 
+commonLabels: {}
 podLabels: {}
 podAnnotations: {}
 
-affinity: {}
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: "eks.amazonaws.com/compute-type"
+              operator: NotIn
+              values:
+                - fargate
 
 resources:
   requests:
@@ -51,5 +60,6 @@ dnsConfig: {}
 
 secrets-store-csi-driver:
   install: true
+  fullnameOverride: secrets-store-csi-driver
 
 env: []

@@ -2,9 +2,11 @@
 
 import os
 import sys
-import subprocess
-import json
-from typing import Dict, List
+from typing import Dict
+
+import boto3
+import botocore
+import botocore.exceptions
 
 # Configuration for each test variant
 CONFIGS = {
@@ -49,119 +51,58 @@ CONFIGS = {
 REGION = os.environ.get("REGION", "us-west-2")
 FAILOVERREGION = os.environ.get("FAILOVERREGION", "us-east-2")
 
-
-def run_aws_command(cmd: List[str], check_exists: bool = False) -> bool:
-    """Run AWS CLI command and return success status"""
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if check_exists:
-            return result.returncode == 0
-        if result.returncode != 0:
-            print(f"    Command failed: {' '.join(cmd)}")
-            print(f"    Error: {result.stderr.strip()}")
-        return result.returncode == 0
-    except Exception as e:
-        print(f"    Error running command: {e}")
-        return False
+secretsmanager = {
+    REGION: boto3.client("secretsmanager", region_name=REGION),
+    FAILOVERREGION: boto3.client("secretsmanager", region_name=FAILOVERREGION),
+}
+ssm = {
+    REGION: boto3.client("ssm", region_name=REGION),
+    FAILOVERREGION: boto3.client("ssm", region_name=FAILOVERREGION),
+}
 
 
 def create_secret_if_not_exists(name: str, value: str, region: str):
     """Create secret if it doesn't exist"""
-    if run_aws_command(
-        [
-            "aws",
-            "secretsmanager",
-            "describe-secret",
-            "--secret-id",
-            name,
-            "--region",
-            region,
-        ],
-        check_exists=True,
-    ):
-        print(f"  Secret already exists: {name} in {region}")
-    else:
+    try:
         print(f"  Creating secret: {name} in {region}")
-        run_aws_command(
-            [
-                "aws",
-                "secretsmanager",
-                "create-secret",
-                "--name",
-                name,
-                "--secret-string",
-                value,
-                "--region",
-                region,
-            ]
-        )
+        secretsmanager[region].create_secret(Name=name, SecretString=value)
+    except botocore.exceptions.ClientError as error:
+        if error.response["Error"]["Code"] == "ResourceExistsException":
+            print(f"  Secret already exists: {name} in {region}")
+        else:
+            raise error
 
 
 def create_parameter_if_not_exists(name: str, value: str, region: str):
     """Create parameter if it doesn't exist"""
-    if run_aws_command(
-        ["aws", "ssm", "get-parameter", "--name", name, "--region", region],
-        check_exists=True,
-    ):
-        print(f"  Parameter already exists: {name} in {region}")
-    else:
+    try:
         print(f"  Creating parameter: {name} in {region}")
-        run_aws_command(
-            [
-                "aws",
-                "ssm",
-                "put-parameter",
-                "--name",
-                name,
-                "--value",
-                value,
-                "--type",
-                "SecureString",
-                "--region",
-                region,
-            ]
+        ssm[region].put_parameter(
+            Name=name, Value=value, Type="SecureString", Overwrite=False
         )
+    except botocore.exceptions.ClientError as error:
+        if error.response["Error"]["Code"] == "ParameterAlreadyExists":
+            print(f"  Parameter already exists: {name} in {region}")
+        else:
+            raise error
 
 
 def delete_secret_if_exists(name: str, region: str):
     """Delete secret if it exists"""
-    if run_aws_command(
-        [
-            "aws",
-            "secretsmanager",
-            "describe-secret",
-            "--secret-id",
-            name,
-            "--region",
-            region,
-        ],
-        check_exists=True,
-    ):
-        print(f"  Deleting secret: {name} in {region}")
-        run_aws_command(
-            [
-                "aws",
-                "secretsmanager",
-                "delete-secret",
-                "--secret-id",
-                name,
-                "--force-delete-without-recovery",
-                "--region",
-                region,
-            ]
-        )
+    print(f"  Deleting secret: {name} in {region}")
+    secretsmanager[region].delete_secret(SecretId=name, ForceDeleteWithoutRecovery=True)
 
 
 def delete_parameter_if_exists(name: str, region: str):
     """Delete parameter if it exists"""
-    if run_aws_command(
-        ["aws", "ssm", "get-parameter", "--name", name, "--region", region],
-        check_exists=True,
-    ):
-        print(f"  Deleting parameter: {name} in {region}")
-        run_aws_command(
-            ["aws", "ssm", "delete-parameter", "--name", name, "--region", region]
-        )
+    print(f"  Deleting parameter: {name} in {region}")
+    try:
+        ssm[region].delete_parameter(Name=name)
+    except botocore.exceptions.ClientError as error:
+        if error.response["Error"]["Code"] == "ParameterNotFound":
+            print(f"  Parameter does not exist: {name} in {region}")
+        else:
+            raise error
 
 
 def create_secrets_for_config(arch: str, auth_type: str):
@@ -278,30 +219,30 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
     """Generate authentication setup code"""
     if auth_type == "irsa":
         return f"""	log "Associating IAM OIDC provider"
-	eksctl utils associate-iam-oidc-provider --name $CLUSTER_NAME --approve --region $REGION
+    eksctl utils associate-iam-oidc-provider --name $CLUSTER_NAME --approve --region $REGION
 
-	log "Creating IAM service account for IRSA"
-	eksctl create iamserviceaccount \\
-		--name basic-test-mount-sa-{arch}-{auth_type} \\
-		--namespace $NAMESPACE \\
-		--cluster $CLUSTER_NAME \\
-		--attach-policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess \\
-		--attach-policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite \\
-		--override-existing-serviceaccounts \\
-		--approve \\
-		--region $REGION"""
+    log "Creating IAM service account for IRSA"
+    eksctl create iamserviceaccount \\
+        --name basic-test-mount-sa-{arch}-{auth_type} \\
+        --namespace $NAMESPACE \\
+        --cluster $CLUSTER_NAME \\
+        --attach-policy-arn arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess \\
+        --attach-policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite \\
+        --override-existing-serviceaccounts \\
+        --approve \\
+        --region $REGION"""
 
     return f"""	log "Creating EKS Pod Identity addon"
-	eksctl create addon --name eks-pod-identity-agent --cluster $CLUSTER_NAME --region $REGION
+    eksctl create addon --name eks-pod-identity-agent --cluster $CLUSTER_NAME --region $REGION
 
-	log "Creating Pod Identity association"
-	eksctl create podidentityassociation \\
-		--cluster $CLUSTER_NAME \\
-		--namespace $NAMESPACE \\
-		--region $REGION \\
-		--service-account-name basic-test-mount-sa-{arch}-{auth_type} \\
-		--role-arn $POD_IDENTITY_{arch.upper()}_ROLE_ARN \\
-		--create-service-account true"""
+    log "Creating Pod Identity association"
+    eksctl create podidentityassociation \\
+        --cluster $CLUSTER_NAME \\
+        --namespace $NAMESPACE \\
+        --region $REGION \\
+        --service-account-name basic-test-mount-sa-{arch}-{auth_type} \\
+        --role-arn $POD_IDENTITY_ROLE_ARN \\
+        --create-service-account true"""
 
 
 def get_pod_identity_param(auth_type: str) -> str:
