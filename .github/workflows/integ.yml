@@ -128,6 +128,14 @@ jobs:
           aws-region: us-west-2
           role-duration-seconds: 14400
 
+      - name: Clean up stale clusters
+        run: |
+          CLUSTER_NAME=integ-cluster-${{ matrix.arch-short }}-${{ matrix.auth_type }}
+          if eksctl get cluster --name "$CLUSTER_NAME" --region us-west-2 2>/dev/null; then
+            echo "Found stale cluster $CLUSTER_NAME, deleting..."
+            eksctl delete cluster --name "$CLUSTER_NAME" --region us-west-2 --wait
+          fi
+
       - name: Run integ tests
         run: cd tests && ./run-tests.sh ${{ matrix.arch-short }}-${{ matrix.auth_type }}
         env:
