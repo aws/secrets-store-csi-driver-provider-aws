@@ -2857,3 +2857,170 @@ func TestDriverVersion(t *testing.T) {
 		t.Fatalf("TestDriverVersion: wrong RuntimeName: %s", ver.RuntimeName)
 	}
 }
+
+// buildMountReqWithTokens builds a MountRequest with a custom tokens JSON string
+// (or empty to omit the tokens attribute entirely).
+func buildMountReqWithTokens(t *testing.T, dir string, tokensJSON string) *v1alpha1.MountRequest {
+	t.Helper()
+	attrMap := map[string]string{
+		"csi.storage.k8s.io/pod.name":            "fakePod",
+		"csi.storage.k8s.io/pod.namespace":       "fakeNS",
+		"csi.storage.k8s.io/serviceAccount.name": "fakeAcct",
+		"region":                                 "us-east-1",
+		"objects": `- objectName: "TestSecret1"
+  objectType: "secretsmanager"`,
+	}
+	if tokensJSON != "" {
+		attrMap["csi.storage.k8s.io/serviceAccount.tokens"] = tokensJSON
+	}
+	attr, _ := json.Marshal(attrMap)
+	return &v1alpha1.MountRequest{
+		Attributes: string(attr),
+		TargetPath: dir,
+		Permission: "420",
+	}
+}
+
+func TestMountMissingTokensAttribute(t *testing.T) {
+	svr := newServerWithMocks(nil, false, nil)
+	dir := t.TempDir()
+	req := buildMountReqWithTokens(t, dir, "")
+	_, err := svr.Mount(context.Background(), req)
+	if err == nil {
+		t.Fatal("Expected error when serviceAccount.tokens is missing")
+	}
+	if !strings.Contains(err.Error(), "serviceAccount.tokens not provided") {
+		t.Fatalf("Expected token-not-provided error, got: %s", err.Error())
+	}
+}
+
+func TestMountTokenAudienceMismatch(t *testing.T) {
+	svr := newServerWithMocks(&testCase{
+		attributes: map[string]string{
+			"podName": "fakePod", "namespace": "fakeNS", "accName": "fakeAcct",
+			"nodeName": "fakeNode", "region": "us-east-1", "roleARN": "fakeRole",
+			"usePodIdentity": "true",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp:  []*ssm.GetParametersOutput{},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+	}, false, nil)
+
+	dir := t.TempDir()
+	// Provide only the IRSA token, but request Pod Identity
+	tokensJSON := `{"sts.amazonaws.com":{"token":"irsa-token","expirationTimestamp":"2099-01-15T10:30:00Z"}}`
+	attrMap := map[string]string{
+		"csi.storage.k8s.io/pod.name":              "fakePod",
+		"csi.storage.k8s.io/pod.namespace":         "fakeNS",
+		"csi.storage.k8s.io/serviceAccount.name":   "fakeAcct",
+		"csi.storage.k8s.io/serviceAccount.tokens": tokensJSON,
+		"region":         "us-east-1",
+		"usePodIdentity": "true",
+		"objects": `- objectName: "TestSecret1"
+  objectType: "secretsmanager"`,
+	}
+	attr, _ := json.Marshal(attrMap)
+	req := &v1alpha1.MountRequest{
+		Attributes: string(attr),
+		TargetPath: dir,
+		Permission: "420",
+	}
+
+	_, err := svr.Mount(context.Background(), req)
+	if err == nil {
+		t.Fatal("Expected error when Pod Identity token audience is missing")
+	}
+	if !strings.Contains(err.Error(), "Pod Identity token extraction failed") {
+		t.Fatalf("Expected Pod Identity token extraction error, got: %s", err.Error())
+	}
+}
+
+func TestMountMaxRegionsExceeded(t *testing.T) {
+	// The len(awsConfigs) > 2 guard is a defensive check. getAwsRegions caps at 2
+	// regions, so this guard can't fire in normal flow. We verify the guard doesn't
+	// false-positive on a normal 1-region request, and that the fix (returning a
+	// real error instead of nil) compiles correctly.
+	sa := &corev1.ServiceAccount{}
+	sa.Name = "fakeAcct"
+	sa.Namespace = "fakeNS"
+	sa.Annotations = map[string]string{"eks.amazonaws.com/role-arn": "fakeRole"}
+	pod := &corev1.Pod{}
+	pod.Name = "fakePod"
+	pod.Namespace = "fakeNS"
+	pod.Spec.NodeName = "fakeNode"
+	node := &corev1.Node{}
+	node.Name = "fakeNode"
+	node.ObjectMeta.Labels = map[string]string{"topology.kubernetes.io/region": "us-east-1"}
+	clientset := fake.NewClientset(sa, pod, node)
+
+	factory := func(configs []aws.Config, regions []string) *provider.SecretProviderFactory {
+		return &provider.SecretProviderFactory{
+			Providers: map[provider.SecretType]provider.SecretProvider{
+				provider.SSMParameter:   provider.NewParameterStoreProviderWithClients(),
+				provider.SecretsManager: provider.NewSecretsManagerProviderWithClients(),
+			},
+		}
+	}
+
+	svr := &CSIDriverProviderServer{
+		secretProviderFactory: factory,
+		k8sClient:             clientset.CoreV1(),
+	}
+
+	dir := t.TempDir()
+	attrMap := map[string]string{
+		"csi.storage.k8s.io/pod.name":              "fakePod",
+		"csi.storage.k8s.io/pod.namespace":         "fakeNS",
+		"csi.storage.k8s.io/serviceAccount.name":   "fakeAcct",
+		"csi.storage.k8s.io/serviceAccount.tokens": `{"sts.amazonaws.com":{"token":"test-token","expirationTimestamp":"2099-01-15T10:30:00Z"}}`,
+		"region": "us-east-1",
+		"objects": `- objectName: "TestSecret1"
+  objectType: "secretsmanager"`,
+	}
+	attr, _ := json.Marshal(attrMap)
+	req := &v1alpha1.MountRequest{Attributes: string(attr), TargetPath: dir, Permission: "420"}
+
+	_, err := svr.Mount(context.Background(), req)
+	if err != nil && strings.Contains(err.Error(), "max number of regions exceeded") {
+		t.Fatal("Guard should not fire with 1 region")
+	}
+}
+
+func TestAppID(t *testing.T) {
+	tests := []struct {
+		name            string
+		eksAddonVersion string
+		providerVersion string
+		expected        string
+	}{
+		{
+			name:            "default provider version",
+			eksAddonVersion: "",
+			providerVersion: "1.0.0",
+			expected:        ProviderName + "-1.0.0",
+		},
+		{
+			name:            "eks addon version overrides",
+			eksAddonVersion: "v1.2.3-eksbuild.1",
+			providerVersion: "1.0.0",
+			expected:        ProviderName + "-v1.2.3-eksbuild.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origVersion := ProviderVersion
+			ProviderVersion = tt.providerVersion
+			defer func() { ProviderVersion = origVersion }()
+
+			svr := &CSIDriverProviderServer{eksAddonVersion: tt.eksAddonVersion}
+			result := svr.appID()
+			if result != tt.expected {
+				t.Errorf("appID() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}

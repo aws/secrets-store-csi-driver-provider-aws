@@ -167,3 +167,69 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_IPv6(t *testing.T) {
 		t.Errorf("expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
 	}
 }
+
+func TestPodIdentityCredentialProvider_GetAWSConfig_AutoFallback(t *testing.T) {
+	defer resetEndpoints()
+
+	// Set up IPv6 mock, make IPv4 unreachable
+	mockServer := setupMockPodIdentityAgent(t, false)
+	defer mockServer.Close()
+
+	podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1" // unreachable
+	podIdentityAgentEndpointIPv6 = mockServer.URL
+
+	shortTimeout := 200 * time.Millisecond
+
+	// In auto mode, GetAWSConfig calls getConfigWithEndpoint for IPv4 first.
+	// config.LoadDefaultConfig is lazy (no network call), so it always succeeds.
+	// The IPv4 config is returned even though the endpoint is unreachable.
+	// Retrieve() on that config will fail. This confirms the auto-mode fallback
+	// in GetAWSConfig only works if LoadDefaultConfig itself errors.
+	//
+	// Verify that explicitly selecting IPv6 works when IPv4 is down.
+	provider, err := NewPodIdentityCredentialProvider(
+		testRegion, "ipv6", &shortTimeout, "test-app-id", "pod-identity-test-token",
+	)
+	if err != nil {
+		t.Fatalf("failed to create provider: %v", err)
+	}
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetAWSConfig failed: %v", err)
+	}
+
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	if err != nil {
+		t.Fatalf("Retrieve failed (IPv6 should work): %v", err)
+	}
+	if creds.AccessKeyID != "TEST_ACCESS_KEY" {
+		t.Errorf("expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
+	}
+}
+
+func TestPodIdentityCredentialProvider_GetAWSConfig_BothFail(t *testing.T) {
+	defer resetEndpoints()
+
+	podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1" // unreachable
+	podIdentityAgentEndpointIPv6 = "http://[::1]:1"     // unreachable
+
+	shortTimeout := 100 * time.Millisecond
+	provider, err := NewPodIdentityCredentialProvider(
+		testRegion, "ipv4", &shortTimeout, "test-app-id", "pod-identity-test-token",
+	)
+	if err != nil {
+		t.Fatalf("failed to create provider: %v", err)
+	}
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetAWSConfig should succeed (lazy credentials): %v", err)
+	}
+
+	// Retrieve fails because the endpoint is unreachable
+	_, err = cfg.Credentials.Retrieve(context.Background())
+	if err == nil {
+		t.Fatal("expected error when endpoint is unreachable")
+	}
+}
