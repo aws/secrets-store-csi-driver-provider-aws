@@ -72,7 +72,7 @@ func parseAddressPreference(preferredAddressType string) string {
 	case "ipv6":
 		return "ipv6"
 	default:
-		return "auto"
+		return "auto" // Default to auto for invalid preferences
 	}
 }
 
@@ -83,22 +83,23 @@ func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.C
 	preference := parseAddressPreference(p.preferredAddressType)
 
 	if preference == "auto" || preference == "ipv4" {
-		cfg, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv4)
+		config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv4)
 		if err != nil {
 			klog.Warningf("IPv4 endpoint attempt failed: %v", err)
 			configErr = err
 		} else {
-			return cfg, nil
+			return config, nil
 		}
 	}
 
 	if preference == "auto" || preference == "ipv6" {
-		cfg, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv6)
+		config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv6)
+
 		if err != nil {
 			klog.Warningf("IPv6 endpoint attempt failed: %v", err)
 			configErr = err
 		} else {
-			return cfg, nil
+			return config, nil
 		}
 	}
 
@@ -109,6 +110,7 @@ func (p *PodIdentityCredentialProvider) getConfigWithEndpoint(ctx context.Contex
 	provider := endpointcreds.New(endpoint,
 		func(opts *endpointcreds.Options) {
 			opts.AuthorizationTokenProvider = p.fetcher
+
 			if p.httpClient != nil {
 				opts.HTTPClient = p.httpClient
 			}
