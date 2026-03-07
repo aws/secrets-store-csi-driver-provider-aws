@@ -1,0 +1,85 @@
+# SecretProviderClass template.
+#
+# Defines which secrets and parameters to mount, and how to sync them to K8s Secrets.
+# This is the core configuration that the CSI driver uses to fetch and mount secrets.
+#
+# Variables (substituted by envsubst):
+#   ARCH, AUTH_TYPE      — target identifiers for parallel run isolation
+#   RESOURCE_PREFIX      — collision avoidance prefix (empty by default)
+#   REGION, FAILOVERREGION, ACCOUNT_NUMBER — AWS context
+#   POD_IDENTITY_PARAM   — injected as 'usePodIdentity: "true"' or empty
+#
+# Resource naming convention:
+#   <BaseName>${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}
+#   e.g. "SecretsManagerTest1-x64-irsa" or "SecretsManagerTest1EKSAddon-x64-irsa"
+#
+# secretObjects: Syncs mounted secrets to native K8s Secrets. The objectName
+# fields here reference jmesPath aliases (ssmUsername, etc.) or full secret names.
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: basic-test-mount-spc-${ARCH}-${AUTH_TYPE}
+spec:
+  provider: aws
+  secretObjects:
+    - secretName: secret
+      type: Opaque
+      data:
+        - objectName: SecretsManagerSync${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}
+          key: username
+    - secretName: json-ssm
+      type: Opaque
+      data:
+        - objectName: ssmUsername
+          key: username
+        - objectName: ssmPassword
+          key: password
+    - secretName: secrets-manager-json
+      type: Opaque
+      data:
+        - objectName: secretsManagerUsername
+          key: username
+        - objectName: secretsManagerPassword
+          key: password
+
+  parameters:${POD_IDENTITY_PARAM}
+    region: ${REGION}
+    failoverRegion: ${FAILOVERREGION}
+    objects: |
+      # --- SSM Parameter Store secrets ---
+      - objectName: "ParameterStoreTest1${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "ssmparameter"
+      - objectName: "ParameterStoreTestWithLongName${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectAlias: "ParameterStoreTest2${RESOURCE_PREFIX}"
+        objectType: "ssmparameter"
+      - objectName: "ParameterStoreRotationTest${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "ssmparameter"
+      - objectName: "ParameterStoreSecureTest${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "ssmparameter"
+      # --- Secrets Manager secrets ---
+      - objectName: "SecretsManagerRotationTest${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "secretsmanager"
+      - objectName: "SecretsManagerTest1${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "secretsmanager"
+      # SecretsManagerTest2 uses a full ARN + failoverObject for cross-region failover testing
+      - objectName: arn:aws:secretsmanager:${REGION}:${ACCOUNT_NUMBER}:secret:SecretsManagerTest2${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}
+        objectAlias: "SecretsManagerTest2${RESOURCE_PREFIX}"
+        failoverObject:
+          objectName: arn:aws:secretsmanager:${FAILOVERREGION}:${ACCOUNT_NUMBER}:secret:SecretsManagerTest2${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}
+      - objectName: "SecretsManagerSync${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "secretsmanager"
+      # --- JMES path extraction (JSON secrets split into individual key files) ---
+      - objectName: "jsonSsm${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "ssmparameter"
+        jmesPath:
+            - Path: "username"
+              ObjectAlias: "ssmUsername"
+            - Path: "password"
+              ObjectAlias: "ssmPassword"
+      - objectName: "secretsManagerJson${RESOURCE_PREFIX}-${ARCH}-${AUTH_TYPE}"
+        objectType: "secretsmanager"
+        jmesPath:
+            - Path: "username"
+              ObjectAlias: "secretsManagerUsername"
+            - Path: "password"
+              ObjectAlias: "secretsManagerPassword"

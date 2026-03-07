@@ -1,0 +1,416 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  EKS Auto Mode cluster infrastructure for integration tests.
+  Creates VPC, EKS cluster with Auto Mode, and auth configuration
+  (IRSA or Pod Identity). Test secrets/parameters are in test-resources.yaml.
+
+Parameters:
+  ClusterName:
+    Type: String
+  Suffix:
+    Type: String
+    Description: "e.g. x64-irsa, arm-pod-identity"
+  PodIdentityRoleArn:
+    Type: String
+    Default: ""
+  AuthType:
+    Type: String
+    AllowedValues: [irsa, pod-identity]
+  KubernetesVersion:
+    Type: String
+    Default: "1.35"
+  PublicAccessCidrs:
+    Type: CommaDelimitedList
+    Default: "0.0.0.0/0"
+    Description: "CIDR blocks allowed to access the EKS API endpoint"
+
+Conditions:
+  IsIRSA: !Equals [!Ref AuthType, irsa]
+  IsPodIdentity: !Equals [!Ref AuthType, pod-identity]
+
+Resources:
+  # ============================================================
+  # VPC & Networking
+  # ============================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 192.168.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-vpc"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 192.168.0.0/19
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 192.168.32.0/19
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 192.168.64.0/19
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetCRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetC
+      RouteTableId: !Ref PublicRouteTable
+
+  NATIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 192.168.96.0/19
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 192.168.128.0/19
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 192.168.160.0/19
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      Tags:
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateRouteC:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableC
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnetARouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTableA
+
+  PrivateSubnetBRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  PrivateSubnetCRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetC
+      RouteTableId: !Ref PrivateRouteTableC
+
+  # ============================================================
+  # Security Groups
+  # ============================================================
+  ControlPlaneSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Communication between the control plane and worker nodegroups
+      VpcId: !Ref VPC
+
+  ClusterSharedNodeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Communication between all nodes in the cluster
+      VpcId: !Ref VPC
+
+  IngressInterNodeGroupSG:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClusterSharedNodeSecurityGroup
+      SourceSecurityGroupId: !Ref ClusterSharedNodeSecurityGroup
+      Description: Allow nodes to communicate with each other (all ports)
+      IpProtocol: "-1"
+      FromPort: 0
+      ToPort: 65535
+
+  # ============================================================
+  # EKS Cluster
+  # ============================================================
+  ClusterServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSVPCResourceController"
+
+  ControlPlane:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      RoleArn: !GetAtt ClusterServiceRole.Arn
+      Version: !Ref KubernetesVersion
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
+      ComputeConfig:
+        Enabled: true
+        NodePools:
+          - general-purpose
+          - system
+        NodeRoleArn: !GetAtt AutoModeNodeRole.Arn
+      KubernetesNetworkConfig:
+        ElasticLoadBalancing:
+          Enabled: true
+      StorageConfig:
+        BlockStorage:
+          Enabled: true
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref ControlPlaneSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+          - !Ref PublicSubnetC
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
+          - !Ref PrivateSubnetC
+        EndpointPublicAccess: true
+        EndpointPrivateAccess: true
+        PublicAccessCidrs: !Ref PublicAccessCidrs
+
+  IngressDefaultClusterToNodeSG:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: ControlPlane
+    Properties:
+      GroupId: !Ref ClusterSharedNodeSecurityGroup
+      SourceSecurityGroupId: !GetAtt ControlPlane.ClusterSecurityGroupId
+      Description: Allow managed and unmanaged nodes to communicate with each other (all ports)
+      IpProtocol: "-1"
+      FromPort: 0
+      ToPort: 65535
+
+  IngressNodeToDefaultClusterSG:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: ControlPlane
+    Properties:
+      GroupId: !GetAtt ControlPlane.ClusterSecurityGroupId
+      SourceSecurityGroupId: !Ref ClusterSharedNodeSecurityGroup
+      Description: Allow unmanaged nodes to communicate with control plane (all ports)
+      IpProtocol: "-1"
+      FromPort: 0
+      ToPort: 65535
+
+  # ============================================================
+  # Auto Mode Node Role
+  # ============================================================
+  AutoModeNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodeMinimalPolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
+
+  # ============================================================
+  # IRSA (only when AuthType=irsa)
+  # ============================================================
+  OIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: IsIRSA
+    DependsOn: ControlPlane
+    Properties:
+      Url: !GetAtt ControlPlane.OpenIdConnectIssuerUrl
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS ignores the thumbprint for EKS OIDC providers (it validates via
+      # the STS regional endpoint's CA instead). A value is still required by
+      # the CFN schema, so we provide a placeholder.
+      ThumbprintList:
+        - "0000000000000000000000000000000000000000"
+
+  IRSARole:
+    Type: AWS::IAM::Role
+    Condition: IsIRSA
+    DependsOn: OIDCProvider
+    Properties:
+      AssumeRolePolicyDocument: !Sub
+        - |
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/${OIDCHost}"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "${OIDCHost}:aud": "sts.amazonaws.com",
+                  "${OIDCHost}:sub": "system:serviceaccount:kube-system:basic-test-mount-sa-${Suffix}"
+                }
+              }
+            }]
+          }
+        - OIDCHost: !Select
+            - 1
+            - !Split ["//", !GetAtt ControlPlane.OpenIdConnectIssuerUrl]
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMReadOnlyAccess"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSSecretsManagerClientReadOnlyAccess"
+
+  # ============================================================
+  # Pod Identity (only when AuthType=pod-identity)
+  # ============================================================
+  PodIdentityAddon:
+    Type: AWS::EKS::Addon
+    Condition: IsPodIdentity
+    DependsOn: ControlPlane
+    Properties:
+      ClusterName: !Ref ClusterName
+      AddonName: eks-pod-identity-agent
+
+  PodIdentityAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Condition: IsPodIdentity
+    DependsOn: PodIdentityAddon
+    Properties:
+      ClusterName: !Ref ClusterName
+      Namespace: kube-system
+      ServiceAccount: !Sub "basic-test-mount-sa-${Suffix}"
+      RoleArn: !Ref PodIdentityRoleArn
+
+Outputs:
+  ClusterName:
+    Value: !Ref ClusterName
+  ClusterEndpoint:
+    Value: !GetAtt ControlPlane.Endpoint
+  ClusterCA:
+    Value: !GetAtt ControlPlane.CertificateAuthorityData
+  ClusterSecurityGroupId:
+    Value: !GetAtt ControlPlane.ClusterSecurityGroupId
+  OIDCIssuerUrl:
+    Value: !GetAtt ControlPlane.OpenIdConnectIssuerUrl
+  AutoModeNodeRoleArn:
+    Value: !GetAtt AutoModeNodeRole.Arn
+  IRSARoleArn:
+    Condition: IsIRSA
+    Value: !GetAtt IRSARole.Arn
+  VpcId:
+    Value: !Ref VPC

@@ -1,0 +1,32 @@
+# Test pod template.
+#
+# Deploys a minimal busybox pod that mounts secrets via the CSI driver.
+# The pod sleeps indefinitely so tests can exec into it to read mounted files.
+#
+# Variables (substituted by envsubst):
+#   ARCH, AUTH_TYPE  — used in naming to avoid collisions across parallel runs
+#   BUSYBOX_IMAGE    — container image for the test pod
+kind: Pod
+apiVersion: v1
+metadata:
+  name: basic-test-mount-${ARCH}-${AUTH_TYPE}
+spec:
+  serviceAccountName: basic-test-mount-sa-${ARCH}-${AUTH_TYPE}
+  containers:
+    - image: ${BUSYBOX_IMAGE}
+      name: busybox
+      imagePullPolicy: IfNotPresent
+      command:
+        - "/bin/sleep"
+        - "10000"
+      volumeMounts:
+        - name: secrets-store-inline
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+  volumes:
+    - name: secrets-store-inline
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: "basic-test-mount-spc-${ARCH}-${AUTH_TYPE}"

@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Test secrets and SSM parameters for integration tests.
+  Deployed once per region (primary + failover) using the same template.
+  Resource names must match those in templates/BasicTestMountSPC.yaml.template.
+
+Parameters:
+  Suffix:
+    Type: String
+    Description: "e.g. x64-irsa, arm-pod-identity"
+  ResourcePrefix:
+    Type: String
+    Default: ""
+    Description: "Inserted into resource names for collision avoidance (e.g. EKSAddon)"
+
+Resources:
+  # ============================================================
+  # Secrets Manager test secrets
+  # ============================================================
+  SecretsManagerTest1:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "SecretsManagerTest1${ResourcePrefix}-${Suffix}"
+      SecretString: "SecretsManagerTest1Value"
+
+  SecretsManagerTest2:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "SecretsManagerTest2${ResourcePrefix}-${Suffix}"
+      SecretString: "SecretsManagerTest2Value"
+
+  SecretsManagerSync:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "SecretsManagerSync${ResourcePrefix}-${Suffix}"
+      SecretString: "SecretUser"
+
+  SecretsManagerRotation:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "SecretsManagerRotationTest${ResourcePrefix}-${Suffix}"
+      SecretString: "BeforeRotation"
+
+  SecretsManagerJson:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "secretsManagerJson${ResourcePrefix}-${Suffix}"
+      SecretString: '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}'
+
+  # ============================================================
+  # SSM Parameter Store test parameters
+  # ============================================================
+  ParameterStoreTest1:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "ParameterStoreTest1${ResourcePrefix}-${Suffix}"
+      Type: String
+      Value: "ParameterStoreTest1Value"
+
+  ParameterStoreTest2:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "ParameterStoreTestWithLongName${ResourcePrefix}-${Suffix}"
+      Type: String
+      Value: "ParameterStoreTest2Value"
+
+  ParameterStoreRotation:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "ParameterStoreRotationTest${ResourcePrefix}-${Suffix}"
+      Type: String
+      Value: "BeforeRotation"
+
+  ParameterStoreJson:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "jsonSsm${ResourcePrefix}-${Suffix}"
+      Type: String
+      Value: '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}'
+
+  # Created as Type: String because CFN doesn't support SecureString without
+  # specifying a KMS key. The integration test overwrites this as SecureString
+  # via 'aws ssm put-parameter --type SecureString' to exercise that code path.
+  ParameterStoreSecureString:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "ParameterStoreSecureTest${ResourcePrefix}-${Suffix}"
+      Type: String
+      Value: "SecureStringTestValue"

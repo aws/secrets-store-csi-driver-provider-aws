@@ -1,0 +1,50 @@
+# EKS addon configuration values for integration tests.
+#
+# This file exercises every schema property supported by the ASCP addon.
+# It serves two purposes:
+#   1. Verify that the addon installs correctly with all options set
+#   2. Catch schema typos that would cause 500 errors on create-addon
+#
+# The "addon config schema options applied" test in integration.bats validates
+# that these values are reflected in the deployed DaemonSet.
+
+podLabels:
+  integ-test: "true"
+podAnnotations:
+  integ-test-annotation: "true"
+tolerations:
+  - operator: Exists
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    cpu: 50m
+    memory: 100Mi
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: eks.amazonaws.com/compute-type
+              operator: NotIn
+              values:
+                - fargate
+nodeSelector: {}
+dnsConfig: {}
+port: 8989
+driverWritesSecrets: false
+useFipsEndpoint: false
+priorityClassName: ""
+
+# CSI driver sub-chart configuration.
+# enableSecretRotation + short poll interval are needed for rotation tests.
+# syncSecret is needed for the K8s Secret sync test.
+secrets-store-csi-driver:
+  enableSecretRotation: true
+  rotationPollInterval: 15s
+  syncSecret:
+    enabled: true
+  tokenRequests:
+    - audience: "sts.amazonaws.com"
+    - audience: "pods.eks.amazonaws.com"
