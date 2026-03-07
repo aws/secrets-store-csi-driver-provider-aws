@@ -57,6 +57,7 @@ jobs:
       - name: List images
         run: |
           docker image ls -a
+
   integration-tests:
     name: Run Integration Tests
     needs: build-docker
@@ -103,14 +104,6 @@ jobs:
 
       - run: eksctl version
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3"
-
-      - name: Install Python dependencies
-        run: pip install boto3
-
       - name: Setup Bats and bats libs
         id: setup-bats
         uses: bats-core/bats-action@3.0.1
@@ -134,6 +127,7 @@ jobs:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
           PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build
           PRIVTAG: latest-${{ matrix.arch }}-${{ github.run_id }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGION: us-west-2
           FAILOVERREGION: us-east-2
 
