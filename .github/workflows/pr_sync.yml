@@ -1,0 +1,31 @@
+name: Remove safe-to-test label when new commits are pushed
+
+on:
+  pull_request_target:
+    types: [synchronize]
+
+jobs:
+  remove-label:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
+
+    steps:
+      - name: Remove label
+        run: |
+          echo "Removing label '$LABEL_NAME' from PR #$PR_NUMBER on repo $REPO" 
+          gh_status=$(gh api "repos/$REPO/issues/$PR_NUMBER/labels/$LABEL_NAME" -X DELETE | jq 'if type == "object" then .status else empty end' --raw-output)
+          case $gh_status in
+            "") echo "Label removed" ;;
+            404) echo "Label not found — ignoring" ;;
+            *) echo "unexpected HTTP $gh_status" && exit 1 ;;
+          esac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LABEL_NAME: safe-to-test
+          REPO: ${{ github.event.pull_request.base.repo.full_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}

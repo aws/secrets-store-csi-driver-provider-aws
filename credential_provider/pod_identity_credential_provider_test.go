@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"k8s.io/client-go/kubernetes/fake"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
@@ -77,8 +79,8 @@ func setupMockPodIdentityAgent(t *testing.T, isIPv4, shouldFail bool) *httptest.
 
 func newPodIdentityCredentialWithMock(t *testing.T, isIPv4 bool, tstData podIdentityCredentialTest) (*PodIdentityCredentialProvider, chan<- struct{}) {
 	k8sClient := &mockK8sV1{
-		CoreV1Interface:  fake.NewSimpleClientset().CoreV1(),
-		fake:             fake.NewSimpleClientset().CoreV1(),
+		CoreV1Interface:  fake.NewClientset().CoreV1(),
+		fake:             fake.NewClientset().CoreV1(),
 		k8CTOneShotError: tstData.k8CTOneShotError,
 	}
 
@@ -108,8 +110,9 @@ func newPodIdentityCredentialWithMock(t *testing.T, isIPv4 bool, tstData podIden
 	return &PodIdentityCredentialProvider{
 		region:               testRegion,
 		preferredAddressType: tstData.preferredEndpoint,
+		appID:                "test-app-id",
 		fetcher:              newPodIdentityTokenFetcher(testNamespace, testServiceAccount, testPodName, k8sClient),
-		httpClient:           http.DefaultClient,
+		httpClient:           awshttp.NewBuildableClient(),
 	}, respChan
 }
 
@@ -358,6 +361,71 @@ func TestPodIdentityToken(t *testing.T) {
 	}
 }
 
+func TestNewPodIdentityCredentialProviderTimeout(t *testing.T) {
+	oneHundredMs := 100 * time.Millisecond
+	oneSec := 1 * time.Second
+	fiftyMs := 50 * time.Millisecond
+	fiveSecs := 5 * time.Second
+
+	tests := []struct {
+		name                   string
+		podIdentityHttpTimeout *time.Duration
+		expectError            bool
+	}{
+		{
+			name:                   "100ms timeout",
+			podIdentityHttpTimeout: &oneHundredMs,
+			expectError:            false,
+		},
+		{
+			name:                   "1s timeout",
+			podIdentityHttpTimeout: &oneSec,
+			expectError:            false,
+		},
+		{
+			name:                   "50ms timeout",
+			podIdentityHttpTimeout: &fiftyMs,
+			expectError:            false,
+		},
+		{
+			name:                   "5s timeout",
+			podIdentityHttpTimeout: &fiveSecs,
+			expectError:            false,
+		},
+		{
+			name:                   "nil timeout",
+			podIdentityHttpTimeout: nil,
+			expectError:            false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k8sClient := fake.NewClientset().CoreV1()
+
+			provider, err := NewPodIdentityCredentialProvider(
+				testRegion, testNamespace, testServiceAccount, testPodName, "", tt.podIdentityHttpTimeout, "test-app-id", k8sClient)
+
+			if tt.expectError && err == nil {
+				t.Errorf("Expected error but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			if !tt.expectError && provider != nil {
+				// Verify the timeout is set correctly by checking the HTTP client
+				podProvider, ok := provider.(*PodIdentityCredentialProvider)
+				if !ok {
+					t.Error("Expected PodIdentityCredentialProvider type")
+				} else if tt.podIdentityHttpTimeout != nil && podProvider.httpClient.GetTimeout() != *tt.podIdentityHttpTimeout {
+					t.Errorf("Expected HTTP client timeout %v, got %v", tt.podIdentityHttpTimeout, podProvider.httpClient.GetTimeout())
+				}
+			}
+		})
+	}
+}
+
 func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 	tests := []struct {
 		name                string
@@ -368,7 +436,7 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 		{
 			name:                "Empty region",
 			region:              "",
-			k8sClient:           fake.NewSimpleClientset().CoreV1(),
+			k8sClient:           fake.NewClientset().CoreV1(),
 			expectedErrorPrefix: "region cannot be empty",
 		},
 		{
@@ -380,7 +448,7 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 		{
 			name:                "Valid parameters",
 			region:              testRegion,
-			k8sClient:           fake.NewSimpleClientset().CoreV1(),
+			k8sClient:           fake.NewClientset().CoreV1(),
 			expectedErrorPrefix: "",
 		},
 	}
@@ -388,7 +456,7 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			provider, err := NewPodIdentityCredentialProvider(
-				tt.region, testNamespace, testServiceAccount, testPodName, "", tt.k8sClient)
+				tt.region, testNamespace, testServiceAccount, testPodName, "", nil, "test-app-id", tt.k8sClient)
 
 			if tt.expectedErrorPrefix == "" {
 				if err != nil {
@@ -408,5 +476,33 @@ func TestNewPodIdentityCredentialProviderValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNewPodIdentityCredentialProvider_AppID(t *testing.T) {
+	expectedAppID := "test-app-id"
+	k8sClient := fake.NewClientset().CoreV1()
+
+	provider, err := NewPodIdentityCredentialProvider(
+		testRegion,
+		testNamespace,
+		testServiceAccount,
+		testPodName,
+		"",
+		nil,
+		expectedAppID,
+		k8sClient,
+	)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	podProvider, ok := provider.(*PodIdentityCredentialProvider)
+	if !ok {
+		t.Fatal("Expected PodIdentityCredentialProvider type")
+	}
+
+	if podProvider.appID != expectedAppID {
+		t.Errorf("Expected appID %q, got %q", expectedAppID, podProvider.appID)
 	}
 }

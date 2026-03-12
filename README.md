@@ -316,6 +316,14 @@ To mount each secret on each pod, the AWS CSI provider lookups the region of the
 
 If you use Helm chart to install the provider, append the `--set-json 'k8sThrottlingParams={"qps": "<custom qps>", "burst": "<custom qps>"}'` flag in the install step.
 
+### HTTP timeout for Pod Identity
+
+In order to configure the HTTP timeout for Pod Identity authentication, pass the `pod-identity-http-timeout` flag during the install step:
+```shell
+helm install ... --pod-identity-http-timeout=250ms
+```
+The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value uses the [AWS SDK default](https://github.com/aws/aws-sdk-go-v2/blob/main/aws/transport/http/client.go#L33) by default.
+
 ### Security Considerations
 
 The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.

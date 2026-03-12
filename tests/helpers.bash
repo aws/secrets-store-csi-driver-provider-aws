@@ -76,7 +76,13 @@ compare_owner_count() {
 check_secret_deleted() {
   secret="$1"
   namespace="$2"
+  kubeconfig_file="$3"
 
-  result=$(kubectl get secret -n ${namespace} | grep "^${secret}$" | wc -l)
+  if [[ -z "$kubeconfig_file" ]]; then
+    result=$(kubectl get secret -n ${namespace} | grep "^${secret}$" | wc -l)
+  else
+    result=$(kubectl --kubeconfig="$kubeconfig_file" get secret -n ${namespace} | grep "^${secret}$" | wc -l)
+  fi
+
   [[ "$result" -eq 0 ]]
 }

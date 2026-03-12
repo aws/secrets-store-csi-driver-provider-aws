@@ -2,21 +2,27 @@ name: Go
 
 on:
   push:
-    branches: main
+    branches: [main]
   pull_request:
     types: [opened, synchronize, ready_for_review]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: "1.23"
+          go-version: "1.25"
 
       - name: Check Formatting
         run: |
@@ -40,10 +46,24 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      - name: Static analysis
+        run: |
+          export STATICCHECK_CACHE="${{ runner.temp }}/staticcheck"
+          go install "honnef.co/go/tools/cmd/staticcheck@latest"
+          $(go env GOPATH)/bin/staticcheck ./...
+        shell: bash
+
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 
+      - name: Setup Helm
+        uses: Azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint charts/*
+
       - name: Codecov
         uses: codecov/codecov-action@v5
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          fail_ci_if_error: true
+          use_oidc: true
