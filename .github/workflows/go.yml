@@ -56,6 +56,13 @@ jobs:
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 
+      - name: Fuzz
+        run: |
+          go test -fuzz=FuzzNewSecretDescriptorList -fuzztime=10s ./provider/
+          go test -fuzz=FuzzValidateFilePermission -fuzztime=10s ./provider/
+          go test -fuzz=FuzzGetJsonSecrets -fuzztime=10s ./provider/
+          go test  -fuzz=FuzzMountAttributes -fuzztime=10s ./server/
+
       - name: Setup Helm
         uses: Azure/setup-helm@v4
 

@@ -396,6 +396,10 @@ func NewSecretDescriptorList(mountDir, translate, objectSpec string, regions []s
 	seenAliases := make(map[string]bool)
 	for _, descriptor := range descriptors {
 
+		if descriptor == nil {
+			return nil, fmt.Errorf("Empty descriptor entry in SecretProviderClass")
+		}
+
 		descriptor.translate = translate
 		descriptor.mountDir = mountDir
 		err = descriptor.validateSecretDescriptor(regions)
