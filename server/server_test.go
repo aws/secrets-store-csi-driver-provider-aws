@@ -911,7 +911,7 @@ var mountTests []testCase = []testCase{
 		ssmRsp:     []*ssm.GetParametersOutput{},
 		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "IAM role must be associated",
+		expErr:     "An IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1375,7 +1375,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestParm1", "objectType": "ssmparameter"},
 		},
-		expErr:     "IAM role must be associated",
+		expErr:     "An IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -2984,7 +2984,7 @@ func TestMountMaxRegionsExceeded(t *testing.T) {
 	req := &v1alpha1.MountRequest{Attributes: string(attr), TargetPath: dir, Permission: "420"}
 
 	_, err := svr.Mount(context.Background(), req)
-	if err != nil && strings.Contains(err.Error(), "max number of regions exceeded") {
+	if err != nil && strings.Contains(err.Error(), "Max number of region(s) exceeded") {
 		t.Fatal("Guard should not fire with 1 region")
 	}
 }

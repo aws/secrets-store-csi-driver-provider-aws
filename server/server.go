@@ -196,7 +196,7 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		return nil, err
 	}
 	if len(awsConfigs) > 2 {
-		return nil, fmt.Errorf("max number of regions exceeded: %s", strings.Join(regions, ", "))
+		return nil, fmt.Errorf("Max number of region(s) exceeded: %s", strings.Join(regions, ", "))
 	}
 
 	// Get the list of secrets to mount. These will be grouped together by type
@@ -249,7 +249,7 @@ func (s *CSIDriverProviderServer) getRoleARN(ctx context.Context, nameSpace, svc
 	}
 	roleArn := rsp.Annotations[roleArnAnnotation]
 	if roleArn == "" {
-		return "", fmt.Errorf("IAM role must be associated with service account %s (namespace: %s) - https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html", svcAcct, nameSpace)
+		return "", fmt.Errorf("An IAM role must be associated with service account %s (namespace: %s)", svcAcct, nameSpace)
 	}
 	klog.Infof("Role ARN for %s:%s is %s", nameSpace, svcAcct, roleArn)
 	return roleArn, nil
