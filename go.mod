@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.6
 	github.com/aws/smithy-go v1.24.0
 	github.com/jmespath/go-jmespath v0.4.0
-	google.golang.org/grpc v1.78.0
+	google.golang.org/grpc v1.79.3
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
 	k8s.io/client-go v0.35.0
