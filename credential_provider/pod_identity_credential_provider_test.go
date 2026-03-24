@@ -38,7 +38,7 @@ func TestParseAddressPreference(t *testing.T) {
 
 func TestNewPodIdentityCredentialProvider(t *testing.T) {
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion, "", nil, "test-app-id", "pod-identity-test-token",
+		"someRegion", "", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -63,7 +63,7 @@ func TestNewPodIdentityCredentialProviderTimeout(t *testing.T) {
 	oneHundredMs := 100 * time.Millisecond
 
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion, "", &oneHundredMs, "test-app-id", "pod-identity-test-token",
+		"someRegion", "", &oneHundredMs, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -118,7 +118,7 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_IPv4(t *testing.T) {
 	podIdentityAgentEndpointIPv4 = mockServer.URL
 
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion, "ipv4", nil, "test-app-id", "pod-identity-test-token",
+		"someRegion", "ipv4", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
@@ -150,7 +150,7 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_IPv6(t *testing.T) {
 	podIdentityAgentEndpointIPv4 = "http://127.0.0.1:1" // Force IPv4 to fail
 
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion, "ipv6", nil, "test-app-id", "pod-identity-test-token",
+		"someRegion", "ipv6", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
@@ -192,7 +192,7 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_AutoFallback(t *testing.T) {
 	//
 	// Verify that explicitly selecting IPv6 works when IPv4 is down.
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion, "ipv6", &shortTimeout, "test-app-id", "pod-identity-test-token",
+		"someRegion", "ipv6", &shortTimeout, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)
@@ -221,7 +221,7 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_BothFail(t *testing.T) {
 
 	shortTimeout := 100 * time.Millisecond
 	provider, err := NewPodIdentityCredentialProvider(
-		testRegion, "ipv4", &shortTimeout, "test-app-id", "pod-identity-test-token",
+		"someRegion", "ipv4", &shortTimeout, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
 		t.Fatalf("Failed to create provider: %v", err)

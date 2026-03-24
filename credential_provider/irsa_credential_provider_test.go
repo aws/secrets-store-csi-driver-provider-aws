@@ -7,7 +7,7 @@ import (
 
 func TestNewIRSACredentialProvider(t *testing.T) {
 	provider, err := NewIRSACredentialProvider(
-		testRegion,
+		"someRegion",
 		"arn:aws:iam::123456789012:role/test-role",
 		"test-app-id",
 		"irsa-test-token",
@@ -33,7 +33,7 @@ func TestCSITokenFetcher(t *testing.T) {
 
 func TestIRSACredentialProvider_GetAWSConfig(t *testing.T) {
 	provider, err := NewIRSACredentialProvider(
-		testRegion,
+		"someRegion",
 		"arn:aws:iam::123456789012:role/test-role",
 		"test-app-id",
 		"irsa-test-token",
