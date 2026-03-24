@@ -18,7 +18,7 @@ func (f *csiTokenFetcher) GetIdentityToken() ([]byte, error) {
 	return []byte(f.token), nil
 }
 
-// IRSACredentialProvider implements ConfigProvider using IAM Roles for Service Accounts.
+// IRSACredentialProvider implements CredentialProvider using IAM Roles for Service Accounts
 type IRSACredentialProvider struct {
 	region  string
 	roleArn string

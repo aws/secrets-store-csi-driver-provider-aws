@@ -33,7 +33,7 @@ func (p *csiTokenProvider) GetToken() (string, error) {
 	return p.token, nil
 }
 
-// PodIdentityCredentialProvider implements ConfigProvider using EKS Pod Identity.
+// PodIdentityCredentialProvider implements CredentialProvider using pod identity
 type PodIdentityCredentialProvider struct {
 	region               string
 	preferredAddressType string
@@ -76,12 +76,9 @@ func parseAddressPreference(preferredAddressType string) string {
 	}
 }
 
-// GetAWSConfig attempts to connect to the Pod Identity Agent, trying endpoints
-// based on the preferred address type (IPv4 first by default, with IPv6 fallback).
 func (p *PodIdentityCredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	var configErr error
 	preference := parseAddressPreference(p.preferredAddressType)
-
 	if preference == "auto" || preference == "ipv4" {
 		config, err := p.getConfigWithEndpoint(ctx, podIdentityAgentEndpointIPv4)
 		if err != nil {

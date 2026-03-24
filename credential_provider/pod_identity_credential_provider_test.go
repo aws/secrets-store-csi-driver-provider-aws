@@ -12,23 +12,25 @@ import (
 
 func TestParseAddressPreference(t *testing.T) {
 	tests := []struct {
+		name     string
 		input    string
 		expected string
 	}{
-		{"", "auto"},
-		{"auto", "auto"},
-		{"ipv4", "ipv4"},
-		{"ipv6", "ipv6"},
-		{"IPv4", "ipv4"},
-		{"IPv6", "ipv6"},
-		{"invalid", "auto"},
+		{"Empty string", "", "auto"},
+		{"Auto preference", "auto", "auto"},
+		{"IPv4 preference", "ipv4", "ipv4"},
+		{"IPv6 preference", "ipv6", "ipv6"},
+		{"IPv4 uppercase", "IPv4", "ipv4"},
+		{"IPv6 uppercase", "IPv6", "ipv6"},
+		{"Invalid preference", "invalid", "auto"},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			result := parseAddressPreference(tt.input)
 			if result != tt.expected {
-				t.Errorf("parseAddressPreference(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("parseAddressPreference(%q) = %q, want %q",
+					tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -39,10 +41,10 @@ func TestNewPodIdentityCredentialProvider(t *testing.T) {
 		testRegion, "", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 	if provider == nil {
-		t.Fatal("expected provider to be non-nil")
+		t.Fatal("Expected provider to be non-nil")
 	}
 }
 
@@ -50,10 +52,10 @@ func TestCSITokenProvider(t *testing.T) {
 	provider := &csiTokenProvider{token: "test-token"}
 	token, err := provider.GetToken()
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Errorf("Unexpected error: %v", err)
 	}
 	if token != "test-token" {
-		t.Errorf("expected token %q, got %q", "test-token", token)
+		t.Errorf("Expected token %q, got %q", "test-token", token)
 	}
 }
 
@@ -64,12 +66,12 @@ func TestNewPodIdentityCredentialProviderTimeout(t *testing.T) {
 		testRegion, "", &oneHundredMs, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	podProvider := provider.(*PodIdentityCredentialProvider)
 	if podProvider.httpClient == nil {
-		t.Error("expected httpClient to be set when timeout is provided")
+		t.Error("Expected httpClient to be set when timeout is provided")
 	}
 }
 
@@ -119,21 +121,22 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_IPv4(t *testing.T) {
 		testRegion, "ipv4", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
-		t.Fatalf("failed to create provider: %v", err)
+		t.Fatalf("Failed to create provider: %v", err)
 	}
 
 	cfg, err := provider.GetAWSConfig(context.Background())
+
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Expected no error, got: %v", err)
 	}
 
 	creds, err := cfg.Credentials.Retrieve(context.Background())
 	if err != nil {
-		t.Fatalf("unexpected credential retrieval error: %v", err)
+		t.Fatalf("Unexpected credential retrieval error: %v", err)
 	}
 
 	if creds.AccessKeyID != "TEST_ACCESS_KEY" {
-		t.Errorf("expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
+		t.Errorf("Expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
 	}
 }
 
@@ -150,21 +153,22 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_IPv6(t *testing.T) {
 		testRegion, "ipv6", nil, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
-		t.Fatalf("failed to create provider: %v", err)
+		t.Fatalf("Failed to create provider: %v", err)
 	}
 
 	cfg, err := provider.GetAWSConfig(context.Background())
+
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Expected no error, got: %v", err)
 	}
 
 	creds, err := cfg.Credentials.Retrieve(context.Background())
 	if err != nil {
-		t.Fatalf("unexpected credential retrieval error: %v", err)
+		t.Fatalf("Unexpected credential retrieval error: %v", err)
 	}
 
 	if creds.AccessKeyID != "TEST_ACCESS_KEY" {
-		t.Errorf("expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
+		t.Errorf("Expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
 	}
 }
 
@@ -191,20 +195,21 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_AutoFallback(t *testing.T) {
 		testRegion, "ipv6", &shortTimeout, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
-		t.Fatalf("failed to create provider: %v", err)
+		t.Fatalf("Failed to create provider: %v", err)
 	}
 
 	cfg, err := provider.GetAWSConfig(context.Background())
+
 	if err != nil {
-		t.Fatalf("GetAWSConfig failed: %v", err)
+		t.Fatalf("Expected no error, got: %v", err)
 	}
 
 	creds, err := cfg.Credentials.Retrieve(context.Background())
 	if err != nil {
-		t.Fatalf("Retrieve failed (IPv6 should work): %v", err)
+		t.Fatalf("Unexpected credential retrieval error: %v", err)
 	}
 	if creds.AccessKeyID != "TEST_ACCESS_KEY" {
-		t.Errorf("expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
+		t.Errorf("Expected AccessKeyID %q, got %q", "TEST_ACCESS_KEY", creds.AccessKeyID)
 	}
 }
 
@@ -219,17 +224,18 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_BothFail(t *testing.T) {
 		testRegion, "ipv4", &shortTimeout, "test-app-id", "pod-identity-test-token",
 	)
 	if err != nil {
-		t.Fatalf("failed to create provider: %v", err)
+		t.Fatalf("Failed to create provider: %v", err)
 	}
 
 	cfg, err := provider.GetAWSConfig(context.Background())
+
 	if err != nil {
-		t.Fatalf("GetAWSConfig should succeed (lazy credentials): %v", err)
+		t.Fatalf("Expected no error during config creation, got: %v", err)
 	}
 
 	// Retrieve fails because the endpoint is unreachable
 	_, err = cfg.Credentials.Retrieve(context.Background())
 	if err == nil {
-		t.Fatal("expected error when endpoint is unreachable")
+		t.Fatal("Expected error but got none")
 	}
 }

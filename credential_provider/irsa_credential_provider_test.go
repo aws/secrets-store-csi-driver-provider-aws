@@ -13,10 +13,10 @@ func TestNewIRSACredentialProvider(t *testing.T) {
 		"irsa-test-token",
 	)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 	if provider == nil {
-		t.Fatal("expected provider to be non-nil")
+		t.Fatal("Expected provider to be non-nil")
 	}
 }
 
@@ -24,10 +24,10 @@ func TestCSITokenFetcher(t *testing.T) {
 	fetcher := &csiTokenFetcher{token: "test-token"}
 	token, err := fetcher.GetIdentityToken()
 	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+		t.Errorf("Unexpected error: %v", err)
 	}
 	if string(token) != "test-token" {
-		t.Errorf("expected token %q, got %q", "test-token", string(token))
+		t.Errorf("Expected token %q, got %q", "test-token", string(token))
 	}
 }
 
@@ -39,14 +39,15 @@ func TestIRSACredentialProvider_GetAWSConfig(t *testing.T) {
 		"irsa-test-token",
 	)
 	if err != nil {
-		t.Fatalf("failed to create provider: %v", err)
+		t.Fatalf("Failed to create provider: %v", err)
 	}
 
 	cfg, err := provider.GetAWSConfig(context.Background())
+
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 	if cfg.Credentials == nil {
-		t.Error("expected credentials to be non-nil")
+		t.Error("Expected credentials to be non-nil")
 	}
 }

@@ -1,5 +1,5 @@
 /*
- * Package responsible for receiving incoming mount requests from the driver.
+ * Package responsible for reciving incomming mount requests from the driver.
  *
  * This package acts as the high level orchestrator; unpacking the message and
  * calling the provider implementation to fetch the secrets.
@@ -52,9 +52,9 @@ const (
 // ProviderVersion is injected at build time from the Makefile.
 var ProviderVersion = "unknown"
 
-// CSIDriverProviderServer implements the Secrets Store CSI Driver provider for AWS.
+// A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
 //
-// This server receives mount requests and then retrieves and stores the secrets
+// This server receives mount requests and then retreives and stores the secrets
 // from that request. The details of what secrets are required and where to
 // store them are in the request. The secrets will be retrieved using the AWS
 // credentials of the IAM role associated with the pod. If there is a failure
@@ -68,7 +68,7 @@ type CSIDriverProviderServer struct {
 	eksAddonVersion        string
 }
 
-// NewServer creates the server to handle incoming mount requests.
+// Factory function to create the server to handle incoming mount requests.
 func NewServer(
 	secretProviderFact provider.ProviderFactoryFactory,
 	k8client k8sv1.CoreV1Interface,
@@ -95,7 +95,7 @@ func (s *CSIDriverProviderServer) appID() string {
 	return ProviderName + "-" + version
 }
 
-// Mount handles each incoming mount request.
+// Mount handles each incomming mount request.
 //
 // The provider will fetch the secret value from the secret provider (Parameter
 // Store or Secrets Manager) and write the secrets to the mount point. The
@@ -255,7 +255,7 @@ func (s *CSIDriverProviderServer) getRoleARN(ctx context.Context, nameSpace, svc
 	return roleArn, nil
 }
 
-// getAwsRegions resolves the primary and optional failover region for a mount request.
+// Private helper to get the aws lookup regions for a given pod.
 //
 // When a region in the mount request is available, the region is added as primary region to the lookup region list
 // If a region is not specified in the mount request, we must lookup the region from node label and add as primary region to the lookup region list
@@ -283,7 +283,11 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 	return lookupRegionList, nil
 }
 
-// getAwsConfigs builds an AWS config for each lookup region using the pod's credentials.
+// Private helper to get the aws configs for all the lookup regions for a given pod.
+//
+// Gets the pod's AWS creds for each lookup region
+// Establishes the connection using Aws cred for each lookup region
+// If at least one config is not created, error will be thrown
 func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token string) ([]aws.Config, error) {
 	var configs []aws.Config
 	appID := s.appID()
@@ -311,7 +315,7 @@ func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []s
 	return configs, nil
 }
 
-// Version returns the provider plugin version information.
+// Return the provider plugin version information to the driver.
 func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.VersionRequest) (*v1alpha1.VersionResponse, error) {
 
 	return &v1alpha1.VersionResponse{
@@ -322,11 +326,10 @@ func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.Ver
 
 }
 
-// getRegionFromNode resolves the AWS region by looking up the pod's node and
-// reading the topology.kubernetes.io/region label. Falls back to AWS_REGION env var.
+// Private helper to get the region information for a given pod.
 //
 // When a region is not specified in the mount request, we must lookup the
-// region of the requesting pod by first describing the pod to find the node and
+// region of the requesting pod by first descriing the pod to find the node and
 // then describing the node to get the region label.
 //
 // See also: https://pkg.go.dev/k8s.io/client-go/kubernetes/typed/core/v1
@@ -360,13 +363,12 @@ func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespa
 	return region, nil
 }
 
-// writeFile writes a secret to the mount point. Uses a temp file + rename for
-// near-atomic updates to avoid pods reading partial files during rotation.
+// Private helper to write a new secret or perform an update on a previously mounted secret.
 //
-// If the driver writes the secrets just return the driver data. Otherwise,
+// If the driver writes the secrets just return the dirver data. Otherwise,
 // we write the secret to a temp file and then rename in order to get as close
 // to an atomic update as the file system supports. This is to avoid having
-// pod applications inadvertently reading an empty or partial files as it is
+// pod applications inadvertantly reading an empty or partial files as it is
 // being updated.
 func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode os.FileMode) (*v1alpha1.File, error) {
 
