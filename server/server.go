@@ -172,23 +172,9 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
-	// Extract the specific token needed for the chosen auth method.
-	var token string
-	var roleArn string
-	if usePodIdentity {
-		token, err = utils.GetTokenForAudience(parsedTokens, utils.PodIdentityAudience)
-		if err != nil {
-			return nil, fmt.Errorf("Pod Identity token extraction failed: %w", err)
-		}
-	} else {
-		token, err = utils.GetTokenForAudience(parsedTokens, utils.IRSAAudience)
-		if err != nil {
-			return nil, fmt.Errorf("IRSA token extraction failed: %w", err)
-		}
-		roleArn, err = s.getRoleARN(ctx, nameSpace, svcAcct)
-		if err != nil {
-			return nil, err
-		}
+	token, roleArn, err := s.resolveCredentials(ctx, usePodIdentity, parsedTokens, nameSpace, svcAcct)
+	if err != nil {
+		return nil, err
 	}
 
 	awsConfigs, err := s.getAwsConfigs(ctx, regions, usePodIdentity, preferredAddressType, roleArn, token)
@@ -239,6 +225,27 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		ov = append(ov, curVerMap[id])
 	}
 	return &v1alpha1.MountResponse{Files: files, ObjectVersion: ov}, nil
+}
+
+// resolveCredentials extracts the CSI token for the chosen auth method and,
+// for IRSA, looks up the IAM role ARN from the service account annotation.
+func (s *CSIDriverProviderServer) resolveCredentials(ctx context.Context, usePodIdentity bool, tokens map[string]utils.ServiceAccountToken, nameSpace, svcAcct string) (token, roleArn string, err error) {
+	if usePodIdentity {
+		token, err = utils.GetTokenForAudience(tokens, utils.PodIdentityAudience)
+		if err != nil {
+			return "", "", fmt.Errorf("Pod Identity token extraction failed: %w", err)
+		}
+	} else {
+		token, err = utils.GetTokenForAudience(tokens, utils.IRSAAudience)
+		if err != nil {
+			return "", "", fmt.Errorf("IRSA token extraction failed: %w", err)
+		}
+		roleArn, err = s.getRoleARN(ctx, nameSpace, svcAcct)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return token, roleArn, nil
 }
 
 // getRoleARN looks up the IAM role ARN from the service account annotation.
