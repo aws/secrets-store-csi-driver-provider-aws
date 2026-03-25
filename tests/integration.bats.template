@@ -49,11 +49,14 @@ setup_file() {
 
 {{AUTH_SETUP}}
 
+	log "Create GHCR secret"
+	KUBECONFIG=${{KUBECONFIG_VAR}} kubectl create secret docker-registry ghcr-secret --docker-server=ghcr.io --docker-username=$GITHUB_ACTOR --docker-password=$GITHUB_TOKEN -n $NAMESPACE
+
 	log "Adding secrets-store-csi-driver Helm repository"
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
 
 	log "Installing secrets-store-csi-driver via Helm"
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true --set tokenRequests[0].audience=sts.amazonaws.com --set tokenRequests[1].audience=pods.eks.amazonaws.com
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install --wait --wait-for-jobs --timeout=30s csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true --set tokenRequests[0].audience=sts.amazonaws.com --set tokenRequests[1].audience=pods.eks.amazonaws.com
 
 	log "Cluster setup completed for $CLUSTER_NAME"
 }
@@ -99,8 +102,9 @@ validate_jmes_mount() {
 	log "Installing AWS provider"
 
 	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${{KUBECONFIG_VAR}} apply -f -
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=csi-secrets-store-provider-aws"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm package --dependency-update ../charts/secrets-store-csi-driver-provider-aws
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm install -n $NAMESPACE --wait --wait-for-jobs --timeout=30s csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws --set image.repository=$PRIVREPO --set image.tag=$PRIVTAG --set secrets-store-csi-driver.install=false --set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]'
 
 	PROVIDER_POD=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=csi-secrets-store-provider-aws -o jsonpath="{.items[0].metadata.name}")
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
@@ -122,8 +126,7 @@ validate_jmes_mount() {
 @test "secretproviderclasses crd is established" {
 	log "Verifying secretproviderclasses CRD is established"
 
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} wait --namespace $NAMESPACE --for condition=established --timeout=60s crd/secretproviderclasses.secrets-store.csi.x-k8s.io"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} wait --namespace $NAMESPACE --for condition=established --timeout=60s crd/secretproviderclasses.secrets-store.csi.x-k8s.io
 
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} get crd/secretproviderclasses.secrets-store.csi.x-k8s.io
 	assert_success
@@ -136,8 +139,7 @@ validate_jmes_mount() {
 
 	envsubst < BasicTestMountSPC-{{ARCH}}-{{AUTH_TYPE}}.yaml | kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f -
 
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get secretproviderclasses.secrets-store.csi.x-k8s.io/basic-test-mount-spc-{{ARCH}}-{{AUTH_TYPE}} -o yaml | grep aws"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get secretproviderclasses.secrets-store.csi.x-k8s.io/basic-test-mount-spc-{{ARCH}}-{{AUTH_TYPE}} -o yaml | grep aws
 
 	log "AWS SecretProviderClass CRD deployment completed"
 }
@@ -146,8 +148,7 @@ validate_jmes_mount() {
 	log "Starting CSI inline volume test with pod portability"
 
 	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f BasicTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}
 
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$POD_NAME
 	assert_success
