@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -237,5 +238,63 @@ func TestPodIdentityCredentialProvider_GetAWSConfig_BothFail(t *testing.T) {
 	_, err = cfg.Credentials.Retrieve(context.Background())
 	if err == nil {
 		t.Fatal("Expected error but got none")
+	}
+}
+
+func setupFailingMockPodIdentityAgent(t *testing.T, isIPv4 bool, statusCode int) *httptest.Server {
+	t.Helper()
+	var listener net.Listener
+	var err error
+	if isIPv4 {
+		listener, err = net.Listen("tcp4", "127.0.0.1:0")
+	} else {
+		listener, err = net.Listen("tcp6", "[::1]:0")
+	}
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+
+	srv := &httptest.Server{
+		Listener:    listener,
+		EnableHTTP2: true,
+		Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(statusCode)
+		})},
+	}
+	srv.Start()
+	return srv
+}
+
+// TestPodIdentityCredentialProvider_GetAWSConfig_AgentReturns500 verifies behavior
+// when the Pod Identity Agent is reachable but returns a server error (e.g. token
+// exchange failure). This is distinct from the unreachable-endpoint case.
+func TestPodIdentityCredentialProvider_GetAWSConfig_AgentReturns500(t *testing.T) {
+	defer resetEndpoints()
+
+	mockServer := setupFailingMockPodIdentityAgent(t, true, http.StatusInternalServerError)
+	defer mockServer.Close()
+
+	podIdentityAgentEndpointIPv4 = mockServer.URL
+
+	provider, err := NewPodIdentityCredentialProvider(
+		"someRegion", "ipv4", nil, "test-app-id", "pod-identity-test-token",
+	)
+	if err != nil {
+		t.Fatalf("Failed to create provider: %v", err)
+	}
+
+	cfg, err := provider.GetAWSConfig(context.Background())
+
+	if err != nil {
+		t.Fatalf("Expected no error during config creation, got: %v", err)
+	}
+
+	_, err = cfg.Credentials.Retrieve(context.Background())
+	if err == nil {
+		t.Fatal("Expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "failed to refresh cached credentials") {
+		t.Errorf("Expected error containing 'failed to refresh cached credentials', got: %v", err)
 	}
 }
