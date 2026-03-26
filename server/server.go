@@ -296,7 +296,7 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
 func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token string) ([]aws.Config, error) {
-	var configs []aws.Config
+	var awsConfigsList []aws.Config
 	appID := s.appID()
 
 	for _, region := range regions {
@@ -312,14 +312,14 @@ func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []s
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
 
-		cfg, err := credProvider.GetAWSConfig(ctx)
+		awsConfig, err := credProvider.GetAWSConfig(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		configs = append(configs, cfg)
+		awsConfigsList = append(awsConfigsList, awsConfig)
 	}
 
-	return configs, nil
+	return awsConfigsList, nil
 }
 
 // Return the provider plugin version information to the driver.
