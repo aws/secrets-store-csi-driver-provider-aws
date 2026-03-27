@@ -1,5 +1,5 @@
 $(eval AWS_REGION=$(shell echo $${REGION:-us-east-1}))
-$(eval REGISTRY_NAME=$(shell echo $${PRIVREPO:-public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:latest}))
+$(eval REGISTRY_NAME=$(shell echo $${PRIVREPO:-public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws}))
 $(eval REPOBASE=$(shell echo $(REGISTRY_NAME) | cut -f1 -d/))
 
 ifeq ($(REPOBASE), public.ecr.aws)
@@ -9,8 +9,8 @@ ECRCMD=ecr
 endif
 
 MAJOR_REV=2
-MINOR_REV=1
-PATCH_REV=0
+MINOR_REV=2
+PATCH_REV=2
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \

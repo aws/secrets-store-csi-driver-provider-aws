@@ -33,19 +33,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build the Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=fakeversion' -extldflags '-static'
           context: .
@@ -83,10 +83,10 @@ jobs:
 
     steps:
       - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@v5
 
       - name: Setup Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
 
       - name: Setup eksctl
         run: |
@@ -113,26 +113,44 @@ jobs:
 
       - name: Setup Bats and bats libs
         id: setup-bats
-        uses: bats-core/bats-action@3.0.1
+        uses: bats-core/bats-action@4.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.ROLE_ARN }}
           role-session-name: csi-driver-ci-${{ github.run_id }}-${{ matrix.arch }}
           aws-region: us-west-2
+          role-duration-seconds: 14400
+
+      - name: Clean up stale clusters
+        run: |
+          CLUSTER_NAME=integ-cluster-${{ matrix.arch-short }}-${{ matrix.auth_type }}
+          if eksctl get cluster --name "$CLUSTER_NAME" --region us-west-2 2>/dev/null; then
+            echo "Found stale cluster $CLUSTER_NAME, deleting..."
+            eksctl delete cluster --name "$CLUSTER_NAME" --region us-west-2 --wait
+          fi
 
       - name: Run integ tests
         run: cd tests && ./run-tests.sh ${{ matrix.arch-short }}-${{ matrix.auth_type }}
         env:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
-          PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build:latest-${{ matrix.arch }}-${{ github.run_id }}
+          PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build
+          PRIVTAG: latest-${{ matrix.arch }}-${{ github.run_id }}
+          REGION: us-west-2
+          FAILOVERREGION: us-east-2
 
       - name: Run cleanup
         if: always()
         run: cd tests && ./run-tests.sh clean ${{ matrix.arch-short }}-${{ matrix.auth_type }}
+        env:
+          REGION: us-west-2
+          FAILOVERREGION: us-east-2

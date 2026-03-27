@@ -16,9 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
-	"github.com/aws/smithy-go/middleware"
 
-	smithyhttp "github.com/aws/smithy-go/transport/http"
 	k8sv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -79,11 +77,22 @@ func NewAuth(
 
 }
 
+// getAppID returns the AppID string for User-Agent
+func (p Auth) getAppID() string {
+	version := ProviderVersion
+	if p.eksAddonVersion != "" {
+		version = p.eksAddonVersion
+	}
+	return ProviderName + "-" + version
+}
+
 // Get the AWS config associated with a given pod's service account.
 // The returned config is capable of automatically refreshing creds as needed
 // by using a private TokenFetcher helper.
 func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 	var credProvider credential_provider.ConfigProvider
+
+	appID := p.getAppID()
 
 	if p.usePodIdentity {
 		klog.Infof("Using Pod Identity for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
@@ -91,49 +100,14 @@ func (p Auth) GetAWSConfig(ctx context.Context) (aws.Config, error) {
 			klog.Infof("Using custom Pod Identity timeout: %v", *p.podIdentityHttpTimeout)
 		}
 		var err error
-		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, p.k8sClient)
+		credProvider, err = credential_provider.NewPodIdentityCredentialProvider(p.region, p.nameSpace, p.svcAcc, p.podName, p.preferredAddressType, p.podIdentityHttpTimeout, appID, p.k8sClient)
 		if err != nil {
 			return aws.Config{}, err
 		}
 	} else {
 		klog.Infof("Using IAM Roles for Service Accounts for authentication in namespace: %s, service account: %s", p.nameSpace, p.svcAcc)
-		credProvider = credential_provider.NewIRSACredentialProvider(p.stsClient, p.region, p.nameSpace, p.svcAcc, p.k8sClient)
+		credProvider = credential_provider.NewIRSACredentialProvider(p.stsClient, p.region, p.nameSpace, p.svcAcc, appID, p.k8sClient)
 	}
 
-	cfg, err := credProvider.GetAWSConfig(ctx)
-	if err != nil {
-		return aws.Config{}, err
-	}
-
-	// Add the user agent to the config
-	cfg.APIOptions = append(cfg.APIOptions, func(stack *middleware.Stack) error {
-		return stack.Build.Add(&userAgentMiddleware{
-			providerName:    ProviderName,
-			eksAddonVersion: p.eksAddonVersion,
-		}, middleware.After)
-	})
-
-	return cfg, nil
-}
-
-type userAgentMiddleware struct {
-	providerName, eksAddonVersion string
-}
-
-func (m *userAgentMiddleware) ID() string {
-	return "AppendCSIDriverVersionToUserAgent"
-}
-
-func (m *userAgentMiddleware) HandleBuild(ctx context.Context, in middleware.BuildInput, next middleware.BuildHandler) (
-	out middleware.BuildOutput, metadata middleware.Metadata, err error) {
-	req, ok := in.Request.(*smithyhttp.Request)
-	if !ok {
-		return next.HandleBuild(ctx, in)
-	}
-	userAgentString := m.providerName + "/" + ProviderVersion
-	if m.eksAddonVersion != "" {
-		userAgentString += " eksAddonVersion/" + m.eksAddonVersion
-	}
-	req.Header.Add("User-Agent", userAgentString)
-	return next.HandleBuild(ctx, in)
+	return credProvider.GetAWSConfig(ctx)
 }

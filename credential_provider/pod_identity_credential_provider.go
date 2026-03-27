@@ -72,6 +72,7 @@ func (p *podIdentityTokenFetcher) GetToken() (string, error) {
 type PodIdentityCredentialProvider struct {
 	region               string
 	preferredAddressType string
+	appID                string
 	fetcher              endpointcreds.AuthTokenProvider
 	httpClient           *awshttp.BuildableClient
 }
@@ -79,9 +80,9 @@ type PodIdentityCredentialProvider struct {
 func NewPodIdentityCredentialProvider(
 	region, nameSpace, svcAcc, podName, preferredAddressType string,
 	podIdentityHttpTimeout *time.Duration,
+	appID string,
 	k8sClient k8sv1.CoreV1Interface,
 ) (ConfigProvider, error) {
-	// Add validation if needed
 	if region == "" {
 		return nil, fmt.Errorf("region cannot be empty")
 	}
@@ -92,6 +93,7 @@ func NewPodIdentityCredentialProvider(
 	pod_identity := PodIdentityCredentialProvider{
 		region:               region,
 		preferredAddressType: preferredAddressType,
+		appID:                appID,
 		fetcher:              newPodIdentityTokenFetcher(nameSpace, svcAcc, podName, k8sClient),
 	}
 
@@ -155,5 +157,6 @@ func (p *PodIdentityCredentialProvider) getConfigWithEndpoint(ctx context.Contex
 	return config.LoadDefaultConfig(ctx,
 		config.WithCredentialsProvider(provider),
 		config.WithRegion(p.region),
+		config.WithAppID(p.appID),
 	)
 }
