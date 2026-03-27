@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -64,13 +64,13 @@ jobs:
           go test  -fuzz=FuzzMountAttributes -fuzztime=10s ./server/
 
       - name: Setup Helm
-        uses: Azure/setup-helm@v4
+        uses: Azure/setup-helm@v5
 
       - name: Helm lint
         run: helm lint charts/*
 
       - name: Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           fail_ci_if_error: true
           use_oidc: true
