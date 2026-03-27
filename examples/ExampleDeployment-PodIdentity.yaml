@@ -38,7 +38,7 @@ spec:
               secretProviderClass: "nginx-pod-identity-deployment-aws-secrets"
       containers:
         - name: nginx-pod-identity-deployment
-          image: nginx
+          image: public.ecr.aws/nginx/nginx:latest
           ports:
             - containerPort: 80
           volumeMounts:
