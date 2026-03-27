@@ -1,0 +1,81 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem -count=5 -timeout=30m ./provider/ ./server/ ./utils/ | tee bench-result.txt
+
+      - name: Download previous benchmark result
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: bench-baseline.txt
+          key: benchmark-baseline-${{ runner.os }}-main
+
+      - name: Compare benchmarks
+        if: github.event_name == 'pull_request' && hashFiles('bench-baseline.txt') != ''
+        run: |
+          go install golang.org/x/perf/cmd/benchstat@latest
+          benchstat bench-baseline.txt bench-result.txt | tee bench-comparison.txt
+
+      - name: Post benchmark comparison to PR
+        if: github.event_name == 'pull_request' && hashFiles('bench-comparison.txt') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comparison = fs.readFileSync('bench-comparison.txt', 'utf8');
+            const body = `## Benchmark Comparison\n\n\`\`\`\n${comparison}\n\`\`\`\n`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.startsWith('## Benchmark Comparison'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Save baseline for main
+        if: github.ref == 'refs/heads/main'
+        run: cp bench-result.txt bench-baseline.txt
+
+      - name: Cache baseline
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: bench-baseline.txt
+          key: benchmark-baseline-${{ runner.os }}-main
