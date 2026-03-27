@@ -24,17 +24,21 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
-	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
+	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
+	"github.com/aws/secrets-store-csi-driver-provider-aws/utils"
 )
 
 // Version filled in by Makefile during build.
 var Version string
 
 const (
+	ProviderName = "secrets-store-csi-driver-provider-aws"
+
 	namespaceAttrib            = "csi.storage.k8s.io/pod.namespace"
 	acctAttrib                 = "csi.storage.k8s.io/serviceAccount.name"
 	podnameAttrib              = "csi.storage.k8s.io/pod.name"
+	serviceAccountTokensAttrib = "csi.storage.k8s.io/serviceAccount.tokens"
 	regionAttrib               = "region"                        // The attribute name for the region in the SecretProviderClass
 	transAttrib                = "pathTranslation"               // Path translation char
 	regionLabel                = "topology.kubernetes.io/region" // The node label giving the region
@@ -42,7 +46,11 @@ const (
 	failoverRegionAttrib       = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
 	usePodIdentityAttrib       = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
 	preferredAddressTypeAttrib = "preferredAddressType"          // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
+	roleArnAnnotation          = "eks.amazonaws.com/role-arn"
 )
+
+// ProviderVersion is injected at build time from the Makefile.
+var ProviderVersion = "unknown"
 
 // A Secrets Store CSI Driver provider implementation for AWS Secrets Manager and SSM Parameter Store.
 //
@@ -76,7 +84,15 @@ func NewServer(
 		podIdentityHttpTimeout: podIdentityHttpTimeout,
 		eksAddonVersion:        eksAddonVersion,
 	}, nil
+}
 
+// appID returns the User-Agent app identifier string.
+func (s *CSIDriverProviderServer) appID() string {
+	version := ProviderVersion
+	if s.eksAddonVersion != "" {
+		version = s.eksAddonVersion
+	}
+	return ProviderName + "-" + version
 }
 
 // Mount handles each incomming mount request.
@@ -114,10 +130,12 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	failoverRegion := attrib[failoverRegionAttrib]
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
 	preferredAddressType := attrib[preferredAddressTypeAttrib]
+	serviceAccountTokens := attrib[serviceAccountTokensAttrib]
 
-	// Validate preferred address type
-	if preferredAddressType != "ipv4" && preferredAddressType != "ipv6" && preferredAddressType != "auto" && preferredAddressType != "" {
-		return nil, fmt.Errorf("invalid preferred address type: %s", preferredAddressType)
+	// Parse CSI tokens once upfront for clear error reporting.
+	parsedTokens, err := utils.ParseServiceAccountTokens(serviceAccountTokens)
+	if err != nil {
+		return nil, fmt.Errorf("CSI token error: %w - ensure tokenRequests is configured in CSIDriver spec", err)
 	}
 
 	// Make a map of the currently mounted versions (if any)
@@ -148,20 +166,23 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	// Default to use IRSA if usePodIdentity parameter is not set in the mount request
 	usePodIdentity := false
 	if usePodIdentityStr != "" {
-		var err error
 		usePodIdentity, err = strconv.ParseBool(usePodIdentityStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse usePodIdentity value, error: %+v", err)
 		}
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, nameSpace, svcAcct, s.eksAddonVersion, regions, usePodIdentity, podName, preferredAddressType, s.podIdentityHttpTimeout)
+	token, roleArn, err := s.resolveCredentials(ctx, usePodIdentity, parsedTokens, nameSpace, svcAcct)
+	if err != nil {
+		return nil, err
+	}
+
+	awsConfigs, err := s.getAwsConfigs(ctx, regions, usePodIdentity, preferredAddressType, roleArn, token)
 	if err != nil {
 		return nil, err
 	}
 	if len(awsConfigs) > 2 {
-		klog.Errorf("Max number of region(s) exceeded: %s", strings.Join(regions, ", "))
-		return nil, err
+		return nil, fmt.Errorf("Max number of region(s) exceeded: %s", strings.Join(regions, ", "))
 	}
 
 	// Get the list of secrets to mount. These will be grouped together by type
@@ -206,6 +227,41 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	return &v1alpha1.MountResponse{Files: files, ObjectVersion: ov}, nil
 }
 
+// resolveCredentials extracts the CSI token for the chosen auth method and,
+// for IRSA, looks up the IAM role ARN from the service account annotation.
+func (s *CSIDriverProviderServer) resolveCredentials(ctx context.Context, usePodIdentity bool, tokens map[string]utils.ServiceAccountToken, nameSpace, svcAcct string) (token, roleArn string, err error) {
+	if usePodIdentity {
+		token, err = utils.GetTokenForAudience(tokens, utils.PodIdentityAudience)
+		if err != nil {
+			return "", "", fmt.Errorf("Pod Identity token extraction failed: %w", err)
+		}
+	} else {
+		token, err = utils.GetTokenForAudience(tokens, utils.IRSAAudience)
+		if err != nil {
+			return "", "", fmt.Errorf("IRSA token extraction failed: %w", err)
+		}
+		roleArn, err = s.getRoleARN(ctx, nameSpace, svcAcct)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return token, roleArn, nil
+}
+
+// getRoleARN looks up the IAM role ARN from the service account annotation.
+func (s *CSIDriverProviderServer) getRoleARN(ctx context.Context, nameSpace, svcAcct string) (string, error) {
+	rsp, err := s.k8sClient.ServiceAccounts(nameSpace).Get(ctx, svcAcct, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get service account %s/%s: %w", nameSpace, svcAcct, err)
+	}
+	roleArn := rsp.Annotations[roleArnAnnotation]
+	if roleArn == "" {
+		return "", fmt.Errorf("An IAM role must be associated with service account %s (namespace: %s)", svcAcct, nameSpace)
+	}
+	klog.Infof("Role ARN for %s:%s is %s", nameSpace, svcAcct, roleArn)
+	return roleArn, nil
+}
+
 // Private helper to get the aws lookup regions for a given pod.
 //
 // When a region in the mount request is available, the region is added as primary region to the lookup region list
@@ -239,16 +295,24 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, nameSpace, svcAcct, eksAddonVersion string, lookupRegionList []string, usePodIdentity bool, podName string, preferredAddressType string, podIdentityHttpTimeout *time.Duration) (response []aws.Config, err error) {
-	// Get the pod's AWS creds for each lookup region.
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token string) ([]aws.Config, error) {
 	var awsConfigsList []aws.Config
+	appID := s.appID()
 
-	for _, region := range lookupRegionList {
-		awsAuth, err := auth.NewAuth(region, nameSpace, svcAcct, podName, preferredAddressType, eksAddonVersion, usePodIdentity, podIdentityHttpTimeout, s.k8sClient)
+	for _, region := range regions {
+		var credProvider credential_provider.ConfigProvider
+		var err error
+
+		if usePodIdentity {
+			credProvider, err = credential_provider.NewPodIdentityCredentialProvider(region, preferredAddressType, s.podIdentityHttpTimeout, appID, token)
+		} else {
+			credProvider, err = credential_provider.NewIRSACredentialProvider(region, roleArn, appID, token)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsConfig, err := awsAuth.GetAWSConfig(ctx)
+
+		awsConfig, err := credProvider.GetAWSConfig(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
@@ -263,7 +327,7 @@ func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.Ver
 
 	return &v1alpha1.VersionResponse{
 		Version:        "v1alpha1",
-		RuntimeName:    auth.ProviderName,
+		RuntimeName:    ProviderName,
 		RuntimeVersion: Version,
 	}, nil
 
