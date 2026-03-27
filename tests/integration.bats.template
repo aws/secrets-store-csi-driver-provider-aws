@@ -124,7 +124,7 @@ validate_jmes_mount() {
 	log "Verifying provider ClusterRole does not grant serviceaccounts/token create permission"
 
 	# Check the provider's own ClusterRole for serviceaccounts/token create permission
-	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} get clusterrole secrets-store-csi-driver-provider-aws-cluster-role -o json | jq -e '[.rules[] | select((.resources[]? == \"serviceaccounts/token\") and (.verbs[]? == \"create\"))] | length == 0'"
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} -n $NAMESPACE get clusterrole secrets-store-csi-driver-provider-aws-cluster-role -o json | jq -e '[.rules[] | select((.resources[]? == \"serviceaccounts/token\") and (.verbs[]? == \"create\"))] | length == 0'"
 	assert_success
 
 	log "Verified: Provider ClusterRole does not grant serviceaccounts/token create permission"
