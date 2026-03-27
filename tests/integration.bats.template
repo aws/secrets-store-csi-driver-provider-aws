@@ -4,7 +4,6 @@ load helpers
 
 WAIT_TIME=120
 SLEEP_TIME=1
-PROVIDER_YAML=../deployment/private-installer.yaml
 NAMESPACE=kube-system
 CLUSTER_NAME=integ-cluster-{{ARCH}}-{{AUTH_TYPE}}
 POD_NAME=basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}
@@ -24,6 +23,16 @@ log() {
 
 if [[ -z "${PRIVREPO}" ]]; then
 	echo "Error: PRIVREPO is not specified" >&2
+	return 1
+fi
+
+if [[ -z "${GITHUB_ACTOR}" ]]; then
+	echo "Error: GITHUB_ACTOR is not specified" >&2
+	return 1
+fi
+
+if [[ -z "${GITHUB_TOKEN}" ]]; then
+	echo "Error: GITHUB_TOKEN is not specified" >&2
 	return 1
 fi
 
@@ -100,8 +109,6 @@ validate_jmes_mount() {
 
 @test "Install aws provider" {
 	log "Installing AWS provider"
-
-	envsubst < $PROVIDER_YAML | kubectl --kubeconfig=${{KUBECONFIG_VAR}} apply -f -
 
 	KUBECONFIG=${{KUBECONFIG_VAR}} helm package --dependency-update ../charts/secrets-store-csi-driver-provider-aws
 	KUBECONFIG=${{KUBECONFIG_VAR}} helm install -n $NAMESPACE --wait --wait-for-jobs --timeout=30s csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws --set image.repository=$PRIVREPO --set image.tag=$PRIVTAG --set secrets-store-csi-driver.install=false --set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]'
