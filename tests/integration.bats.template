@@ -109,14 +109,16 @@ validate_jmes_mount() {
 	log "AWS provider installation completed"
 }
 
-@test "Verify serviceaccounts/token create permission is not granted to provider" {
-	log "Verifying provider ClusterRole does not grant serviceaccounts/token create permission"
-
-	# Check the provider's own ClusterRole for serviceaccounts/token create permission
-	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} get clusterrole csi-secrets-store-provider-aws-cluster-role -o json | jq -e '[.rules[] | select((.resources[]? == \"serviceaccounts/token\") and (.verbs[]? == \"create\"))] | length == 0'"
-	assert_success
-
-	log "Verified: Provider ClusterRole does not grant serviceaccounts/token create permission"
+@test "provider does not have serviceaccounts/token create permission" {
+	log "Verifying serviceaccounts/token create permission is absent"
+	local rules
+	rules=$(kctl get clusterrole -l app=csi-secrets-store-provider-aws -o json 2>/dev/null) \
+		|| rules=$(kctl get clusterrole csi-secrets-store-provider-aws-cluster-role -o json)
+	if echo "$rules" | grep -q '"serviceaccounts/token"'; then
+		echo "FAIL: ClusterRole still grants serviceaccounts/token permission" >&3
+		echo "$rules" | grep -A2 'serviceaccounts/token' >&3
+		return 1
+	fi
 }
 
 @test "secretproviderclasses crd is established" {
