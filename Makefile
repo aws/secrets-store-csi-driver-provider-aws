@@ -8,9 +8,9 @@ else
 ECRCMD=ecr
 endif
 
-MAJOR_REV=2
-MINOR_REV=2
-PATCH_REV=2
+MAJOR_REV=3
+MINOR_REV=0
+PATCH_REV=0
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
