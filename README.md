@@ -356,7 +356,7 @@ Helm installation example:
 helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set driverWritesSecrets=true
 ```
 
-The Secrets Store CSI Driver uses [atomic writer](https://github.com/kubernetes/kubernetes/blob/master/pkg/volume/util/atomic_writer.go) to write the secret files. Atomic writer relies on symlinks to update the content of the file. Reading file metadata (such as last updated timestamps) when the secret gets auto-rotated requires following symlinks (`stat -L`). For more information, refer to the [relevant Secrets Store CSI Driver documentation section](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations).
+The Secrets Store CSI Driver uses [atomic writer](https://github.com/kubernetes/kubernetes/blob/master/pkg/volume/util/atomic_writer.go) to write the secret files. Atomic writer relies on symlinks to update the content of the file. Reading file metadata (such as last updated timestamps) when the secret gets auto-rotated requires following symlinks (`stat -L` instead of `stat`). For more information, refer to the [relevant Secrets Store CSI Driver documentation section](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations).
 
 
 ### Security Considerations
