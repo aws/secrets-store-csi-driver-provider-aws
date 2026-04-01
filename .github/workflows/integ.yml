@@ -47,7 +47,7 @@ jobs:
       - name: Build the Docker image
         uses: docker/build-push-action@v7
         with:
-          build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=fakeversion' -extldflags '-static'
+          build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.ProviderVersion=fakeversion' -extldflags '-static'
           context: .
           platforms: ${{ matrix.os }}/${{ matrix.arch }}
           load: true
@@ -66,6 +66,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -145,6 +146,8 @@ jobs:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
           PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build
           PRIVTAG: latest-${{ matrix.arch }}-${{ github.run_id }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGION: us-west-2
           FAILOVERREGION: us-east-2
 
