@@ -11,9 +11,6 @@ metadata:
   name: csi-secrets-store-provider-aws-cluster-role
 rules:
 - apiGroups: [""]
-  resources: ["serviceaccounts/token"]
-  verbs: ["create"]
-- apiGroups: [""]
   resources: ["serviceaccounts"]
   verbs: ["get"]
 - apiGroups: [""]
@@ -58,7 +55,7 @@ spec:
       hostNetwork: false
       containers:
         - name: provider-aws-installer
-          image: ${PRIVREPO}
+          image: ${PRIVREPO}${PRIVTAG:+:}${PRIVTAG}
           imagePullPolicy: Always
           args:
               - --provider-volume=/var/run/secrets-store-csi-providers
@@ -89,3 +86,5 @@ spec:
             type: DirectoryOrCreate
       nodeSelector:
         kubernetes.io/os: linux
+      tolerations:
+        - operator: Exists

@@ -35,6 +35,29 @@ helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-sto
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 ```
 
+### Separate CSI Driver Installation
+
+If you install the secrets-store-csi-driver separately (not via this Helm chart), you must configure `tokenRequests` in the CSI driver for the AWS provider to authenticate with AWS services:
+
+```shell
+helm upgrade csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver \
+  --set tokenRequests[0].audience="sts.amazonaws.com" \
+  --set tokenRequests[1].audience="pods.eks.amazonaws.com"
+```
+
+Or if using kubectl, add the following to your CSIDriver manifest:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: secrets-store.csi.k8s.io
+spec:
+  tokenRequests:
+    - audience: "sts.amazonaws.com"
+    - audience: "pods.eks.amazonaws.com"
+```
+
 ## Usage
 
 Set the region name and name of your cluster to use in the bash commands that follow:
@@ -286,7 +309,7 @@ cd secrets-store-csi-driver-provider-aws
 Next, set your region and repository name in bash shell variables to be used later:
 ```bash
 export REGION=<REGION>
-export PRIVREPO=<ACCOUNT>.dkr.ecr.$REGION.amazonaws.com/secrets-store-csi-driver-provider-aws:latest
+export PRIVREPO=<ACCOUNT>.dkr.ecr.$REGION.amazonaws.com/secrets-store-csi-driver-provider-aws
 ```
 Where **&lt;REGION&gt;** is the AWS region in which your Kubernetes cluster is running, and **&lt;ACCOUNT&gt;** is your AWS account Id. Next create your ECR repository if you have not already done so:
 ```bash
