@@ -347,6 +347,18 @@ helm install ... --pod-identity-http-timeout=250ms
 ```
 The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value uses the [AWS SDK default](https://github.com/aws/aws-sdk-go-v2/blob/main/aws/transport/http/client.go#L33) by default.
 
+### Driver Writes Secrets
+
+By default, the AWS provider is responsible for writing secret files to the pods. In order to instead make the Secrets Store CSI Driver perform the file writing, set the `driver-writes-secrets` flag to `true` during the install step.
+
+Helm installation example:
+```shell
+helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set driverWritesSecrets=true
+```
+
+The Secrets Store CSI Driver uses [atomic writer](https://github.com/kubernetes/kubernetes/blob/master/pkg/volume/util/atomic_writer.go) to write the secret files. Atomic writer relies on symlinks to update the content of the file. Reading file metadata (such as last updated timestamps) when the secret gets auto-rotated requires following symlinks (`stat -L` instead of `stat`). For more information, refer to the [relevant Secrets Store CSI Driver documentation section](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations).
+
+
 ### Security Considerations
 
 The AWS Secrets Manager and Config Provider provides compatibility for legacy applications that access secrets as mounted files in the pod. Security conscious applications should use the native AWS APIs to fetch secrets and optionally cache them in memory rather than storing them in the file system.
