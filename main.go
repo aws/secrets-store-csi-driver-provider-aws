@@ -57,10 +57,19 @@ func parsePodIdentityHttpTimeout(timeoutStr string) *time.Duration {
 // requests.
 func main() {
 
-	klog.Infof("Starting %s version %s", server.ProviderName, server.Version)
-	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
+	klog.InitFlags(nil)
+
+	// Opt into the new klog behavior (klog v2.140.0+) so that -stderrthreshold
+	// is honored even when -logtostderr=true. Without this, all log levels go
+	// to stderr causing INFO messages to be treated as errors by log aggregators.
+	// See: https://github.com/kubernetes/klog/issues/212
+	flag.Set("legacy_stderr_threshold_behavior", "false")
+	flag.Set("stderrthreshold", "INFO")
 
 	flag.Parse() // Parse command line flags
+
+	klog.Infof("Starting %s version %s", server.ProviderName, server.Version)
+	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
 
 	//socket on which to listen to for driver calls
 	endpoint := fmt.Sprintf("%s/aws.sock", *endpointDir)
