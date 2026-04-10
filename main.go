@@ -52,19 +52,23 @@ func parsePodIdentityHttpTimeout(timeoutStr string) *time.Duration {
 	return &duration
 }
 
+// initKlogFlags registers klog flags and configures the new klog behavior
+// (klog v2.140.0+) so that -stderrthreshold is honored even when
+// -logtostderr=true. Without this, all log levels go to stderr causing INFO
+// messages to be treated as errors by log aggregators.
+// See: https://github.com/kubernetes/klog/issues/212
+func initKlogFlags() {
+	klog.InitFlags(nil)
+	flag.Set("legacy_stderr_threshold_behavior", "false")
+	flag.Set("stderrthreshold", "INFO")
+}
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
 func main() {
 
-	klog.InitFlags(nil)
-
-	// Opt into the new klog behavior (klog v2.140.0+) so that -stderrthreshold
-	// is honored even when -logtostderr=true. Without this, all log levels go
-	// to stderr causing INFO messages to be treated as errors by log aggregators.
-	// See: https://github.com/kubernetes/klog/issues/212
-	flag.Set("legacy_stderr_threshold_behavior", "false")
-	flag.Set("stderrthreshold", "INFO")
+	initKlogFlags()
 
 	flag.Parse() // Parse command line flags
 
