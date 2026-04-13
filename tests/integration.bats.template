@@ -137,7 +137,7 @@ validate_jmes_mount() {
 	log "Verifying provider ClusterRole does not grant serviceaccounts/token create permission"
 
 	# Find the provider ClusterRole (name varies between Helm and addon installs)
-	PROVIDER_CLUSTER_ROLE=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} get clusterrole -o name | grep provider.*cluster-role | head -1 | sed 's|clusterrole.rbac.authorization.k8s.io/||')
+	PROVIDER_CLUSTER_ROLE=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} get clusterrole -o json | jq -r '.items[].metadata.name | select(test("provider.*cluster-role"))' | head -1)
 
 	# Check the provider's own ClusterRole for serviceaccounts/token create permission
 	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} -n $NAMESPACE get clusterrole $PROVIDER_CLUSTER_ROLE -o json | jq -e '[.rules[] | select((.resources[]? == \"serviceaccounts/token\") and (.verbs[]? == \"create\"))] | length == 0'"
