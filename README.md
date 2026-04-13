@@ -319,6 +319,17 @@ Now run make to build the plugin and push it into your account's repo:
 ```
 make
 ```
+
+The build supports both Docker and [Finch](https://github.com/runfinch/finch) as container runtimes. If Docker is not installed, the Makefile will automatically use Finch instead (including managing the Finch VM lifecycle). You can also force a specific runtime:
+```bash
+make CONTAINER_TOOL=finch
+make CONTAINER_TOOL=docker
+```
+
+**Known limitations when using Finch:**
+* **No remote manifest check**: Finch does not support `manifest inspect`, so the pre-build check that prevents overwriting an existing image tag is skipped. Use caution when re-running builds with an existing version number.
+* **ECR push behavior**: Finch pushes both the image index and the image to ECR, whereas Docker pushes only the image. This can cause "media type not supported" errors with some AWS services that consume the image (e.g., CloudFormation). This does not affect EKS workloads. The build uses `--provenance=false` to minimize this by stripping attestation manifests.
+
 Once the image is in your repo you can install it into your cluster from your repo rather than the public repo:
 ```bash
 envsubst < deployment/private-installer.yaml | kubectl apply -f -
