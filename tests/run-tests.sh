@@ -38,6 +38,30 @@ delete_cluster() {
 	eksctl delete cluster --name $1 --parallel 25
 }
 
+# Parse --addon and --addon-version flags from any position
+REMAINING_ARGS=()
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		--addon)
+			export INSTALL_METHOD=addon
+			shift
+			;;
+		--addon-version)
+			if [[ -z "$2" || "$2" == --* ]]; then
+				echo "Error: --addon-version requires a value" >&2
+				exit 1
+			fi
+			export ADDON_VERSION="$2"
+			shift 2
+			;;
+		*)
+			REMAINING_ARGS+=("$1")
+			shift
+			;;
+	esac
+done
+set -- "${REMAINING_ARGS[@]}"
+
 if [[ "$1" == "clean" ]]; then
 	cleanup
 	echo "Cleaning up secrets and parameters for all configs..."
