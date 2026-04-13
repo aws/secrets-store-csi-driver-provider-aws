@@ -1,3 +1,8 @@
+// Benchmarks for the server package covering end-to-end mount request
+// handling with mocked AWS clients (single secret, mixed types, JMES path
+// extraction, and large batches).
+// All benchmark tests benchmark both server initialization and mount requests.
+// Run with: go test -bench=. -benchmem ./server/
 package server
 
 import (
