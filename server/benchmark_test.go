@@ -20,9 +20,10 @@ import (
 
 func buildBenchMountReq(dir string, tst testCase) *v1alpha1.MountRequest {
 	attrMap := map[string]string{
-		"csi.storage.k8s.io/pod.name":            tst.attributes["podName"],
-		"csi.storage.k8s.io/pod.namespace":       tst.attributes["namespace"],
-		"csi.storage.k8s.io/serviceAccount.name": tst.attributes["accName"],
+		"csi.storage.k8s.io/pod.name":              tst.attributes["podName"],
+		"csi.storage.k8s.io/pod.namespace":         tst.attributes["namespace"],
+		"csi.storage.k8s.io/serviceAccount.name":   tst.attributes["accName"],
+		"csi.storage.k8s.io/serviceAccount.tokens": `{"sts.amazonaws.com":{"token":"fake-irsa-token","expirationTimestamp":"2099-01-15T10:30:00Z"},"pods.eks.amazonaws.com":{"token":"fake-pod-identity-token","expirationTimestamp":"2099-01-15T10:30:00Z"}}`,
 	}
 	if r := tst.attributes["region"]; len(r) > 0 {
 		attrMap["region"] = r
