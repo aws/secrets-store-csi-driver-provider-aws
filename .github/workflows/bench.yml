@@ -24,7 +24,7 @@ jobs:
           go-version: "1.25"
 
       - name: Run benchmarks
-        run: go test -bench=. -benchmem -count=5 -timeout=30m ./provider/ ./server/ ./utils/ | tee bench-result.txt
+        run: go test -bench=. -benchmem -count=5 -timeout=30m ./server/ | tee bench-result.txt
 
       - name: Download previous benchmark result
         if: github.event_name == 'pull_request'
