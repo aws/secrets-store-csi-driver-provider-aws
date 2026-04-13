@@ -62,6 +62,11 @@ while [[ $# -gt 0 ]]; do
 done
 set -- "${REMAINING_ARGS[@]}"
 
+if [[ -n "$ADDON_VERSION" && "$INSTALL_METHOD" != "addon" ]]; then
+	echo "Error: --addon-version requires --addon" >&2
+	exit 1
+fi
+
 if [[ "$1" == "clean" ]]; then
 	cleanup
 	echo "Cleaning up secrets and parameters for all configs..."
