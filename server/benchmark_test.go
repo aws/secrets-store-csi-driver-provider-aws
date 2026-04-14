@@ -163,7 +163,6 @@ func BenchmarkMount_LargeBatch(b *testing.B) {
 		dir := b.TempDir()
 		svr := newServerWithMocks(&tst, true, nil)
 		req := buildBenchMountReq(dir, tst)
-		svr.Mount(context.Background(), req)
 		if _, err := svr.Mount(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
