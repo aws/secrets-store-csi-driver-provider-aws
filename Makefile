@@ -10,7 +10,7 @@ endif
 
 MAJOR_REV=3
 MINOR_REV=0
-PATCH_REV=0
+PATCH_REV=1
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
@@ -31,7 +31,7 @@ clean:
 docker-login:
 	# Logging into ecr-public is required to pull the Amazon Linux 2 image used for the build
 	aws --region us-east-1 ecr-public get-login-password | docker login -u AWS --password-stdin public.ecr.aws
-	@if [[ "$(REPOBASE)" != "public.ecr.aws" ]]; then\
+	@if [ "$(REPOBASE)" != "public.ecr.aws" ]; then \
 		aws --region $(AWS_REGION) ecr get-login-password | docker login -u AWS --password-stdin $(REPOBASE);\
 	fi
 
