@@ -47,6 +47,7 @@ imagePullSecrets: []
 
 rbac:
   install: true
+  serviceAccountName: ""
 
 securityContext:
   privileged: false
