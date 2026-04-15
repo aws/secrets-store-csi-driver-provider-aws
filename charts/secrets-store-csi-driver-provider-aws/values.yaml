@@ -64,3 +64,18 @@ secrets-store-csi-driver:
   tokenRequests:
     - audience: "sts.amazonaws.com"
     - audience: "pods.eks.amazonaws.com"
+
+  linux:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: type
+                  operator: NotIn
+                  values:
+                    - virtual-kubelet
+                - key: eks.amazonaws.com/compute-type
+                  operator: NotIn
+                  values:
+                    - fargate
