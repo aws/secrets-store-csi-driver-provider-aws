@@ -31,7 +31,7 @@ clean:
 docker-login:
 	# Logging into ecr-public is required to pull the Amazon Linux 2 image used for the build
 	aws --region us-east-1 ecr-public get-login-password | docker login -u AWS --password-stdin public.ecr.aws
-	@if [[ "$(REPOBASE)" != "public.ecr.aws" ]]; then\
+	@if [ "$(REPOBASE)" != "public.ecr.aws" ]; then \
 		aws --region $(AWS_REGION) ecr get-login-password | docker login -u AWS --password-stdin $(REPOBASE);\
 	fi
 
