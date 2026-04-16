@@ -21,19 +21,21 @@ log() {
 	echo -e "${{{LOG_COLOR}}}[$TIMESTAMP] [{{ARCH}}-{{AUTH_TYPE}}] $msg${NC}" >&3
 }
 
-if [[ -z "${PRIVREPO}" ]]; then
-	echo "Error: PRIVREPO is not specified" >&2
-	return 1
-fi
+if [[ "${INSTALL_METHOD}" != "addon" ]]; then
+	if [[ -z "${PRIVREPO}" ]]; then
+		echo "Error: PRIVREPO is not specified" >&2
+		return 1
+	fi
 
-if [[ -z "${GITHUB_ACTOR}" ]]; then
-	echo "Error: GITHUB_ACTOR is not specified" >&2
-	return 1
-fi
+	if [[ -z "${GITHUB_ACTOR}" ]]; then
+		echo "Error: GITHUB_ACTOR is not specified" >&2
+		return 1
+	fi
 
-if [[ -z "${GITHUB_TOKEN}" ]]; then
-	echo "Error: GITHUB_TOKEN is not specified" >&2
-	return 1
+	if [[ -z "${GITHUB_TOKEN}" ]]; then
+		echo "Error: GITHUB_TOKEN is not specified" >&2
+		return 1
+	fi
 fi
 
 if [[ -z "${{{NODE_TYPE_VAR}}}" ]]; then
@@ -58,14 +60,21 @@ setup_file() {
 
 {{AUTH_SETUP}}
 
-	log "Create GHCR secret"
-	KUBECONFIG=${{KUBECONFIG_VAR}} kubectl create secret docker-registry ghcr-secret --docker-server=ghcr.io --docker-username=$GITHUB_ACTOR --docker-password=$GITHUB_TOKEN -n $NAMESPACE
+	if [[ "${INSTALL_METHOD}" == "addon" ]]; then
+		log "Installing aws-secrets-store-csi-driver-provider as EKS addon"
+		aws eks create-addon --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider \
+			--configuration-values file://addon_config_values.yaml ${ADDON_VERSION:+--addon-version $ADDON_VERSION} --region $REGION
+		aws eks wait addon-active --cluster-name $CLUSTER_NAME --addon-name aws-secrets-store-csi-driver-provider --region $REGION
+	else
+		log "Create GHCR secret"
+		KUBECONFIG=${{KUBECONFIG_VAR}} kubectl create secret docker-registry ghcr-secret --docker-server=ghcr.io --docker-username=$GITHUB_ACTOR --docker-password=$GITHUB_TOKEN -n $NAMESPACE
 
-	log "Adding secrets-store-csi-driver Helm repository"
-	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+		log "Adding secrets-store-csi-driver Helm repository"
+		helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
 
-	log "Installing secrets-store-csi-driver via Helm"
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install --wait --wait-for-jobs --timeout=30s csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true --set tokenRequests[0].audience=sts.amazonaws.com --set tokenRequests[1].audience=pods.eks.amazonaws.com
+		log "Installing secrets-store-csi-driver via Helm"
+		KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install --wait --wait-for-jobs --timeout=30s csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true --set tokenRequests[0].audience=sts.amazonaws.com --set tokenRequests[1].audience=pods.eks.amazonaws.com
+	fi
 
 	log "Cluster setup completed for $CLUSTER_NAME"
 }
@@ -108,6 +117,10 @@ validate_jmes_mount() {
 }
 
 @test "Install aws provider" {
+	if [[ "${INSTALL_METHOD}" == "addon" ]]; then
+		skip "Provider installed as EKS addon"
+	fi
+
 	log "Installing AWS provider"
 
 	KUBECONFIG=${{KUBECONFIG_VAR}} helm package --dependency-update ../charts/secrets-store-csi-driver-provider-aws
@@ -123,8 +136,11 @@ validate_jmes_mount() {
 @test "Verify serviceaccounts/token create permission is not granted to provider" {
 	log "Verifying provider ClusterRole does not grant serviceaccounts/token create permission"
 
+	# Find the provider ClusterRole (name varies between Helm and addon installs)
+	PROVIDER_CLUSTER_ROLE=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} get clusterrole -o json | jq -r '.items[].metadata.name | select(test("provider.*cluster-role"))' | head -1)
+
 	# Check the provider's own ClusterRole for serviceaccounts/token create permission
-	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} -n $NAMESPACE get clusterrole csi-secrets-store-provider-aws-secrets-store-csi-driver-provide-cluster-role -o json | jq -e '[.rules[] | select((.resources[]? == \"serviceaccounts/token\") and (.verbs[]? == \"create\"))] | length == 0'"
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} -n $NAMESPACE get clusterrole $PROVIDER_CLUSTER_ROLE -o json | jq -e '[.rules[] | select((.resources[]? == \"serviceaccounts/token\") and (.verbs[]? == \"create\"))] | length == 0'"
 	assert_success
 
 	log "Verified: Provider ClusterRole does not grant serviceaccounts/token create permission"
