@@ -5,13 +5,38 @@ on:
 
 permissions:
   contents: read
+  packages: read
   id-token: write
 
 jobs:
-  test:
+  unit-test:
     uses: ./.github/workflows/go.yml
+  extract-image-info:
+    runs-on: ubuntu-latest
+    outputs:
+      imageRepo: ${{ steps.extract.outputs.imageRepo }}
+      imageTag: ${{ steps.extract.outputs.imageTag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Extract image repo and tag from values.yaml
+        id: extract
+        run: |
+          echo "imageRepo=$(yq '.image.repository' charts/secrets-store-csi-driver-provider-aws/values.yaml)" >> "$GITHUB_OUTPUT"
+          echo "imageTag=$(yq '.image.tag' charts/secrets-store-csi-driver-provider-aws/values.yaml)" >> "$GITHUB_OUTPUT"
+  integration-tests:
+    needs: [extract-image-info]
+    uses: ./.github/workflows/integ.yml
+    with:
+      imageRepo: ${{ needs.extract-image-info.outputs.imageRepo }}
+      imageTagAmd64: ${{ needs.extract-image-info.outputs.imageTag }}
+      imageTagArm64: ${{ needs.extract-image-info.outputs.imageTag }}
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
   release:
-    needs: [test]
+    needs: [unit-test, integration-tests]
     permissions:
       contents: write
     environment: prod
