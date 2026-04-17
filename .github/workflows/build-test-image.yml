@@ -81,3 +81,4 @@ jobs:
       id-token: write
       contents: read
       packages: read
+    secrets: inherit

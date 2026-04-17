@@ -34,6 +34,7 @@ jobs:
       contents: read
       packages: read
       id-token: write
+    secrets: inherit
   release:
     needs: [unit-test, integration-tests]
     permissions:
