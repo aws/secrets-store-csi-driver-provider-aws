@@ -7,14 +7,17 @@ on:
         description: 'Repository for the provider image'
         required: true
         type: string
+        default: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
       imageTagAmd64:
         description: 'Image tag for the amd64 build'
         required: true
         type: string
+        default: latest
       imageTagArm64:
         description: 'Image tag for the arm64 build'
         required: true
         type: string
+        default: latest
   workflow_dispatch:
     inputs: *inputs
 
@@ -45,7 +48,10 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
 
+    env:
+      imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
     steps:
+      - run: Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}
       - name: Setup kubectl
         uses: azure/setup-kubectl@v5
 
@@ -105,7 +111,7 @@ jobs:
         env:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
           PRIVREPO: ${{ inputs.imageRepo }}
-          PRIVTAG: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
+          PRIVTAG: ${{ env.imageTag }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGION: us-west-2
