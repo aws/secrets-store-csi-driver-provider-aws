@@ -1,68 +1,39 @@
 name: Integration Tests
 
 on:
+  workflow_call:
+    inputs: &inputs
+      imageRepo:
+        description: 'Repository for the provider image'
+        required: true
+        type: string
+        default: public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws
+      imageTagAmd64:
+        description: 'Image tag for the amd64 build'
+        required: true
+        type: string
+        default: latest
+      imageTagArm64:
+        description: 'Image tag for the arm64 build'
+        required: true
+        type: string
+        default: latest
   workflow_dispatch:
-  push:
-    branches: ["main"]
-  pull_request_target:
-    types: [labeled]
+    inputs: *inputs
 
 concurrency:
   # Only run one workflow at a time to avoid hitting the network interface quota
   group: integration-tests
   cancel-in-progress: false
 
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
 jobs:
-  build-docker:
-    name: Build Docker Image
-    if: |
-      github.event_name != 'pull_request_target' ||
-      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
-        include:
-          - os: linux
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build the Docker image
-        uses: docker/build-push-action@v7
-        with:
-          build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.ProviderVersion=fakeversion' -extldflags '-static'
-          context: .
-          platforms: ${{ matrix.os }}/${{ matrix.arch }}
-          load: true
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/test-build:latest-${{ matrix.arch }}-${{ github.run_id }}
-
-      - name: List images
-        run: |
-          docker image ls -a
   integration-tests:
     name: Run Integration Tests
-    needs: build-docker
-    if: |
-      github.event_name != 'pull_request_target' ||
-      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
     permissions:
       id-token: write
       contents: read
@@ -82,7 +53,11 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
 
+    env:
+      imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
     steps:
+      - name: Context
+        run: echo "Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}"
       - name: Setup kubectl
         uses: azure/setup-kubectl@v5
 
@@ -118,11 +93,8 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -144,8 +116,8 @@ jobs:
         run: cd tests && ./run-tests.sh ${{ matrix.arch-short }}-${{ matrix.auth_type }}
         env:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
-          PRIVREPO: ghcr.io/${{ github.repository_owner }}/test-build
-          PRIVTAG: latest-${{ matrix.arch }}-${{ github.run_id }}
+          PRIVREPO: ${{ inputs.imageRepo }}
+          PRIVTAG: ${{ env.imageTag }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGION: us-west-2
