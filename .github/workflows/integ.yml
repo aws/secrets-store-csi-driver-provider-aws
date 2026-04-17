@@ -51,7 +51,8 @@ jobs:
     env:
       imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
     steps:
-      - run: Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}
+      - name: Context
+        run: echo "Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}"
       - name: Setup kubectl
         uses: azure/setup-kubectl@v5
 
