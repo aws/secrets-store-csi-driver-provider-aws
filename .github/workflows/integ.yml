@@ -26,6 +26,11 @@ concurrency:
   group: integration-tests
   cancel-in-progress: false
 
+permissions:
+  id-token: write
+  contents: read
+  packages: read
+
 jobs:
   integration-tests:
     name: Run Integration Tests
