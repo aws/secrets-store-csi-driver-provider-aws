@@ -44,6 +44,15 @@ jobs:
       - name: Add SSCD Helm Repo
         run: helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
 
+      - name: Check dependency lock is up to date
+        run: |
+          helm dependency update charts/secrets-store-csi-driver-provider-aws
+          if ! git diff --quiet charts/secrets-store-csi-driver-provider-aws/Chart.lock; then
+            echo "::error::Chart.lock is out of date. Run 'helm dependency update' and commit the changes before releasing."
+            git diff charts/secrets-store-csi-driver-provider-aws/Chart.lock
+            exit 1
+          fi
+
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@cae68fefc6b5f367a0275617c9f83181ba54714f # v1.7.0
         with:
