@@ -1,6 +1,6 @@
 module github.com/aws/secrets-store-csi-driver-provider-aws
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.5
@@ -16,7 +16,7 @@ require (
 	k8s.io/apimachinery v0.35.3
 	k8s.io/client-go v0.35.3
 	k8s.io/klog/v2 v2.140.0
-	sigs.k8s.io/secrets-store-csi-driver v1.5.6
+	sigs.k8s.io/secrets-store-csi-driver v1.6.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -60,7 +60,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
