@@ -1,0 +1,8 @@
+secrets-store-csi-driver:
+  enableSecretRotation: true
+  rotationPollInterval: "15s"
+  syncSecret:
+    enabled: true
+  tokenRequests:
+    - audience: "sts.amazonaws.com"
+    - audience: "pods.eks.amazonaws.com"
