@@ -7,6 +7,43 @@ import (
 	"time"
 )
 
+func TestInitKlogFlags(t *testing.T) {
+	// Reset the default flag set so klog flags can be re-registered.
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+
+	initKlogFlags()
+
+	// Verify that klog flags were registered by klog.InitFlags.
+	klogFlags := []string{
+		"logtostderr",
+		"stderrthreshold",
+		"v",
+		"legacy_stderr_threshold_behavior",
+	}
+	for _, name := range klogFlags {
+		if f := flag.Lookup(name); f == nil {
+			t.Errorf("expected klog flag %q to be registered after initKlogFlags()", name)
+		}
+	}
+
+	// Verify the legacy_stderr_threshold_behavior flag is set to "false".
+	if f := flag.Lookup("legacy_stderr_threshold_behavior"); f != nil {
+		if got := f.Value.String(); got != "false" {
+			t.Errorf("expected legacy_stderr_threshold_behavior to be \"false\", got %q", got)
+		}
+	}
+
+	// Verify the stderrthreshold flag is set to INFO (severity 0).
+	// klog stores severity thresholds as numeric values: INFO=0, WARNING=1,
+	// ERROR=2, FATAL=3. The default for stderrthreshold is ERROR (2), so
+	// after initKlogFlags it should be INFO (0).
+	if f := flag.Lookup("stderrthreshold"); f != nil {
+		if got := f.Value.String(); got != "0" {
+			t.Errorf("expected stderrthreshold to be \"0\" (INFO), got %q", got)
+		}
+	}
+}
+
 func TestParsePodIdentityHttpTimeout(t *testing.T) {
 	oneHundredMs := 100 * time.Millisecond
 	twoSecs := 2 * time.Second
