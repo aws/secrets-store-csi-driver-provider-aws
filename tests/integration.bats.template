@@ -26,14 +26,19 @@ if [[ -z "${PRIVREPO}" ]]; then
 	return 1
 fi
 
-if [[ -z "${GITHUB_ACTOR}" ]]; then
-	echo "Error: GITHUB_ACTOR is not specified" >&2
-	return 1
-fi
+# GHCR pull credentials are only required when running inside GitHub Actions,
+# where the provider image lives in a private GHCR repo. Local runs pull from
+# whatever PRIVREPO points at and skip the GHCR pull-secret entirely.
+if [[ "${GITHUB_ACTIONS}" == "true" ]]; then
+	if [[ -z "${GITHUB_ACTOR}" ]]; then
+		echo "Error: GITHUB_ACTOR is not specified" >&2
+		return 1
+	fi
 
-if [[ -z "${GITHUB_TOKEN}" ]]; then
-	echo "Error: GITHUB_TOKEN is not specified" >&2
-	return 1
+	if [[ -z "${GITHUB_TOKEN}" ]]; then
+		echo "Error: GITHUB_TOKEN is not specified" >&2
+		return 1
+	fi
 fi
 
 if [[ -z "${{{NODE_TYPE_VAR}}}" ]]; then
@@ -58,8 +63,10 @@ setup_file() {
 
 {{AUTH_SETUP}}
 
-	log "Create GHCR secret"
-	KUBECONFIG=${{KUBECONFIG_VAR}} kubectl create secret docker-registry ghcr-secret --docker-server=ghcr.io --docker-username=$GITHUB_ACTOR --docker-password=$GITHUB_TOKEN -n $NAMESPACE
+	if [[ "${GITHUB_ACTIONS}" == "true" ]]; then
+		log "Create GHCR secret"
+		KUBECONFIG=${{KUBECONFIG_VAR}} kubectl create secret docker-registry ghcr-secret --docker-server=ghcr.io --docker-username=$GITHUB_ACTOR --docker-password=$GITHUB_TOKEN -n $NAMESPACE
+	fi
 
 	log "Adding secrets-store-csi-driver Helm repository"
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
@@ -111,7 +118,20 @@ validate_jmes_mount() {
 	log "Installing AWS provider"
 
 	KUBECONFIG=${{KUBECONFIG_VAR}} helm package --dependency-update ../charts/secrets-store-csi-driver-provider-aws
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm install -n $NAMESPACE --wait --wait-for-jobs --timeout=30s csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws --set image.repository=$PRIVREPO --set image.tag=$PRIVTAG --set secrets-store-csi-driver.install=false --set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]'
+
+	# Only attach the GHCR pull-secret in GitHub Actions, where it was created above.
+	helm_extra_args=()
+	if [[ "${GITHUB_ACTIONS}" == "true" ]]; then
+		helm_extra_args+=(--set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]')
+	fi
+
+	# Only override image.tag when PRIVTAG is set; an empty --set value renders
+	# `image: <repo>:` and breaks helm's YAML parser.
+	if [[ -n "${PRIVTAG}" ]]; then
+		helm_extra_args+=(--set "image.tag=$PRIVTAG")
+	fi
+
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm install -n $NAMESPACE --wait --wait-for-jobs --timeout=30s csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws --set image.repository=$PRIVREPO --set secrets-store-csi-driver.install=false "${helm_extra_args[@]}"
 
 	PROVIDER_POD=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=secrets-store-csi-driver-provider-aws -o jsonpath="{.items[0].metadata.name}")
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
@@ -171,11 +191,13 @@ validate_jmes_mount() {
 
 	log "Updating Parameter Store value for rotation test"
 	aws ssm put-parameter --name ParameterStoreRotationTest-{{ARCH}}-{{AUTH_TYPE}} --value AfterRotation --type SecureString --overwrite --region $REGION
-	sleep 20
 
+	# v1.6.0+ rotation is driven by kubelet NodePublishVolume republish (requiresRepublish);
+	# --rotation-poll-interval is now a minimum cache duration, not an exact poll period.
+	# Poll for the rotated value rather than waiting a fixed interval.
 	log "Verifying Parameter Store rotation"
-	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreRotationTest-{{ARCH}}-{{AUTH_TYPE}})
-	[[ "${result//$'\r'}" == "AfterRotation" ]]
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreRotationTest-{{ARCH}}-{{AUTH_TYPE}} | tr -d '\\r' | grep -qx AfterRotation"
+	wait_for_process 240 5 "$cmd"
 
 	log "Parameter Store rotation test completed"
 }
@@ -188,11 +210,13 @@ validate_jmes_mount() {
 
 	log "Updating Secrets Manager value for rotation test"
 	aws secretsmanager put-secret-value --secret-id SecretsManagerRotationTest-{{ARCH}}-{{AUTH_TYPE}} --secret-string AfterRotation --region $REGION
-	sleep 20
 
+	# v1.6.0+ rotation is driven by kubelet NodePublishVolume republish (requiresRepublish);
+	# --rotation-poll-interval is now a minimum cache duration, not an exact poll period.
+	# Poll for the rotated value rather than waiting a fixed interval.
 	log "Verifying Secrets Manager rotation"
-	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerRotationTest-{{ARCH}}-{{AUTH_TYPE}})
-	[[ "${result//$'\r'}" == "AfterRotation" ]]
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerRotationTest-{{ARCH}}-{{AUTH_TYPE}} | tr -d '\\r' | grep -qx AfterRotation"
+	wait_for_process 240 5 "$cmd"
 
 	log "Secrets Manager rotation test completed"
 }
@@ -233,8 +257,12 @@ validate_jmes_mount() {
 	UPDATED_JSON_CONTENT='{"username": "ParameterStoreUserUpdated", "password": "PasswordForParameterStoreUpdated"}'
 	aws ssm put-parameter --name jsonSsm-{{ARCH}}-{{AUTH_TYPE}} --value "$UPDATED_JSON_CONTENT" --type SecureString --overwrite --region $REGION
 
-	sleep 20
+	# v1.6.0+ rotation is driven by kubelet NodePublishVolume republish (requiresRepublish);
+	# --rotation-poll-interval is now a minimum cache duration, not an exact poll period.
+	# Poll for the rotated username to land in the mount before re-validating.
 	log "Validating Parameter Store JMES path rotation"
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ssmUsername | tr -d '\\r' | grep -qx ParameterStoreUserUpdated"
+	wait_for_process 240 5 "$cmd"
 	USERNAME_ALIAS=ssmUsername USERNAME=ParameterStoreUserUpdated PASSWORD_ALIAS=ssmPassword PASSWORD=PasswordForParameterStoreUpdated\
 	SECRET_FILE_NAME=jsonSsm-{{ARCH}}-{{AUTH_TYPE}} SECRET_FILE_CONTENT=$UPDATED_JSON_CONTENT K8_SECRET_NAME=json-ssm validate_jmes_mount
 
@@ -254,8 +282,12 @@ validate_jmes_mount() {
 	UPDATED_JSON_CONTENT='{"username": "SecretsManagerUserUpdated", "password": "PasswordForSecretsManagerUpdated"}'
 	aws secretsmanager put-secret-value --secret-id secretsManagerJson-{{ARCH}}-{{AUTH_TYPE}} --secret-string "$UPDATED_JSON_CONTENT" --region $REGION
 
-	sleep 20
+	# v1.6.0+ rotation is driven by kubelet NodePublishVolume republish (requiresRepublish);
+	# --rotation-poll-interval is now a minimum cache duration, not an exact poll period.
+	# Poll for the rotated username to land in the mount before re-validating.
 	log "Validating Secrets Manager JMES path rotation"
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/secretsManagerUsername | tr -d '\\r' | grep -qx SecretsManagerUserUpdated"
+	wait_for_process 240 5 "$cmd"
 	USERNAME_ALIAS=secretsManagerUsername USERNAME=SecretsManagerUserUpdated PASSWORD_ALIAS=secretsManagerPassword \
 	PASSWORD=PasswordForSecretsManagerUpdated SECRET_FILE_NAME=secretsManagerJson-{{ARCH}}-{{AUTH_TYPE}} SECRET_FILE_CONTENT=$UPDATED_JSON_CONTENT
 	K8_SECRET_NAME=secrets-manager-json validate_jmes_mount
