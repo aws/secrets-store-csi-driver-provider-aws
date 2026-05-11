@@ -263,6 +263,11 @@ validate_jmes_mount() {
 	log "Validating Parameter Store JMES path rotation"
 	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ssmUsername | tr -d '\\r' | grep -qx ParameterStoreUserUpdated"
 	wait_for_process 240 5 "$cmd"
+	# The synced K8s Secret is reconciled by the CSI driver after the mount write
+	# completes, so the secret object lags behind the mount on slower clusters.
+	# Wait for the synced K8s Secret to reflect the rotated value before asserting.
+	cmd="[[ \"\$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace=$NAMESPACE get secret json-ssm -o jsonpath='{.data.username}' | base64 -d | tr -d '\\r')\" == ParameterStoreUserUpdated ]]"
+	wait_for_process 240 5 "$cmd"
 	USERNAME_ALIAS=ssmUsername USERNAME=ParameterStoreUserUpdated PASSWORD_ALIAS=ssmPassword PASSWORD=PasswordForParameterStoreUpdated\
 	SECRET_FILE_NAME=jsonSsm-{{ARCH}}-{{AUTH_TYPE}} SECRET_FILE_CONTENT=$UPDATED_JSON_CONTENT K8_SECRET_NAME=json-ssm validate_jmes_mount
 
@@ -287,6 +292,11 @@ validate_jmes_mount() {
 	# Poll for the rotated username to land in the mount before re-validating.
 	log "Validating Secrets Manager JMES path rotation"
 	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/secretsManagerUsername | tr -d '\\r' | grep -qx SecretsManagerUserUpdated"
+	wait_for_process 240 5 "$cmd"
+	# The synced K8s Secret is reconciled by the CSI driver after the mount write
+	# completes, so the secret object lags behind the mount on slower clusters.
+	# Wait for the synced K8s Secret to reflect the rotated value before asserting.
+	cmd="[[ \"\$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace=$NAMESPACE get secret secrets-manager-json -o jsonpath='{.data.username}' | base64 -d | tr -d '\\r')\" == SecretsManagerUserUpdated ]]"
 	wait_for_process 240 5 "$cmd"
 	USERNAME_ALIAS=secretsManagerUsername USERNAME=SecretsManagerUserUpdated PASSWORD_ALIAS=secretsManagerPassword \
 	PASSWORD=PasswordForSecretsManagerUpdated SECRET_FILE_NAME=secretsManagerJson-{{ARCH}}-{{AUTH_TYPE}} SECRET_FILE_CONTENT=$UPDATED_JSON_CONTENT
