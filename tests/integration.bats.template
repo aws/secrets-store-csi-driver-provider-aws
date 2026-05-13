@@ -317,6 +317,79 @@ validate_jmes_mount() {
 	log "Kubernetes Secret sync test completed"
 }
 
+@test "CSI inline volume test with driverWritesSecrets enabled" {
+	# Enable driverWritesSecrets on the provider
+	log "Upgrading provider with driverWritesSecrets=true"
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm upgrade -n $NAMESPACE csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws \
+		--set image.repository=$PRIVREPO \
+		--set image.tag=$PRIVTAG \
+		--set secrets-store-csi-driver.install=false \
+		--set driverWritesSecrets=true \
+		--set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]' \
+		--wait --wait-for-jobs --timeout=60s
+
+	# Verify helm upgrade succeeded by checking provider pods exist
+	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pods -l app=secrets-store-csi-driver-provider-aws
+	assert_success
+
+	# Wait for provider pods to be ready after upgrade
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=secrets-store-csi-driver-provider-aws"
+	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+	# Delete existing test pod to force a fresh mount with driverWritesSecrets
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE delete pod/$POD_NAME --ignore-not-found --wait=true
+	
+	# Wait to ensure pod is fully deleted
+	sleep 5
+
+	# Redeploy the test pod
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f BasicTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/$POD_NAME"
+	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	
+	log "Starting driverWritesSecrets test"
+
+	# Verify secrets are mounted correctly with driverWritesSecrets
+	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/SecretsManagerTest1-{{ARCH}}-{{AUTH_TYPE}})
+	[[ "${result//$'\r'}" == "SecretsManagerTest1Value" ]]
+
+	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- cat /mnt/secrets-store/ParameterStoreTest1-{{ARCH}}-{{AUTH_TYPE}})
+	[[ "${result//$'\r'}" == "ParameterStoreTest1Value" ]]
+	
+	# Verify atomic writer behavior - check for symlinks (key characteristic of driverWritesSecrets mode)
+	log "Verifying atomic writer symlink behavior"
+	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $POD_NAME -- sh -c "ls -la /mnt/secrets-store/ | grep -c '^l' || echo 0")
+	# Should have symlinks when driverWritesSecrets is enabled
+	[[ "$result" -gt 0 ]]
+
+	log "driverWritesSecrets mount verified successfully with atomic writer behavior"
+}
+
+teardown() {
+	# Only run teardown for the driverWritesSecrets test
+	if [[ "$BATS_TEST_NAME" == "CSI inline volume test with driverWritesSecrets enabled" ]]; then
+		log "Tearing down driverWritesSecrets test - restoring driverWritesSecrets=false"
+
+		KUBECONFIG=${{KUBECONFIG_VAR}} helm upgrade -n $NAMESPACE csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws \
+			--set image.repository=$PRIVREPO \
+			--set image.tag=$PRIVTAG \
+			--set secrets-store-csi-driver.install=false \
+			--set driverWritesSecrets=false \
+			--set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]' \
+			--wait --wait-for-jobs --timeout=60s
+
+		# Wait for provider pods to be ready
+		cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=secrets-store-csi-driver-provider-aws"
+		wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+		# Delete and redeploy test pod with provider-writes-secrets mode
+		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE delete pod/$POD_NAME --ignore-not-found --wait=true
+		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f BasicTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml
+		cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/$POD_NAME"
+		wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	fi
+}
+
 @test "Sync with Kubernetes Secret - Delete deployment. Secret should also be deleted" {
 	log "Starting deployment deletion and secret cleanup test"
 
