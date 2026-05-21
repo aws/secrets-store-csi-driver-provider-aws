@@ -19,6 +19,7 @@ jobs:
         uses: step-security/harden-runner@v2.19.4
         with:
           egress-policy: audit
+
       - name: Remove label
         run: |
           echo "Removing label '$LABEL_NAME' from PR #$PR_NUMBER on repo $REPO" 
