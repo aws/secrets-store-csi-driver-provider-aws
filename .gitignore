@@ -25,3 +25,6 @@ _output
 
 # oh-my-claudecode local state (any depth)
 .omc/
+
+# Build artifact
+secrets-store-csi-driver-provider-aws
