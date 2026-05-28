@@ -32,6 +32,11 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -83,6 +88,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Setup kubectl
         uses: azure/setup-kubectl@v5
 
