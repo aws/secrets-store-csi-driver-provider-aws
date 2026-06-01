@@ -40,6 +40,14 @@ jobs:
           load: true
           tags: test-build:latest-${{ matrix.arch }}
 
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: test-build:latest-${{ matrix.arch }}
+          format: table
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
       - name: List images
         run: |
           docker image ls -a
