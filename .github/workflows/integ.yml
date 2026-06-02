@@ -58,6 +58,12 @@ jobs:
     steps:
       - name: Context
         run: echo "Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}"
+
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Setup kubectl
         uses: azure/setup-kubectl@v5
 
