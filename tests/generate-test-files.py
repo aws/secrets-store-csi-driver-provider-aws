@@ -283,26 +283,17 @@ def main():
     else:
         action = "default"
 
-    if action == "create-secrets":
-        print("Creating secrets for all test configurations...")
-        for config_name, config in CONFIGS.items():
-            create_secrets_for_config(config["ARCH"], config["AUTH_TYPE"])
-        print("All secrets created successfully")
+    if action in ("create-secrets", "cleanup-secrets"):
+        fn = create_secrets_for_config if action == "create-secrets" else cleanup_secrets_for_config
+        target = sys.argv[2] if len(sys.argv) > 2 else None
+        targets = [target] if target else list(CONFIGS.keys())
+        for config_name in targets:
+            if config_name not in CONFIGS:
+                print(f"Unknown config: {config_name}")
+                sys.exit(1)
+            config = CONFIGS[config_name]
+            fn(config["ARCH"], config["AUTH_TYPE"])
         return
-    if action == "cleanup-secrets":
-        print("Cleaning up secrets for all test configurations...")
-        for config_name, config in CONFIGS.items():
-            cleanup_secrets_for_config(config["ARCH"], config["AUTH_TYPE"])
-        print("All secrets cleaned up successfully")
-        return
-    if action == "generate-only":
-        # Just generate files, don't manage secrets
-        pass
-    else:
-        # Default behavior: generate files and create secrets
-        print("Creating secrets for all test configurations...")
-        for config_name, config in CONFIGS.items():
-            create_secrets_for_config(config["ARCH"], config["AUTH_TYPE"])
 
     # Generate files for each configuration
     for config_name, config in CONFIGS.items():
@@ -345,12 +336,9 @@ def main():
         print(f"  - BasicTestMount-{arch}-{auth_type}.yaml")
 
     print("\nUsage:")
-    print(
-        "  ./generate-test-files.py                 # Generate files and create secrets"
-    )
-    print("  ./generate-test-files.py generate-only  # Generate files only")
-    print("  ./generate-test-files.py create-secrets # Create secrets only")
-    print("  ./generate-test-files.py cleanup-secrets # Cleanup secrets only")
+    print("  ./generate-test-files.py                                # Generate files only")
+    print("  ./generate-test-files.py create-secrets [<config>]      # Create secrets (single config or all)")
+    print("  ./generate-test-files.py cleanup-secrets [<config>]     # Cleanup secrets (single config or all)")
 
 
 if __name__ == "__main__":

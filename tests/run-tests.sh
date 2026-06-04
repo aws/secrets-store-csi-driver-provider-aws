@@ -2,7 +2,6 @@
 
 cleanup() {
 	cleanup_generated_files
-	cleanup_secrets
 }
 
 check_parallel() {
@@ -39,13 +38,10 @@ delete_cluster() {
 	eksctl delete cluster --name $1 --parallel 25
 }
 
-cleanup_secrets() {
-	echo "Cleaning up secrets and parameters..."
-	python3 generate-test-files.py cleanup-secrets
-}
-
 if [[ "$1" == "clean" ]]; then
 	cleanup
+	echo "Cleaning up secrets and parameters for all configs..."
+	python3 generate-test-files.py cleanup-secrets
 
 	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "pod-identity" || "$2" == "x64-pod-identity" ]]; then
 		delete_cluster integ-cluster-x64-pod-identity
@@ -63,7 +59,7 @@ if [[ "$1" == "clean" ]]; then
 	exit $?
 fi
 
-# Generate test files from templates (this also creates secrets)
+# Generate test files from templates. Each test's setup_file creates its own secrets.
 generate_test_files
 
 # Run tests based on argument
