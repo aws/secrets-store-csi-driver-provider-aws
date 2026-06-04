@@ -11,6 +11,7 @@ concurrency:
   # Only run one workflow at a time to avoid hitting the network interface quota
   group: integration-tests
   cancel-in-progress: false
+  queue: max
 
 jobs:
   build-docker:
