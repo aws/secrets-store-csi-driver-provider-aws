@@ -75,7 +75,7 @@ jobs:
         run: helm lint charts/*
 
       - name: Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
           use_oidc: true
