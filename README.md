@@ -35,6 +35,29 @@ helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-sto
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
 ```
 
+### Separate CSI Driver Installation
+
+If you install the secrets-store-csi-driver separately (not via this Helm chart), you must configure `tokenRequests` in the CSI driver for the AWS provider to authenticate with AWS services:
+
+```shell
+helm upgrade csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver \
+  --set tokenRequests[0].audience="sts.amazonaws.com" \
+  --set tokenRequests[1].audience="pods.eks.amazonaws.com"
+```
+
+Or if using kubectl, add the following to your CSIDriver manifest:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: secrets-store.csi.k8s.io
+spec:
+  tokenRequests:
+    - audience: "sts.amazonaws.com"
+    - audience: "pods.eks.amazonaws.com"
+```
+
 ## Usage
 
 Set the region name and name of your cluster to use in the bash commands that follow:
@@ -323,6 +346,18 @@ In order to configure the HTTP timeout for Pod Identity authentication, pass the
 helm install ... --pod-identity-http-timeout=250ms
 ```
 The timeout value must be a valid Go duration string (e.g. `2s`, `500ms`). The timeout value uses the [AWS SDK default](https://github.com/aws/aws-sdk-go-v2/blob/main/aws/transport/http/client.go#L33) by default.
+
+### Driver Writes Secrets
+
+By default, the AWS provider is responsible for writing secret files to the pods. In order to instead make the Secrets Store CSI Driver perform the file writing, set the `driver-writes-secrets` flag to `true` during the install step.
+
+Helm installation example:
+```shell
+helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set driverWritesSecrets=true
+```
+
+**Note:** When `driverWritesSecrets` is enabled, the Secrets Store CSI Driver uses [atomic writer](https://github.com/kubernetes/kubernetes/blob/master/pkg/volume/util/atomic_writer.go) to write the secret files. Atomic writer relies on symlinks to update file content. This means that reading file metadata (such as last updated timestamps) when the secret gets auto-rotated requires following symlinks (e.g., `stat -L` instead of `stat`). Applications that check file timestamps without following symlinks will see stale values. For more information, refer to the [relevant Secrets Store CSI Driver documentation section](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations).
+
 
 ### Security Considerations
 

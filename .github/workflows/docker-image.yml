@@ -6,6 +6,9 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -20,13 +23,18 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Build the Docker image
         uses: docker/build-push-action@v7
         with:
-          build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/auth.ProviderVersion=fakeversion' -extldflags '-static'
+          build-args: LDFLAGS=-X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=fakeversion' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.ProviderVersion=fakeversion' -extldflags '-static'
           context: .
           platforms: ${{ matrix.os }}/${{ matrix.arch }}
           load: true

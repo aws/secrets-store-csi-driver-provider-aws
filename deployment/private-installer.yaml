@@ -11,9 +11,6 @@ metadata:
   name: csi-secrets-store-provider-aws-cluster-role
 rules:
 - apiGroups: [""]
-  resources: ["serviceaccounts/token"]
-  verbs: ["create"]
-- apiGroups: [""]
   resources: ["serviceaccounts"]
   verbs: ["get"]
 - apiGroups: [""]
@@ -89,3 +86,5 @@ spec:
             type: DirectoryOrCreate
       nodeSelector:
         kubernetes.io/os: linux
+      tolerations:
+        - operator: Exists
