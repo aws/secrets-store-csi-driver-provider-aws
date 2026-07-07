@@ -22,7 +22,7 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -69,13 +69,13 @@ jobs:
           go test  -fuzz=FuzzMountAttributes -fuzztime=10s ./server/
 
       - name: Setup Helm
-        uses: Azure/setup-helm@v5
+        uses: Azure/setup-helm@v5.0.1
 
       - name: Helm lint
         run: helm lint charts/*
 
       - name: Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
           use_oidc: true
