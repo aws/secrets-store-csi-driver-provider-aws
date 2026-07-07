@@ -14,6 +14,10 @@ driverWritesSecrets: false
 commonLabels: {}
 podLabels: {}
 podAnnotations: {}
+# The provider requires a service account token to authenticate to the
+# Kubernetes API server, including for Pod Identity and IRSA token resolution.
+# Disabling this will prevent the provider from starting unless a token is
+# provided by other means.
 automountServiceAccountToken: true
 
 affinity:
