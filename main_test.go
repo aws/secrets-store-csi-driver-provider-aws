@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	"testing"
 	"time"
@@ -142,20 +141,16 @@ func TestFlagParsing(t *testing.T) {
 	}
 }
 
-func TestSocketPermissions(t *testing.T) {
+func TestCreateSocket(t *testing.T) {
 	dir := t.TempDir()
 	endpoint := fmt.Sprintf("%s/aws.sock", dir)
 
-	listener, err := net.Listen("unix", endpoint)
+	listener, err := createSocket(endpoint)
 	if err != nil {
-		t.Fatalf("Failed to create socket: %v", err)
+		t.Fatalf("createSocket failed: %v", err)
 	}
 	defer listener.Close()
 	defer os.Remove(endpoint)
-
-	if err := os.Chmod(endpoint, 0700); err != nil {
-		t.Fatalf("Failed to chmod socket: %v", err)
-	}
 
 	info, err := os.Stat(endpoint)
 	if err != nil {
@@ -165,5 +160,12 @@ func TestSocketPermissions(t *testing.T) {
 	perm := info.Mode().Perm()
 	if perm != 0700 {
 		t.Errorf("Expected socket permissions 0700, got %04o", perm)
+	}
+}
+
+func TestCreateSocket_InvalidPath(t *testing.T) {
+	_, err := createSocket("/nonexistent/path/aws.sock")
+	if err == nil {
+		t.Error("Expected error for invalid path, got nil")
 	}
 }
