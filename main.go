@@ -55,9 +55,11 @@ func parsePodIdentityHttpTimeout(timeoutStr string) *time.Duration {
 // createSocket creates a Unix domain socket at the given path with restricted
 // permissions (0700) so that only the owner (root) can connect.
 func createSocket(endpoint string) (net.Listener, error) {
+	oldMask := syscall.Umask(0077)
 	listener, err := net.Listen("unix", endpoint)
+	syscall.Umask(oldMask)
 	if err != nil {
-		return nil, fmt.Errorf("failed to listen: %w", err)
+		return nil, fmt.Errorf("failed to listen on %s: %w", endpoint, err)
 	}
 	if err := os.Chmod(endpoint, 0700); err != nil {
 		listener.Close()

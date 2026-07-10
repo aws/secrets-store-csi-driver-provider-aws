@@ -150,7 +150,6 @@ func TestCreateSocket(t *testing.T) {
 		t.Fatalf("createSocket failed: %v", err)
 	}
 	defer listener.Close()
-	defer os.Remove(endpoint)
 
 	info, err := os.Stat(endpoint)
 	if err != nil {
