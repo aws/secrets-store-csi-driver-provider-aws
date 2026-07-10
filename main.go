@@ -81,6 +81,9 @@ func main() {
 	if err != nil {
 		klog.Fatalf("Failed to listen on unix socket. error: %v", err)
 	}
+	if err := os.Chmod(endpoint, 0700); err != nil {
+		klog.Fatalf("Failed to set socket permissions. error: %v", err)
+	}
 
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
