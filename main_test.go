@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -137,5 +139,31 @@ func TestFlagParsing(t *testing.T) {
 				t.Errorf("Expected flag value %s, got %s", tt.expectedFlag, *testPodIdentityHttpTimeout)
 			}
 		})
+	}
+}
+
+func TestSocketPermissions(t *testing.T) {
+	dir := t.TempDir()
+	endpoint := fmt.Sprintf("%s/aws.sock", dir)
+
+	listener, err := net.Listen("unix", endpoint)
+	if err != nil {
+		t.Fatalf("Failed to create socket: %v", err)
+	}
+	defer listener.Close()
+	defer os.Remove(endpoint)
+
+	if err := os.Chmod(endpoint, 0700); err != nil {
+		t.Fatalf("Failed to chmod socket: %v", err)
+	}
+
+	info, err := os.Stat(endpoint)
+	if err != nil {
+		t.Fatalf("Failed to stat socket: %v", err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm != 0700 {
+		t.Errorf("Expected socket permissions 0700, got %04o", perm)
 	}
 }
