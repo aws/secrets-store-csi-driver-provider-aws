@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
