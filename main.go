@@ -95,7 +95,7 @@ func main() {
 
 	listener, err := createSocket(endpoint)
 	if err != nil {
-		klog.Fatalf("Failed to create unix socket. error: %v", err)
+		klog.Fatalf("Failed to listen on unix socket. error: %v", err)
 	}
 
 	cfg, err := rest.InClusterConfig()
