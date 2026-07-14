@@ -52,6 +52,22 @@ func parsePodIdentityHttpTimeout(timeoutStr string) *time.Duration {
 	return &duration
 }
 
+// createSocket creates a Unix domain socket at the given path with restricted
+// permissions (0700) so that only the owner (root) can connect.
+func createSocket(endpoint string) (net.Listener, error) {
+	oldMask := syscall.Umask(0077)
+	listener, err := net.Listen("unix", endpoint)
+	syscall.Umask(oldMask)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on %s: %w", endpoint, err)
+	}
+	if err := os.Chmod(endpoint, 0700); err != nil {
+		listener.Close()
+		return nil, fmt.Errorf("failed to set socket permissions: %w", err)
+	}
+	return listener, nil
+}
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
@@ -77,7 +93,7 @@ func main() {
 		grpcSrv.GracefulStop()
 	}()
 
-	listener, err := net.Listen("unix", endpoint)
+	listener, err := createSocket(endpoint)
 	if err != nil {
 		klog.Fatalf("Failed to listen on unix socket. error: %v", err)
 	}
