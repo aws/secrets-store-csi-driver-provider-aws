@@ -143,7 +143,7 @@ func TestFlagParsing(t *testing.T) {
 
 func TestCreateSocket(t *testing.T) {
 	dir := t.TempDir()
-	endpoint := fmt.Sprintf("%s/aws.sock", dir)
+	endpoint := filepath.Join(dir, "aws.sock")
 
 	listener, err := createSocket(endpoint)
 	if err != nil {
