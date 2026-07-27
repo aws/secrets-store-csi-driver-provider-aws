@@ -12,6 +12,8 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	logsapi "k8s.io/component-base/logs/api/v1"
+	"k8s.io/component-base/logs/json"
 	"k8s.io/klog/v2"
 	csidriver "sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
@@ -26,6 +28,7 @@ var (
 	burst                  = flag.Int("burst", 10, "Maximum burst for throttle. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
 	eksAddonVersion        = flag.String("eks-addon-version", "", "The EKS addon version of the provider")
 	podIdentityHttpTimeout = flag.String("pod-identity-http-timeout", "", "The HTTP timeout threshold for Pod Identity authentication.")
+	logFormatJSON          = flag.Bool("log-format-json", false, "Set log formatter to JSON")
 )
 
 // parsePodIdentityHttpTimeout parses and validates the HTTP timeout for Pod Identity authentication
@@ -73,10 +76,15 @@ func createSocket(endpoint string) (net.Listener, error) {
 // requests.
 func main() {
 
+	flag.Parse() // Parse command line flags
+
+	if *logFormatJSON {
+		logger, _ := json.Factory{}.Create(*logsapi.NewLoggingConfiguration(), logsapi.LoggingOptions{ErrorStream: os.Stderr, InfoStream: os.Stdout})
+		klog.SetLogger(logger)
+	}
+
 	klog.Infof("Starting %s version %s", server.ProviderName, server.Version)
 	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
-
-	flag.Parse() // Parse command line flags
 
 	//socket on which to listen to for driver calls
 	endpoint := fmt.Sprintf("%s/aws.sock", *endpointDir)

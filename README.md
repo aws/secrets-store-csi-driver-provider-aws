@@ -358,6 +358,15 @@ helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-sto
 
 **Note:** When `driverWritesSecrets` is enabled, the Secrets Store CSI Driver uses [atomic writer](https://github.com/kubernetes/kubernetes/blob/master/pkg/volume/util/atomic_writer.go) to write the secret files. Atomic writer relies on symlinks to update file content. This means that reading file metadata (such as last updated timestamps) when the secret gets auto-rotated requires following symlinks (e.g., `stat -L` instead of `stat`). Applications that check file timestamps without following symlinks will see stale values. For more information, refer to the [relevant Secrets Store CSI Driver documentation section](https://secrets-store-csi-driver.sigs.k8s.io/known-limitations).
 
+### JSON Logging
+
+By default, the provider writes logs in the klog text format. In order to emit logs in JSON format instead, set the `log-format-json` flag to `true` during the install step.
+
+Helm installation example:
+```shell
+helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set logFormatJSON=true
+```
+
 
 ### Security Considerations
 
