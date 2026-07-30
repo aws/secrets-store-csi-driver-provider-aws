@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 func TestParsePodIdentityHttpTimeout(t *testing.T) {
@@ -166,5 +170,33 @@ func TestCreateSocket_InvalidPath(t *testing.T) {
 	_, err := createSocket("/nonexistent/path/aws.sock")
 	if err == nil {
 		t.Error("Expected error for invalid path, got nil")
+	}
+}
+
+func TestConfigureLogging(t *testing.T) {
+	defer func() {
+		*logFormatJSON = false
+		klog.ClearLogger()
+	}()
+
+	var out bytes.Buffer
+
+	// Flag disabled: klog is left untouched.
+	configureLogging(&out)
+	klog.InfoS("plain message")
+	if out.Len() != 0 {
+		t.Errorf("Expected no output on the given stream when the flag is disabled, got %q", out.String())
+	}
+
+	// Flag enabled: klog output becomes JSON.
+	*logFormatJSON = true
+	configureLogging(&out)
+	klog.InfoS("json message")
+	var entry map[string]interface{}
+	if err := json.NewDecoder(&out).Decode(&entry); err != nil {
+		t.Fatalf("Log output is not valid JSON: %v", err)
+	}
+	if entry["msg"] != "json message" {
+		t.Errorf("Expected msg %q, got %v", "json message", entry["msg"])
 	}
 }

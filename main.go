@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -71,6 +72,17 @@ func createSocket(endpoint string) (net.Listener, error) {
 	return listener, nil
 }
 
+// configureLogging replaces the default klog text output with a logger that
+// emits log entries in JSON format to the given stream when the
+// log-format-json flag is enabled.
+func configureLogging(out io.Writer) {
+	if !*logFormatJSON {
+		return
+	}
+	logger, control := json.Factory{}.Create(*logsapi.NewLoggingConfiguration(), logsapi.LoggingOptions{ErrorStream: out, InfoStream: out})
+	klog.SetLoggerWithOptions(logger, klog.FlushLogger(control.Flush))
+}
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
@@ -78,10 +90,7 @@ func main() {
 
 	flag.Parse() // Parse command line flags
 
-	if *logFormatJSON {
-		logger, _ := json.Factory{}.Create(*logsapi.NewLoggingConfiguration(), logsapi.LoggingOptions{ErrorStream: os.Stderr, InfoStream: os.Stdout})
-		klog.SetLogger(logger)
-	}
+	configureLogging(os.Stderr)
 
 	klog.Infof("Starting %s version %s", server.ProviderName, server.Version)
 	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
