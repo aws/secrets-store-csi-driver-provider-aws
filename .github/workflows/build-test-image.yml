@@ -41,6 +41,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          allow-unsafe-pr-checkout: true
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Login to GitHub Container Registry
