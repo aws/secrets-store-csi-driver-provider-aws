@@ -1035,7 +1035,7 @@ var mountTests []testCase = []testCase{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "(contains path separator)|(path can not contain)",
+		expErr:     "escapes mount directory",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1061,7 +1061,7 @@ var mountTests []testCase = []testCase{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "(contains path separator)|(path can not contain)",
+		expErr:     "escapes mount directory",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -2986,6 +2986,91 @@ func TestMountMaxRegionsExceeded(t *testing.T) {
 	_, err := svr.Mount(context.Background(), req)
 	if err != nil && strings.Contains(err.Error(), "Max number of region(s) exceeded") {
 		t.Fatal("Guard should not fire with 1 region")
+	}
+}
+
+// newSecretsManagerDescriptor returns the single SecretsManager descriptor
+// produced from a one-object mount spec under the given mountDir/translate.
+func newSecretsManagerDescriptor(t *testing.T, mountDir, translate string) *provider.SecretDescriptor {
+	t.Helper()
+	descriptors, err := provider.NewSecretDescriptorList(
+		mountDir, translate,
+		`- objectName: "arn:aws:secretsmanager:us-east-1:123456789012:secret:okAlias"
+  objectAlias: "okAlias"`,
+		[]string{"us-east-1"},
+	)
+	if err != nil {
+		t.Fatalf("failed to build descriptor: %v", err)
+	}
+	list := descriptors[provider.SecretsManager]
+	if len(list) != 1 {
+		t.Fatalf("expected exactly 1 SecretsManager descriptor, got %d", len(list))
+	}
+	return list[0]
+}
+
+// Uses ".." (no separator) so os.CreateTemp's own "pattern contains path
+// separator" rejection cannot mask whether writeFile's guard fired.
+func TestWriteFileRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	d := newSecretsManagerDescriptor(t, dir, "False")
+	d.ObjectAlias = ".."
+
+	secret := &provider.SecretValue{
+		Value:      []byte("attacker-controlled"),
+		Descriptor: *d,
+	}
+
+	svr := &CSIDriverProviderServer{}
+	_, err := svr.writeFile(secret, 0644)
+	if err == nil {
+		t.Fatalf("expected writeFile to reject a traversing descriptor, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes mount directory") {
+		t.Fatalf("expected \"escapes mount directory\" error, got: %v", err)
+	}
+}
+
+// The driverWriteSecrets branch (which returns file contents instead of
+// writing to disk) must ALSO honor the traversal guard, since the file name
+// it emits will be used verbatim by the driver.
+func TestWriteFileRejectsTraversalInDriverWriteMode(t *testing.T) {
+	dir := t.TempDir()
+	d := newSecretsManagerDescriptor(t, dir, "False")
+	d.ObjectAlias = "../escape"
+
+	secret := &provider.SecretValue{
+		Value:      []byte("attacker-controlled"),
+		Descriptor: *d,
+	}
+
+	svr := &CSIDriverProviderServer{driverWriteSecrets: true}
+	_, err := svr.writeFile(secret, 0644)
+	if err == nil {
+		t.Fatalf("expected writeFile to reject a traversing descriptor in driverWriteSecrets mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes mount directory") {
+		t.Fatalf("expected \"escapes mount directory\" error, got: %v", err)
+	}
+}
+
+// writeFile must accept a normal in-directory descriptor so the guard is not
+// over-restrictive.
+func TestWriteFileAcceptsInsideDir(t *testing.T) {
+	dir := t.TempDir()
+	d := newSecretsManagerDescriptor(t, dir, "False")
+
+	secret := &provider.SecretValue{
+		Value:      []byte("payload"),
+		Descriptor: *d,
+	}
+
+	svr := &CSIDriverProviderServer{}
+	if _, err := svr.writeFile(secret, 0644); err != nil {
+		t.Fatalf("unexpected error writing a normal file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "okAlias")); err != nil {
+		t.Fatalf("expected okAlias to be written under %s: %v", dir, err)
 	}
 }
 
