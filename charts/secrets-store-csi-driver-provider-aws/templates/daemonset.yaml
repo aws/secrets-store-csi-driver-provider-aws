@@ -48,9 +48,9 @@ spec:
             {{- if .Values.k8sThrottlingParams.burst }}
             - --burst={{ .Values.k8sThrottlingParams.burst }}
             {{- end }}
+            {{- end }}
             {{- if .Values.eksAddonVersion }}
             - --eks-addon-version={{ .Values.eksAddonVersion }}
-            {{- end }}
             {{- end }}
             {{- if .Values.podIdentityHttpTimeout }}
             - --pod-identity-http-timeout={{ .Values.podIdentityHttpTimeout }}

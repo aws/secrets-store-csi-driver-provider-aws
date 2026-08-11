@@ -17,12 +17,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24"
+          go-version-file: 'go.mod'
 
       - name: Check Formatting
         run: |
@@ -56,14 +61,21 @@ jobs:
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 
+      - name: Fuzz
+        run: |
+          go test -fuzz=FuzzNewSecretDescriptorList -fuzztime=10s ./provider/
+          go test -fuzz=FuzzValidateFilePermission -fuzztime=10s ./provider/
+          go test -fuzz=FuzzGetJsonSecrets -fuzztime=10s ./provider/
+          go test  -fuzz=FuzzMountAttributes -fuzztime=10s ./server/
+
       - name: Setup Helm
-        uses: Azure/setup-helm@v4
+        uses: Azure/setup-helm@v5
 
       - name: Helm lint
         run: helm lint charts/*
 
       - name: Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           fail_ci_if_error: true
           use_oidc: true

@@ -15,7 +15,6 @@ import (
 	"k8s.io/klog/v2"
 	csidriver "sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
-	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/server"
 )
@@ -53,12 +52,29 @@ func parsePodIdentityHttpTimeout(timeoutStr string) *time.Duration {
 	return &duration
 }
 
+// createSocket creates a Unix domain socket at the given path with restricted
+// permissions (0700) so that only the owner (root) can connect.
+func createSocket(endpoint string) (net.Listener, error) {
+	oldMask := syscall.Umask(0077)
+	listener, err := net.Listen("unix", endpoint)
+	syscall.Umask(oldMask)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on %s: %w", endpoint, err)
+	}
+	if err := os.Chmod(endpoint, 0700); err != nil {
+		listener.Close()
+		return nil, fmt.Errorf("failed to set socket permissions: %w", err)
+	}
+	return listener, nil
+}
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
 func main() {
 
-	klog.Infof("Starting %s version %s", auth.ProviderName, server.Version)
+	klog.Infof("Starting %s version %s", server.ProviderName, server.Version)
+	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
 
 	flag.Parse() // Parse command line flags
 
@@ -77,7 +93,7 @@ func main() {
 		grpcSrv.GracefulStop()
 	}()
 
-	listener, err := net.Listen("unix", endpoint)
+	listener, err := createSocket(endpoint)
 	if err != nil {
 		klog.Fatalf("Failed to listen on unix socket. error: %v", err)
 	}

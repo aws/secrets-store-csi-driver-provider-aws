@@ -437,6 +437,22 @@ func TestNewDescriptorList(t *testing.T) {
 
 }
 
+func TestNilDescriptorEntry(t *testing.T) {
+	objects := `
+          - objectName: secret1
+            objectType: secretsmanager
+          -
+          - objectName: secret2
+            objectType: ssmparameter`
+
+	_, err := NewSecretDescriptorList("/", "", objects, singleRegion)
+	expectedErrorMessage := "Empty descriptor entry in SecretProviderClass"
+
+	if err == nil || err.Error() != expectedErrorMessage {
+		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	}
+}
+
 // test separation/grouping into ssm/secretsmanager with valid parameters
 func TestBadYaml(t *testing.T) {
 	objects := `

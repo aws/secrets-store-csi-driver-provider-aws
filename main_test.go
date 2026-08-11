@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -137,5 +138,33 @@ func TestFlagParsing(t *testing.T) {
 				t.Errorf("Expected flag value %s, got %s", tt.expectedFlag, *testPodIdentityHttpTimeout)
 			}
 		})
+	}
+}
+
+func TestCreateSocket(t *testing.T) {
+	dir := t.TempDir()
+	endpoint := filepath.Join(dir, "aws.sock")
+
+	listener, err := createSocket(endpoint)
+	if err != nil {
+		t.Fatalf("createSocket failed: %v", err)
+	}
+	defer listener.Close()
+
+	info, err := os.Stat(endpoint)
+	if err != nil {
+		t.Fatalf("Failed to stat socket: %v", err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm != 0700 {
+		t.Errorf("Expected socket permissions 0700, got %04o", perm)
+	}
+}
+
+func TestCreateSocket_InvalidPath(t *testing.T) {
+	_, err := createSocket("/nonexistent/path/aws.sock")
+	if err == nil {
+		t.Error("Expected error for invalid path, got nil")
 	}
 }

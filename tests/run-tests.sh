@@ -2,7 +2,6 @@
 
 cleanup() {
 	cleanup_generated_files
-	cleanup_secrets
 }
 
 check_parallel() {
@@ -39,13 +38,10 @@ delete_cluster() {
 	eksctl delete cluster --name $1 --parallel 25
 }
 
-cleanup_secrets() {
-	echo "Cleaning up secrets and parameters..."
-	python3 generate-test-files.py cleanup-secrets
-}
-
 if [[ "$1" == "clean" ]]; then
 	cleanup
+	echo "Cleaning up secrets and parameters for all configs..."
+	python3 generate-test-files.py cleanup-secrets
 
 	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "pod-identity" || "$2" == "x64-pod-identity" ]]; then
 		delete_cluster integ-cluster-x64-pod-identity
@@ -63,50 +59,54 @@ if [[ "$1" == "clean" ]]; then
 	exit $?
 fi
 
-# Generate test files from templates (this also creates secrets)
+# Generate test files from templates. Each test's setup_file creates its own secrets.
 generate_test_files
 
 # Run tests based on argument
+bats_exit_code=0
 if [[ "$1" == "all" || "$1" == "" ]]; then
 	check_parallel
 	echo "Running all tests: x64-irsa, x64-pod-identity, arm-irsa, arm-pod-identity"
 	bats --jobs 4 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats arm-irsa.bats arm-pod-identity.bats
-fi
-if [[ "$1" == "irsa" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "irsa" ]]; then
 	check_parallel
 	echo "Running IRSA tests: x64-irsa, arm-irsa"
 	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats arm-irsa.bats
-fi
-if [[ "$1" == "pod-identity" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "pod-identity" ]]; then
 	check_parallel
 	echo "Running Pod Identity tests: x64-pod-identity, arm-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files x64-pod-identity.bats arm-pod-identity.bats
-fi
-if [[ "$1" == "x64" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "x64" ]]; then
 	check_parallel
 	echo "Running x64 tests: x64-irsa, x64-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files x64-irsa.bats x64-pod-identity.bats
-fi
-if [[ "$1" == "arm" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "arm" ]]; then
 	check_parallel
 	echo "Running ARM tests: arm-irsa, arm-pod-identity"
 	bats --jobs 2 --no-parallelize-within-files arm-irsa.bats arm-pod-identity.bats
-fi
-if [[ "$1" == "x64-irsa" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "x64-irsa" ]]; then
 	echo "Running x64 IRSA test: x64-irsa"
 	bats x64-irsa.bats
-fi
-if [[ "$1" == "x64-pod-identity" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "x64-pod-identity" ]]; then
 	echo "Running x64 Pod Identity test: x64-pod-identity"
 	bats x64-pod-identity.bats
-fi
-if [[ "$1" == "arm-irsa" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "arm-irsa" ]]; then
 	echo "Running ARM IRSA test: arm-irsa"
 	bats arm-irsa.bats
-fi
-if [[ "$1" == "arm-pod-identity" ]]; then
+	bats_exit_code=$?
+elif [[ "$1" == "arm-pod-identity" ]]; then
 	echo "Running ARM Pod Identity test: arm-pod-identity"
 	bats arm-pod-identity.bats
+	bats_exit_code=$?
 fi
 
 cleanup
+
+exit $bats_exit_code
