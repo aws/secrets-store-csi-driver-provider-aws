@@ -174,29 +174,52 @@ func TestCreateSocket_InvalidPath(t *testing.T) {
 }
 
 func TestConfigureLogging(t *testing.T) {
-	defer func() {
-		*logFormatJSON = false
-		klog.ClearLogger()
-	}()
+	// klog's logger is process-wide state, so these subtests must not run in
+	// parallel with anything else that asserts on klog output.
+	defer klog.ClearLogger()
 
-	var out bytes.Buffer
+	t.Run("disabled leaves klog untouched", func(t *testing.T) {
+		var out bytes.Buffer
+		configureLogging(false, &out)
+		klog.Infof("plain message")
+		if out.Len() != 0 {
+			t.Errorf("Expected no output on the given stream when disabled, got %q", out.String())
+		}
+	})
 
-	// Flag disabled: klog is left untouched.
-	configureLogging(&out)
-	klog.InfoS("plain message")
-	if out.Len() != 0 {
-		t.Errorf("Expected no output on the given stream when the flag is disabled, got %q", out.String())
-	}
+	t.Run("enabled emits JSON", func(t *testing.T) {
+		var out bytes.Buffer
+		configureLogging(true, &out)
+		defer klog.ClearLogger()
 
-	// Flag enabled: klog output becomes JSON.
-	*logFormatJSON = true
-	configureLogging(&out)
-	klog.InfoS("json message")
-	var entry map[string]interface{}
-	if err := json.NewDecoder(&out).Decode(&entry); err != nil {
-		t.Fatalf("Log output is not valid JSON: %v", err)
-	}
-	if entry["msg"] != "json message" {
-		t.Errorf("Expected msg %q, got %v", "json message", entry["msg"])
-	}
+		// InfoS reaches the logger directly, while the printf-style calls used
+		// by every production call site in this repo take a different klog code
+		// path (printfDepth -> output) that strips klog's own header and trims
+		// the trailing newline. Both are asserted so a klog change that breaks
+		// only the printf path cannot pass unnoticed.
+		for _, tc := range []struct {
+			name string
+			log  func()
+			want string
+		}{
+			{"structured", func() { klog.InfoS("json message") }, "json message"},
+			{"printf", func() { klog.Infof("formatted %s", "message") }, "formatted message"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				out.Reset()
+				tc.log()
+
+				var entry map[string]interface{}
+				if err := json.NewDecoder(&out).Decode(&entry); err != nil {
+					t.Fatalf("Log output is not valid JSON: %v (raw: %q)", err, out.String())
+				}
+				if entry["msg"] != tc.want {
+					t.Errorf("Expected msg %q, got %v", tc.want, entry["msg"])
+				}
+				if entry["caller"] == nil {
+					t.Error("Expected a caller field in the JSON entry")
+				}
+			})
+		}
+	})
 }

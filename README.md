@@ -367,6 +367,19 @@ Helm installation example:
 helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set logFormatJSON=true
 ```
 
+**Note:** `logFormatJSON` only affects the AWS provider DaemonSet. It does not cascade into the bundled [Secrets Store CSI Driver](https://github.com/kubernetes-sigs/secrets-store-csi-driver) sub-chart, which is installed by default and emits much of the mount-path log volume. To switch the driver to JSON as well, set its own value: `--set secrets-store-csi-driver.logFormatJSON=true`.
+
+**Note:** The JSON entries do not contain an explicit level field. Info entries carry a verbosity key (`"v":0`), while error entries omit `v` and instead carry an `err` field, for example:
+
+```json
+{"ts":1786956565051.783,"caller":"main.go:109","msg":"Starting secrets-store-csi-driver-provider-aws version 1.0.0","v":0}
+{"ts":1786956565051.976,"caller":"main.go:129","msg":"Failed to listen on unix socket","err":"listen unix /var/run/secrets-store-csi-providers/aws.sock: bind: no such file or directory"}
+```
+
+Log collectors that expect a `level` or `severity` field need a remapping rule based on the presence of `v`/`err`. Note also that klog routes only `ErrorS`/`Errorf` through the logger's error path, so `klog.Warning` entries appear as info entries; provider startup failures are logged via `ErrorS` and are therefore distinguishable as errors.
+
+**Note:** Only klog output is converted to JSON. Diagnostics written directly to stderr by other libraries (for example grpc-go transport errors) and Go panic output remain plain text, so a strict JSON-only parser may still encounter non-JSON lines.
+
 
 ### Security Considerations
 

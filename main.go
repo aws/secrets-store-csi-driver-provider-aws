@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	logsapi "k8s.io/component-base/logs/api/v1"
-	"k8s.io/component-base/logs/json"
+	logsjson "k8s.io/component-base/logs/json"
 	"k8s.io/klog/v2"
 	csidriver "sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
@@ -73,14 +73,27 @@ func createSocket(endpoint string) (net.Listener, error) {
 }
 
 // configureLogging replaces the default klog text output with a logger that
-// emits log entries in JSON format to the given stream when the
-// log-format-json flag is enabled.
-func configureLogging(out io.Writer) {
-	if !*logFormatJSON {
+// emits log entries in JSON format to the given stream when jsonFormat is set.
+//
+// jsonFormat is passed in rather than read from the flag directly so that this
+// stays a pure function of its arguments; reading *logFormatJSON here would
+// silently do nothing if it ever ran before flag.Parse().
+func configureLogging(jsonFormat bool, out io.Writer) {
+	if !jsonFormat {
 		return
 	}
-	logger, control := json.Factory{}.Create(*logsapi.NewLoggingConfiguration(), logsapi.LoggingOptions{ErrorStream: out, InfoStream: out})
-	klog.SetLoggerWithOptions(logger, klog.FlushLogger(control.Flush))
+	// Only ErrorStream is consulted while SplitStream is false (the default),
+	// but InfoStream is set to the same writer so that enabling SplitStream
+	// later cannot leave the factory with a nil writer.
+	logger, control := logsjson.Factory{}.Create(
+		*logsapi.NewLoggingConfiguration(),
+		logsapi.LoggingOptions{ErrorStream: out, InfoStream: out},
+	)
+	// ContextualLogger(true) makes klog.Background()/FromContext() return this
+	// logger directly, matching how component-base installs the factory itself.
+	// Without it, client-go's contextual log calls are serialized to text by
+	// klog first and arrive here as one flattened msg string.
+	klog.SetLoggerWithOptions(logger, klog.ContextualLogger(true), klog.FlushLogger(control.Flush))
 }
 
 // Main entry point for the Secret Store CSI driver AWS provider. This main
@@ -90,7 +103,8 @@ func main() {
 
 	flag.Parse() // Parse command line flags
 
-	configureLogging(os.Stderr)
+	configureLogging(*logFormatJSON, os.Stderr)
+	defer klog.Flush()
 
 	klog.Infof("Starting %s version %s", server.ProviderName, server.Version)
 	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
@@ -112,12 +126,14 @@ func main() {
 
 	listener, err := createSocket(endpoint)
 	if err != nil {
-		klog.Fatalf("Failed to listen on unix socket. error: %v", err)
+		klog.ErrorS(err, "Failed to listen on unix socket")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
-		klog.Fatalf("Can not get cluster config. error: %v", err)
+		klog.ErrorS(err, "Can not get cluster config")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
 	cfg.QPS = float32(*qps)
@@ -125,7 +141,8 @@ func main() {
 
 	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		klog.Fatalf("Can not initialize kubernetes client. error: %v", err)
+		klog.ErrorS(err, "Can not initialize kubernetes client")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
 	defer func() { // Cleanup on shutdown
@@ -138,7 +155,8 @@ func main() {
 
 	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration, *eksAddonVersion)
 	if err != nil {
-		klog.Fatalf("Could not create server. error: %v", err)
+		klog.ErrorS(err, "Could not create server")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 	csidriver.RegisterCSIDriverProviderServer(grpcSrv, providerSrv)
 
@@ -146,7 +164,8 @@ func main() {
 
 	err = grpcSrv.Serve(listener)
 	if err != nil {
-		klog.Fatalf("Failure serving incoming mount requests. error: %v", err)
+		klog.ErrorS(err, "Failure serving incoming mount requests")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
 }
