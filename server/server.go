@@ -207,6 +207,15 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		fetchedSecrets = append(fetchedSecrets, secrets...) // Build up the list of all secrets
 	}
 
+	// Validate every descriptor before the first write so a rejection does
+	// not leave a partially populated mount.
+	for _, secret := range fetchedSecrets {
+		if err := secret.Descriptor.ValidateMountPath(); err != nil {
+			klog.Errorf("Refusing to write secret outside mount directory: %s", err)
+			return nil, err
+		}
+	}
+
 	// Write out the secrets to the mount point after everything is fetched.
 	var files []*v1alpha1.File
 	for _, secret := range fetchedSecrets {
@@ -378,6 +387,14 @@ func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespa
 // pod applications inadvertantly reading an empty or partial files as it is
 // being updated.
 func (s *CSIDriverProviderServer) writeFile(secret *provider.SecretValue, mode os.FileMode) (*v1alpha1.File, error) {
+
+	// Backstop: Mount() validates every descriptor before entering this
+	// loop; this repeats the check so writeFile is safe if called through
+	// any future path that bypasses NewSecretDescriptorList.
+	if err := secret.Descriptor.ValidateMountPath(); err != nil {
+		klog.Errorf("Refusing to write secret outside mount directory: %s", err)
+		return nil, err
+	}
 
 	// Don't write if the driver is supposed to do it.
 	if s.driverWriteSecrets {
