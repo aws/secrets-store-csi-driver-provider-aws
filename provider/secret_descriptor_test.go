@@ -551,6 +551,9 @@ func TestTraversal(t *testing.T) {
         `, `
         - objectName: "mypath/.."
           objectType: ssmparameter
+        `, `
+        - objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:mypath"
+          objectAlias: "a/../b"
         `,
 	}
 
@@ -558,8 +561,8 @@ func TestTraversal(t *testing.T) {
 
 		_, err := NewSecretDescriptorList("/", "False", obj, singleRegion)
 
-		if err == nil || !strings.Contains(err.Error(), "path can not contain ../") {
-			t.Errorf("Expected error: path can not contain ../, got error: %v\n%v", err, obj)
+		if err == nil || !strings.Contains(err.Error(), "escapes mount directory") {
+			t.Errorf("Expected error: escapes mount directory, got error: %v\n%v", err, obj)
 		}
 
 	}
@@ -990,4 +993,147 @@ func TestValidateDescriptorFilePermission(t *testing.T) {
 			t.Errorf("got: %v want: %v", got, want)
 		}
 	})
+}
+
+// jmesPath sub-entry objectAlias containing ../ must be rejected.
+func TestJMESPathObjectAliasTraversal(t *testing.T) {
+	objects := []string{
+		`
+        - objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:jsonSecret"
+          objectAlias: "safeAlias"
+          jmesPath:
+            - path: "payload"
+              objectAlias: "../../../../etc/cron.d/pwn"
+        `, `
+        - objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:jsonSecret"
+          objectAlias: "safeAlias"
+          jmesPath:
+            - path: "payload"
+              objectAlias: "sub/../../escape"
+        `, `
+        - objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:jsonSecret"
+          objectAlias: "safeAlias"
+          jmesPath:
+            - path: "payload"
+              objectAlias: ".."
+        `,
+	}
+
+	for _, obj := range objects {
+		_, err := NewSecretDescriptorList("/mountpoint", "False", obj, singleRegion)
+		if err == nil || !strings.Contains(err.Error(), "escapes mount directory") {
+			t.Errorf("Expected error: escapes mount directory, got error: %v\n%v", err, obj)
+		}
+	}
+}
+
+// jmesPath objectAlias with ../ segments must not escape mountDir when
+// pathTranslation is disabled.
+func TestJMESPathObjectAliasEscapesMountDirRejected(t *testing.T) {
+	mountDir := "/var/lib/kubelet/pods/POD-UID/volumes/kubernetes.io~csi/secrets-store/mount"
+	objectSpec := `
+- objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:my-json-secret"
+  objectType: "secretsmanager"
+  jmesPath:
+    - path: "payload"
+      objectAlias: "../../../../../../../../../etc/cron.d/pwn"
+`
+
+	_, err := NewSecretDescriptorList(mountDir, "False", objectSpec, singleRegion)
+	if err == nil {
+		t.Fatalf("expected traversal error, but NewSecretDescriptorList accepted a jmesPath objectAlias with ../ segments")
+	}
+	if !strings.Contains(err.Error(), "escapes mount directory") {
+		t.Fatalf("expected error: escapes mount directory, got: %v", err)
+	}
+}
+
+// Confirm the pre-existing top-level objectAlias traversal check still fires.
+func TestTopLevelObjectAliasTraversal(t *testing.T) {
+	objectSpec := `
+- objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:my-secret"
+  objectAlias: "../../../../etc/cron.d/pwn"
+`
+	_, err := NewSecretDescriptorList("/mountpoint", "False", objectSpec, singleRegion)
+	if err == nil || !strings.Contains(err.Error(), "escapes mount directory") {
+		t.Fatalf("expected traversal error, got: %v", err)
+	}
+}
+
+// translate="" mirrors NewSecretDescriptorList's state when pathTranslation
+// is "False", which is when a ".." element can survive to the write path.
+// translate="/" is the only setting under which GetFileName() can return an
+// absolute name (the TrimLeft in GetFileName's else branch is skipped).
+func TestValidateMountPathRejectsEscape(t *testing.T) {
+	cases := []struct {
+		name        string
+		translate   string
+		objectAlias string
+	}{
+		{"parent-traversal", "", "../etc/passwd"},
+		{"deep-traversal", "", "../../../../etc/cron.d/pwn"},
+		{"embedded-traversal", "", "sub/../../escape"},
+		{"bare-parent", "", ".."},
+		{"trailing-parent", "", "mypath/.."},
+		{"absorbed-parent", "", "/../pathTest-abc123"},
+		{"balanced-parent", "", "a/../b"},
+		{"dot", "", "."},
+		{"empty-after-trim", "", "/"},
+		{"translate-slash-absolute", "/", "/prod/db/password"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := SecretDescriptor{
+				ObjectAlias: tc.objectAlias,
+				translate:   tc.translate,
+			}
+			if err := d.ValidateMountPath(); err == nil {
+				t.Fatalf("expected ValidateMountPath to reject alias %q (translate=%q), got nil",
+					tc.objectAlias, tc.translate)
+			}
+		})
+	}
+}
+
+func TestValidateMountPathDefaultTranslateAcceptsSubstituted(t *testing.T) {
+	d := SecretDescriptor{
+		ObjectAlias: "../etc/passwd",
+		mountDir:    "/mountpoint",
+		translate:   "_",
+	}
+	if err := d.ValidateMountPath(); err != nil {
+		t.Fatalf("unexpected error after slash substitution: %v (resolved to %q)",
+			err, d.GetMountPath())
+	}
+	if got, want := d.GetFileName(), ".._etc_passwd"; got != want {
+		t.Fatalf("expected resolved name %q, got %q", want, got)
+	}
+}
+
+// ValidateMountPath accepts normal in-directory file names.
+func TestValidateMountPathAcceptsInsideDir(t *testing.T) {
+	d := SecretDescriptor{
+		ObjectName: "secret",
+		ObjectType: "secretsmanager",
+		mountDir:   "/mountpoint",
+	}
+	if err := d.ValidateMountPath(); err != nil {
+		t.Fatalf("unexpected error for in-directory file: %v", err)
+	}
+}
+
+// Verifies getJmesEntrySecretDescriptor propagates translate/mountDir: under
+// default slash-substitution, a jmesPath alias with `..` segments becomes a
+// flat file name and is accepted.
+func TestJMESPathObjectAliasAcceptedUnderDefaultTranslate(t *testing.T) {
+	objectSpec := `
+- objectName: "arn:aws:secretsmanager:us-west-2:123456789012:secret:jsonSecret"
+  objectAlias: "safeAlias"
+  jmesPath:
+    - path: "payload"
+      objectAlias: "sub/../x"
+`
+	if _, err := NewSecretDescriptorList("/mountpoint", "", objectSpec, singleRegion); err != nil {
+		t.Fatalf("unexpected error under default translate: %v", err)
+	}
 }
