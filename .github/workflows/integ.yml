@@ -28,7 +28,6 @@ concurrency:
   queue: max
 
 permissions:
-  id-token: write
   contents: read
   packages: read
 
@@ -36,31 +35,35 @@ jobs:
   integration-tests:
     name: Run Integration Tests
     permissions:
-      id-token: write
       contents: read
       packages: read
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        image: [linux-5.0, arm-3.0]
         auth_type: [irsa, pod-identity]
         include:
           - os: linux
           - arch: amd64
             arch-short: x64
-            runner: ubuntu-latest
+            image: linux-5.0
           - arch: arm64
             arch-short: arm
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+            image: arm-3.0
+    # CodeBuild-hosted runner. AWS credentials come from the runner's own IAM role, so the workflow
+    # does not assume a role. `image` picks the compute: linux-5.0 is x86_64, arm-3.0 is Graviton.
+    runs-on: codebuild-ascp-runner-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.image }}-large
 
     env:
       imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
+      AWS_REGION: us-west-2
     steps:
       - name: Context
         run: echo "Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}"
 
       - name: Harden Runner
+        # Self-hosted runners need a StepSecurity agent, which CodeBuild runners do not have.
+        if: runner.environment == 'github-hosted'
         uses: step-security/harden-runner@v2.19.4
         with:
           egress-policy: audit
@@ -82,7 +85,10 @@ jobs:
 
           tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
 
-          sudo install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
+          SUDO=""
+          [ "$(id -u)" -ne 0 ] && SUDO=sudo
+
+          $SUDO install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
 
       - run: eksctl version
 
@@ -102,14 +108,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.ROLE_ARN }}
-          role-session-name: csi-driver-ci-${{ github.run_id }}-${{ matrix.arch }}
-          aws-region: us-west-2
-          role-duration-seconds: 14400
 
       - name: Clean up stale clusters
         run: |
