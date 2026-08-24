@@ -6,7 +6,10 @@ RUN echo "Running on ${BUILDPLATFORM}, building for ${TARGETPLATFORM}."
 WORKDIR /workdir
 
 RUN apk add git build-base
-RUN go env -w GOPROXY=direct
+
+# Override to `direct` on networks that cannot reach proxy.golang.org.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 
 COPY go.mod .
 COPY go.sum .
