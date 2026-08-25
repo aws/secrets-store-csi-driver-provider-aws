@@ -6,7 +6,12 @@ RUN echo "Running on ${BUILDPLATFORM}, building for ${TARGETPLATFORM}."
 WORKDIR /workdir
 
 RUN apk add git build-base
-RUN go env -w GOPROXY=direct
+
+# Override on networks that cannot reach proxy.golang.org, e.g.
+#   docker build --build-arg GOPROXY=direct .
+#   make GOPROXY=direct    # full build+push; see README "Private Builds" for PRIVREPO
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 
 COPY go.mod .
 COPY go.sum .
