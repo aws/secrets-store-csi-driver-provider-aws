@@ -42,7 +42,7 @@ docker-buildx:
 	docker buildx build \
 				--platform linux/arm64,linux/amd64 \
 				--build-arg LDFLAGS=$(LDFLAGS) \
-				$(if $(GOPROXY),--build-arg GOPROXY=$(GOPROXY)) \
+				--build-arg 'GOPROXY=$(GOPROXY)' \
 				--push \
 				-t $(REGISTRY_NAME):latest \
 				-t $(REGISTRY_NAME):$(FULL_REV) \
