@@ -8,8 +8,8 @@ WORKDIR /workdir
 RUN apk add git build-base
 
 # Override on networks that cannot reach proxy.golang.org, e.g.
-#   make docker-buildx GOPROXY=direct
 #   docker build --build-arg GOPROXY=direct .
+#   make GOPROXY=direct    # full build+push; see README "Private Builds" for PRIVREPO
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 
