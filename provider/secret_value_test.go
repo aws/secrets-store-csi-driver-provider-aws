@@ -1,13 +1,13 @@
 package provider
 
 import (
-	"fmt"
+	"strings"
 	"testing"
 )
 
 var TEST_OBJECT_NAME = "jsonObject"
 
-func RunGetJsonSecretTest(t *testing.T, jsonContent string, path string, objectAlias string, expectedErrorMessage string) {
+func RunGetJsonSecretTest(t *testing.T, jsonContent string, path string, objectAlias string, expectedErrorSubstring string) {
 	jmesPath := []JMESPathEntry{
 		{
 			Path:        path,
@@ -27,8 +27,8 @@ func RunGetJsonSecretTest(t *testing.T, jsonContent string, path string, objectA
 
 	_, err := secretValue.getJsonSecrets()
 
-	if err == nil || err.Error() != expectedErrorMessage {
-		t.Fatalf("Expected error: %s, got error: %v", expectedErrorMessage, err)
+	if err == nil || !strings.Contains(err.Error(), expectedErrorSubstring) {
+		t.Fatalf("Expected error containing %q, got error: %v", expectedErrorSubstring, err)
 	}
 }
 func TestNotValidJson(t *testing.T) {
@@ -36,7 +36,7 @@ func TestNotValidJson(t *testing.T) {
 	path := ".username"
 	objectAlias := "test"
 	jsonContent := "NotValidJson"
-	expectedErrorMessage := fmt.Sprintf("Invalid JSON used with jmesPath in secret: %s.", TEST_OBJECT_NAME)
+	expectedErrorMessage := `Failed to parse secret "jsonObject" as JSON for JMESPath processing:`
 
 	RunGetJsonSecretTest(t, jsonContent, path, objectAlias, expectedErrorMessage)
 }
@@ -46,7 +46,7 @@ func TestJMESPathPointsToInvalidObject(t *testing.T) {
 	jsonContent := `{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}`
 	path := "testpath"
 	objectAlias := "testAlias"
-	expectedErrorMessage := fmt.Sprintf("JMES Path - %s for object alias - %s does not point to a valid object.", path, objectAlias)
+	expectedErrorMessage := `JMESPath "testpath" for object alias "testAlias" was not found in secret "jsonObject"`
 
 	RunGetJsonSecretTest(t, jsonContent, path, objectAlias, expectedErrorMessage)
 }
@@ -56,7 +56,7 @@ func TestInvalidJMESPath(t *testing.T) {
 	jsonContent := `{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}`
 	path := ".testpath"
 	objectAlias := "testAlias"
-	expectedErrorMessage := fmt.Sprintf("Invalid JMES Path: %s.", path)
+	expectedErrorMessage := `Invalid JMESPath ".testpath" for object alias "testAlias" in secret "jsonObject":`
 
 	RunGetJsonSecretTest(t, jsonContent, path, objectAlias, expectedErrorMessage)
 }
@@ -66,7 +66,7 @@ func TestInvalidJMESResultType(t *testing.T) {
 	jsonContent := `{"username": 3}`
 	path := "username"
 	objectAlias := "testAlias"
-	expectedErrorMessage := fmt.Sprintf("Invalid JMES search result type for path:%s. Only string is allowed.", path)
+	expectedErrorMessage := `JMESPath "username" for object alias "testAlias" in secret "jsonObject" returned a non-string value. Only string values are supported`
 
 	RunGetJsonSecretTest(t, jsonContent, path, objectAlias, expectedErrorMessage)
 }
