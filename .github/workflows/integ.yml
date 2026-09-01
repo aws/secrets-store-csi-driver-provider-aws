@@ -61,7 +61,7 @@ jobs:
         run: echo "Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}"
 
       - name: Harden Runner
-        uses: step-security/harden-runner@v2.19.4
+        uses: step-security/harden-runner@v2.21.0
         with:
           egress-policy: audit
 
@@ -69,7 +69,7 @@ jobs:
         uses: azure/setup-kubectl@v5
 
       - name: Setup Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@v5.0.1
 
       - name: Setup eksctl
         run: |
@@ -87,7 +87,7 @@ jobs:
       - run: eksctl version
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3"
 
@@ -101,7 +101,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6

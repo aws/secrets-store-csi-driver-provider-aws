@@ -35,11 +35,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@v2.19.4
+        uses: step-security/harden-runner@v2.21.0
         with:
           egress-policy: audit
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           allow-unsafe-pr-checkout: true
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
