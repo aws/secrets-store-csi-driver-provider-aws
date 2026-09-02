@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -222,4 +223,64 @@ func TestConfigureLogging(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestLogFatal(t *testing.T) {
+	var out bytes.Buffer
+	configureLogging(true, &out)
+	defer klog.ClearLogger()
+
+	exitCode := -1
+	klog.OsExit = func(code int) { exitCode = code }
+	defer func() { klog.OsExit = os.Exit }()
+
+	logFatal(errors.New("boom"), "fatal message")
+
+	if exitCode != 1 {
+		t.Fatalf("Expected exit code 1, got %d", exitCode)
+	}
+	var entry map[string]interface{}
+	if err := json.NewDecoder(&out).Decode(&entry); err != nil {
+		t.Fatalf("Log output is not valid JSON: %v (raw: %q)", err, out.String())
+	}
+	if entry["msg"] != "fatal message" {
+		t.Errorf("Expected msg %q, got %v", "fatal message", entry["msg"])
+	}
+	if entry["err"] != "boom" {
+		t.Errorf("Expected err %q, got %v", "boom", entry["err"])
+	}
+}
+
+// The test environment is not a cluster, so main is expected to reach one of
+// its logFatal call sites and exit with code 1. klog.OsExit exists exactly for
+// intercepting that exit; panicking inside it stops main from running past the
+// failed call site.
+func TestMainExitsFatallyOutsideCluster(t *testing.T) {
+	oldArgs := os.Args
+	oldEndpointDir := *endpointDir
+	defer func() {
+		os.Args = oldArgs
+		*endpointDir = oldEndpointDir
+		klog.OsExit = os.Exit
+	}()
+	os.Args = []string{"secrets-store-csi-driver-provider-aws"}
+	*endpointDir = t.TempDir()
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+
+	type exitPanic struct{ code int }
+	klog.OsExit = func(code int) { panic(exitPanic{code}) }
+
+	defer func() {
+		switch r := recover().(type) {
+		case nil:
+			t.Fatal("Expected main to exit fatally outside a cluster")
+		case exitPanic:
+			if r.code != 1 {
+				t.Errorf("Expected exit code 1, got %d", r.code)
+			}
+		default:
+			t.Fatalf("Expected main to exit via klog.FlushAndExit, got panic: %v", r)
+		}
+	}()
+	main()
 }

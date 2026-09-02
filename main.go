@@ -96,6 +96,14 @@ func configureLogging(jsonFormat bool, out io.Writer) {
 	klog.SetLoggerWithOptions(logger, klog.ContextualLogger(true), klog.FlushLogger(control.Flush))
 }
 
+// logFatal logs err at error severity and terminates the process. It replaces
+// klog.Fatalf, whose logr bridge demotes fatal messages to info severity when
+// a structured logger is installed via configureLogging.
+func logFatal(err error, msg string) {
+	klog.ErrorS(err, msg)
+	klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+}
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
@@ -126,14 +134,12 @@ func main() {
 
 	listener, err := createSocket(endpoint)
 	if err != nil {
-		klog.ErrorS(err, "Failed to listen on unix socket")
-		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+		logFatal(err, "Failed to listen on unix socket")
 	}
 
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
-		klog.ErrorS(err, "Can not get cluster config")
-		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+		logFatal(err, "Can not get cluster config")
 	}
 
 	cfg.QPS = float32(*qps)
@@ -141,8 +147,7 @@ func main() {
 
 	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		klog.ErrorS(err, "Can not initialize kubernetes client")
-		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+		logFatal(err, "Can not initialize kubernetes client")
 	}
 
 	defer func() { // Cleanup on shutdown
@@ -155,8 +160,7 @@ func main() {
 
 	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration, *eksAddonVersion)
 	if err != nil {
-		klog.ErrorS(err, "Could not create server")
-		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+		logFatal(err, "Could not create server")
 	}
 	csidriver.RegisterCSIDriverProviderServer(grpcSrv, providerSrv)
 
@@ -164,8 +168,7 @@ func main() {
 
 	err = grpcSrv.Serve(listener)
 	if err != nil {
-		klog.ErrorS(err, "Failure serving incoming mount requests")
-		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+		logFatal(err, "Failure serving incoming mount requests")
 	}
 
 }
