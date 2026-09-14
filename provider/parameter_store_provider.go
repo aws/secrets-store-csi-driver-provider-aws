@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -81,7 +82,14 @@ func (p *ParameterStoreProvider) fetchParameterStoreValue(
 ) (values []*SecretValue, err error) {
 
 	for _, client := range p.clients {
-		batchValues, err := p.fetchParameterStoreBatch(ctx, client, batchDescriptors, curMap)
+		// Only the client that supplies the mounted values reports versions; a
+		// later client writes into a copy that is discarded.
+		verMap := curMap
+		if len(values) > 0 {
+			verMap = maps.Clone(curMap)
+		}
+
+		batchValues, err := p.fetchParameterStoreBatch(ctx, client, batchDescriptors, verMap)
 
 		if utils.IsFatalError(err) {
 			return nil, err
