@@ -22,14 +22,20 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 
 ### Installing the AWS Provider and Config Provider (ASCP)
 
-#### Option 1: Using helm
+#### Option 1: Using eksctl
+
+```shell
+eksctl create addon --name aws-secrets-store-csi-driver-provider --cluster <your_cluster>
+```
+
+#### Option 2: Using helm
 
 ```shell
 helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver-provider-aws
 helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws
 ```
 
-#### Option 2: Using kubectl
+#### Option 3: Using kubectl
 
 ```shell
 kubectl apply -f https://raw.githubusercontent.com/aws/secrets-store-csi-driver-provider-aws/main/deployment/aws-provider-installer.yaml
