@@ -45,3 +45,17 @@ aws iam attach-role-policy \
    - `./run-tests.sh x64-pod-identity` will run only x64 Pod Identity tests
    - `./run-tests.sh arm-irsa` will run only ARM IRSA tests
    - `./run-tests.sh arm-pod-identity` will run only ARM Pod Identity tests
+
+## Test secrets and parameters
+
+Each config's secrets and parameters are persistent. `setup_file` writes all 18 of
+them to their expected values on every run, so the rotation fixtures the tests
+mutate are reset rather than deleted and recreated. Teardown leaves them in place.
+
+To remove them:
+
+```bash
+python3 generate-test-files.py cleanup-secrets            # all configs
+python3 generate-test-files.py cleanup-secrets x64-irsa   # one config
+python3 generate-test-files.py cleanup-secrets x64        # both x64 configs
+```

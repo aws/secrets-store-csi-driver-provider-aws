@@ -48,7 +48,7 @@ fi
 setup_file() {
 	log "Starting cluster setup for $CLUSTER_NAME"
 
-	log "Creating secrets and parameters for {{ARCH}}-{{AUTH_TYPE}}"
+	log "Setting secrets and parameters for {{ARCH}}-{{AUTH_TYPE}}"
 	python3 generate-test-files.py create-secrets {{ARCH}}-{{AUTH_TYPE}}
 
 	# Create a unique kubeconfig file path for this specific test script
@@ -90,8 +90,7 @@ teardown_file() {
 	log "Cleaning up kubeconfig file"
 	rm -f ${{KUBECONFIG_VAR}}
 
-	log "Cleaning up secrets and parameters for {{ARCH}}-{{AUTH_TYPE}}"
-	python3 generate-test-files.py cleanup-secrets {{ARCH}}-{{AUTH_TYPE}}
+	# Secrets and parameters are left in place; setup_file resets them.
 
 	log "Cluster teardown completed for $CLUSTER_NAME"
 }
