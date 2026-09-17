@@ -8,6 +8,11 @@ on:
   workflow_call:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Only supersede PR runs; a release calls this workflow and must not be cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   id-token: write
