@@ -50,17 +50,18 @@ assert_not_match() {
   fi
 }
 
+# Polls $3 until it succeeds or $1 seconds of wall clock elapse, sleeping $2
+# between attempts. Bounded on wall clock, not on attempt count, so a command
+# that blocks cannot exceed the stated budget.
 wait_for_process(){
-  wait_time="$1"
-  sleep_time="$2"
-  cmd="$3"
-  while [ "$wait_time" -gt 0 ]; do
+  local deadline=$((SECONDS+$1))
+  local sleep_time="$2"
+  local cmd="$3"
+  while [ "$SECONDS" -lt "$deadline" ]; do
     if eval "$cmd"; then
       return 0
-    else
-      sleep "$sleep_time"
-      wait_time=$((wait_time-sleep_time))
     fi
+    sleep "$sleep_time"
   done
   return 1
 }

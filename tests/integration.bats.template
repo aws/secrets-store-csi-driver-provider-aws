@@ -339,8 +339,7 @@ validate_jmes_mount() {
 	assert_success
 
 	# Wait for provider pods to be ready after upgrade
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=secrets-store-csi-driver-provider-aws"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=300s pod -l app=secrets-store-csi-driver-provider-aws
 
 	# Delete existing test pod to force a fresh mount with driverWritesSecrets
 	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE delete pod/$POD_NAME --ignore-not-found --wait=true
@@ -350,8 +349,7 @@ validate_jmes_mount() {
 
 	# Redeploy the test pod
 	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f BasicTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml
-	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/$POD_NAME"
-	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=300s pod/$POD_NAME
 	
 	log "Starting driverWritesSecrets test"
 
@@ -385,14 +383,12 @@ teardown() {
 			--wait --wait-for-jobs --timeout=60s
 
 		# Wait for provider pods to be ready
-		cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=secrets-store-csi-driver-provider-aws"
-		wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=300s pod -l app=secrets-store-csi-driver-provider-aws
 
 		# Delete and redeploy test pod with provider-writes-secrets mode
 		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE delete pod/$POD_NAME --ignore-not-found --wait=true
 		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f BasicTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml
-		cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/$POD_NAME"
-		wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=300s pod/$POD_NAME
 	fi
 }
 
