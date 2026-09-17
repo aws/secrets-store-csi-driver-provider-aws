@@ -66,6 +66,9 @@ jobs:
       - name: Test
         run: go test -v ./... -coverprofile=coverage.out -covermode=atomic
 
+      - name: Integ test helpers self-check
+        run: ./tests/helpers-selfcheck.sh
+
       - name: Fuzz
         run: |
           go test -fuzz=FuzzNewSecretDescriptorList -fuzztime=10s ./provider/
