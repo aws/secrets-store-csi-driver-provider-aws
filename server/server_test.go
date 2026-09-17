@@ -26,6 +26,14 @@ import (
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 )
 
+// getRegionFromNode reads AWS_REGION (server.go), so every test that expects
+// the node-label region needs it unset. Clear it once rather than depending on
+// the caller's environment.
+func TestMain(m *testing.M) {
+	os.Unsetenv("AWS_REGION")
+	os.Exit(m.Run())
+}
+
 type MockParameterStoreClient struct {
 	ssm.Client
 	rspCnt int
@@ -2773,8 +2781,7 @@ func TestNoPath(t *testing.T) {
 
 func TestGetRegionFromNodeWithAWSRegionEnvVar(t *testing.T) {
 	// Test with AWS_REGION set
-	os.Setenv("AWS_REGION", "us-west-2")
-	defer os.Unsetenv("AWS_REGION")
+	t.Setenv("AWS_REGION", "us-west-2")
 
 	svr := newServerWithMocks(&testCase{
 		testName: "Get Region From AWS_REGION Env",
@@ -2796,9 +2803,6 @@ func TestGetRegionFromNodeWithAWSRegionEnvVar(t *testing.T) {
 }
 
 func TestGetRegionFromNodeWithNodeLabels(t *testing.T) {
-	// Test with AWS_REGION not set
-	os.Unsetenv("AWS_REGION")
-
 	svr := newServerWithMocks(&testCase{
 		testName: "Get Region From Node Labels",
 		attributes: map[string]string{
@@ -2819,8 +2823,6 @@ func TestGetRegionFromNodeWithNodeLabels(t *testing.T) {
 
 func TestGetRegionFromNodeError(t *testing.T) {
 	// Test error case when no region available
-	os.Unsetenv("AWS_REGION")
-
 	svr := newServerWithMocks(&testCase{
 		testName: "Get Region Error",
 		attributes: map[string]string{
