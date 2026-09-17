@@ -56,11 +56,15 @@ setup_file() {
 	export {{KUBECONFIG_VAR}}
 	log "Created Kubeconfig at ${{KUBECONFIG_VAR}}"
 
+	# Nodes default to public subnets (privateNetworking is false), so they egress
+	# through the IGW and the NAT gateway is unused. Disabling it drops a NAT
+	# gateway and an EIP from the per-cluster quota draw.
 	log "Creating EKS cluster with node type ${{NODE_TYPE_VAR}}"
 	eksctl create cluster \
 		--name $CLUSTER_NAME \
 		--node-type ${{NODE_TYPE_VAR}} \
-		--nodes 3 \
+		--nodes 1 \
+		--vpc-nat-mode Disable \
 		--region $REGION \
 		--kubeconfig=${{KUBECONFIG_VAR}}
 
@@ -85,7 +89,9 @@ teardown_file() {
 
 	eksctl delete cluster \
 		--name $CLUSTER_NAME \
-		--region $REGION
+		--region $REGION \
+		--disable-nodegroup-eviction \
+		--parallel 25
 
 	log "Cleaning up kubeconfig file"
 	rm -f ${{KUBECONFIG_VAR}}

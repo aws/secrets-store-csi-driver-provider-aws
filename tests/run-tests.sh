@@ -35,7 +35,7 @@ cleanup_generated_files() {
 }
 
 delete_cluster() {
-	eksctl delete cluster --name $1 --parallel 25
+	eksctl delete cluster --name $1 --disable-nodegroup-eviction --parallel 25
 }
 
 if [[ "$1" == "clean" ]]; then
