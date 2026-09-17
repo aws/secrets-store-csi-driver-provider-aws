@@ -221,7 +221,7 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
         --region $REGION"""
 
     return f"""	log "Creating EKS Pod Identity addon"
-    eksctl create addon --name eks-pod-identity-agent --cluster $CLUSTER_NAME --region $REGION
+    eksctl create addon --name eks-pod-identity-agent --cluster $CLUSTER_NAME --region $REGION --wait
 
     log "Creating Pod Identity association"
     eksctl create podidentityassociation \\

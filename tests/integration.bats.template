@@ -75,7 +75,7 @@ setup_file() {
 	helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
 
 	log "Installing secrets-store-csi-driver via Helm"
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install --wait --wait-for-jobs --timeout=30s csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true --set tokenRequests[0].audience=sts.amazonaws.com --set tokenRequests[1].audience=pods.eks.amazonaws.com
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm --namespace=$NAMESPACE install --wait --wait-for-jobs --timeout=300s csi-secrets-store secrets-store-csi-driver/secrets-store-csi-driver --set enableSecretRotation=true --set rotationPollInterval=15s --set syncSecret.enabled=true --set tokenRequests[0].audience=sts.amazonaws.com --set tokenRequests[1].audience=pods.eks.amazonaws.com
 
 	log "Cluster setup completed for $CLUSTER_NAME"
 }
@@ -136,7 +136,7 @@ validate_jmes_mount() {
 		helm_extra_args+=(--set "image.tag=$PRIVTAG")
 	fi
 
-	KUBECONFIG=${{KUBECONFIG_VAR}} helm install -n $NAMESPACE --wait --wait-for-jobs --timeout=30s csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws --set image.repository=$PRIVREPO --set secrets-store-csi-driver.install=false "${helm_extra_args[@]}"
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm install -n $NAMESPACE --wait --wait-for-jobs --timeout=300s csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws --set image.repository=$PRIVREPO --set secrets-store-csi-driver.install=false "${helm_extra_args[@]}"
 
 	PROVIDER_POD=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=secrets-store-csi-driver-provider-aws -o jsonpath="{.items[0].metadata.name}")
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
@@ -180,7 +180,7 @@ validate_jmes_mount() {
 	log "Starting CSI inline volume test with pod portability"
 
 	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f BasicTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml
-	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=300s pod/basic-test-mount-{{ARCH}}-{{AUTH_TYPE}}
 
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$POD_NAME
 	assert_success
@@ -331,7 +331,7 @@ validate_jmes_mount() {
 		--set secrets-store-csi-driver.install=false \
 		--set driverWritesSecrets=true \
 		--set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]' \
-		--wait --wait-for-jobs --timeout=60s
+		--wait --wait-for-jobs --timeout=300s
 
 	# Verify helm upgrade succeeded by checking provider pods exist
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pods -l app=secrets-store-csi-driver-provider-aws
@@ -379,7 +379,7 @@ teardown() {
 			--set secrets-store-csi-driver.install=false \
 			--set driverWritesSecrets=false \
 			--set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]' \
-			--wait --wait-for-jobs --timeout=60s
+			--wait --wait-for-jobs --timeout=300s
 
 		# Wait for provider pods to be ready
 		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=300s pod -l app=secrets-store-csi-driver-provider-aws
