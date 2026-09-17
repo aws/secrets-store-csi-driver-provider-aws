@@ -61,30 +61,28 @@ ssm = {
 }
 
 
-def create_secret_if_not_exists(name: str, value: str, region: str):
-    """Create secret if it doesn't exist"""
+def upsert_secret(name: str, value: str, region: str):
+    """Set a secret to value, creating it if it does not exist yet.
+
+    Tests mutate the rotation fixtures and assert their pre-rotation value, so
+    setup must reset them rather than skip the ones that already exist.
+    """
+    print(f"  Setting secret: {name} in {region}")
     try:
-        print(f"  Creating secret: {name} in {region}")
-        secretsmanager[region].create_secret(Name=name, SecretString=value)
+        secretsmanager[region].put_secret_value(SecretId=name, SecretString=value)
     except botocore.exceptions.ClientError as error:
-        if error.response["Error"]["Code"] == "ResourceExistsException":
-            print(f"  Secret already exists: {name} in {region}")
+        if error.response["Error"]["Code"] == "ResourceNotFoundException":
+            secretsmanager[region].create_secret(Name=name, SecretString=value)
         else:
             raise error
 
 
-def create_parameter_if_not_exists(name: str, value: str, region: str):
-    """Create parameter if it doesn't exist"""
-    try:
-        print(f"  Creating parameter: {name} in {region}")
-        ssm[region].put_parameter(
-            Name=name, Value=value, Type="SecureString", Overwrite=False
-        )
-    except botocore.exceptions.ClientError as error:
-        if error.response["Error"]["Code"] == "ParameterAlreadyExists":
-            print(f"  Parameter already exists: {name} in {region}")
-        else:
-            raise error
+def upsert_parameter(name: str, value: str, region: str):
+    """Set a parameter to value, creating it if it does not exist yet."""
+    print(f"  Setting parameter: {name} in {region}")
+    ssm[region].put_parameter(
+        Name=name, Value=value, Type="SecureString", Overwrite=True
+    )
 
 
 def delete_secret_if_exists(name: str, region: str):
@@ -108,73 +106,63 @@ def delete_parameter_if_exists(name: str, region: str):
 def create_secrets_for_config(arch: str, auth_type: str):
     """Create secrets for a specific test configuration"""
     suffix = f"{arch}-{auth_type}"
-    print(f"Creating secrets and parameters for {suffix}...")
+    print(f"Setting secrets and parameters for {suffix}...")
 
     # Create secrets in primary region
-    create_secret_if_not_exists(
-        f"SecretsManagerTest1-{suffix}", "SecretsManagerTest1Value", REGION
-    )
-    create_secret_if_not_exists(
-        f"SecretsManagerTest2-{suffix}", "SecretsManagerTest2Value", REGION
-    )
-    create_secret_if_not_exists(f"SecretsManagerSync-{suffix}", "SecretUser", REGION)
-    create_secret_if_not_exists(
-        f"SecretsManagerRotationTest-{suffix}", "BeforeRotation", REGION
-    )
-    create_secret_if_not_exists(
+    upsert_secret(f"SecretsManagerTest1-{suffix}", "SecretsManagerTest1Value", REGION)
+    upsert_secret(f"SecretsManagerTest2-{suffix}", "SecretsManagerTest2Value", REGION)
+    upsert_secret(f"SecretsManagerSync-{suffix}", "SecretUser", REGION)
+    upsert_secret(f"SecretsManagerRotationTest-{suffix}", "BeforeRotation", REGION)
+    upsert_secret(
         f"secretsManagerJson-{suffix}",
         '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}',
         REGION,
     )
 
     # Create secrets in failover region
-    create_secret_if_not_exists(
+    upsert_secret(
         f"SecretsManagerTest1-{suffix}", "SecretsManagerTest1Value", FAILOVERREGION
     )
-    create_secret_if_not_exists(
+    upsert_secret(
         f"SecretsManagerTest2-{suffix}", "SecretsManagerTest2Value", FAILOVERREGION
     )
-    create_secret_if_not_exists(
-        f"SecretsManagerSync-{suffix}", "SecretUser", FAILOVERREGION
-    )
-    create_secret_if_not_exists(
+    upsert_secret(f"SecretsManagerSync-{suffix}", "SecretUser", FAILOVERREGION)
+    upsert_secret(
         f"SecretsManagerRotationTest-{suffix}", "BeforeRotation", FAILOVERREGION
     )
-    create_secret_if_not_exists(
+    upsert_secret(
         f"secretsManagerJson-{suffix}",
         '{"username": "SecretsManagerUser", "password": "PasswordForSecretsManager"}',
         FAILOVERREGION,
     )
 
     # Create parameters in primary region
-    create_parameter_if_not_exists(
+    upsert_parameter(
         f"ParameterStoreTest1-{suffix}", "ParameterStoreTest1Value", REGION
     )
-    create_parameter_if_not_exists(
+    upsert_parameter(
         f"ParameterStoreTestWithLongName-{suffix}", "ParameterStoreTest2Value", REGION
     )
-    create_parameter_if_not_exists(
-        f"ParameterStoreRotationTest-{suffix}", "BeforeRotation", REGION
-    )
-    create_parameter_if_not_exists(
+    upsert_parameter(f"ParameterStoreRotationTest-{suffix}", "BeforeRotation", REGION)
+    upsert_parameter(
         f"jsonSsm-{suffix}",
         '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}',
         REGION,
     )
 
     # Create parameters in failover region
-    create_parameter_if_not_exists(
+    upsert_parameter(
         f"ParameterStoreTest1-{suffix}", "ParameterStoreTest1Value", FAILOVERREGION
     )
-    create_parameter_if_not_exists(
+    upsert_parameter(
         f"ParameterStoreTestWithLongName-{suffix}",
         "ParameterStoreTest2Value",
         FAILOVERREGION,
     )
-    create_parameter_if_not_exists(
+    upsert_parameter(
         f"ParameterStoreRotationTest-{suffix}", "BeforeRotation", FAILOVERREGION
     )
-    create_parameter_if_not_exists(
+    upsert_parameter(
         f"jsonSsm-{suffix}",
         '{"username": "ParameterStoreUser", "password": "PasswordForParameterStore"}',
         FAILOVERREGION,
@@ -275,6 +263,22 @@ def replace_template_vars(template_file: str, output_file: str, config: Dict[str
         f.write(content)
 
 
+def resolve_targets(target):
+    """Resolve a config name, a group token, "all", or None to config names.
+
+    Group tokens are the ones run-tests.sh accepts: x64, arm, irsa, pod-identity.
+    """
+    if target in (None, "all"):
+        return list(CONFIGS.keys())
+    if target in CONFIGS:
+        return [target]
+    matches = [name for name in CONFIGS if target in name.split("-", 1)]
+    if not matches:
+        print(f"Unknown config: {target}")
+        sys.exit(1)
+    return matches
+
+
 def main():
     """Main function"""
     # Parse command line arguments
@@ -284,13 +288,14 @@ def main():
         action = "default"
 
     if action in ("create-secrets", "cleanup-secrets"):
-        fn = create_secrets_for_config if action == "create-secrets" else cleanup_secrets_for_config
+        fn = (
+            create_secrets_for_config
+            if action == "create-secrets"
+            else cleanup_secrets_for_config
+        )
         target = sys.argv[2] if len(sys.argv) > 2 else None
-        targets = [target] if target else list(CONFIGS.keys())
+        targets = resolve_targets(target)
         for config_name in targets:
-            if config_name not in CONFIGS:
-                print(f"Unknown config: {config_name}")
-                sys.exit(1)
             config = CONFIGS[config_name]
             fn(config["ARCH"], config["AUTH_TYPE"])
         return
@@ -336,9 +341,15 @@ def main():
         print(f"  - BasicTestMount-{arch}-{auth_type}.yaml")
 
     print("\nUsage:")
-    print("  ./generate-test-files.py                                # Generate files only")
-    print("  ./generate-test-files.py create-secrets [<config>]      # Create secrets (single config or all)")
-    print("  ./generate-test-files.py cleanup-secrets [<config>]     # Cleanup secrets (single config or all)")
+    print(
+        "  ./generate-test-files.py                                # Generate files only"
+    )
+    print(
+        "  ./generate-test-files.py create-secrets [<config>]      # Create secrets (single config or all)"
+    )
+    print(
+        "  ./generate-test-files.py cleanup-secrets [<config>]     # Cleanup secrets (single config or all)"
+    )
 
 
 if __name__ == "__main__":
