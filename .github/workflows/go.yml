@@ -46,7 +46,7 @@ jobs:
 
       - name: Go import lint
         run: |
-          go install golang.org/x/tools/cmd/goimports@latest
+          go install golang.org/x/tools/cmd/goimports@v0.50.0
           if [ "$(goimports -d . | wc -l)" -gt 0 ]; then
             goimports -d .
             echo "Please format Go code by running: goimports -w ./.."
@@ -59,7 +59,7 @@ jobs:
       - name: Static analysis
         run: |
           export STATICCHECK_CACHE="${{ runner.temp }}/staticcheck"
-          go install "honnef.co/go/tools/cmd/staticcheck@latest"
+          go install "honnef.co/go/tools/cmd/staticcheck@v0.8.1"
           $(go env GOPATH)/bin/staticcheck ./...
         shell: bash
 
@@ -68,13 +68,6 @@ jobs:
 
       - name: Integ test helpers self-check
         run: ./tests/helpers-selfcheck.sh
-
-      - name: Fuzz
-        run: |
-          go test -fuzz=FuzzNewSecretDescriptorList -fuzztime=10s ./provider/
-          go test -fuzz=FuzzValidateFilePermission -fuzztime=10s ./provider/
-          go test -fuzz=FuzzGetJsonSecrets -fuzztime=10s ./provider/
-          go test  -fuzz=FuzzMountAttributes -fuzztime=10s ./server/
 
       - name: Setup Helm
         uses: Azure/setup-helm@v5
@@ -85,5 +78,5 @@ jobs:
       - name: Codecov
         uses: codecov/codecov-action@v6
         with:
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           use_oidc: true

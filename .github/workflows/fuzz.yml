@@ -1,0 +1,49 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: FuzzNewSecretDescriptorList
+            package: ./provider/
+          - target: FuzzValidateFilePermission
+            package: ./provider/
+          - target: FuzzGetJsonSecrets
+            package: ./provider/
+          - target: FuzzMountAttributes
+            package: ./server/
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Fuzz ${{ matrix.target }}
+        run: go test -run '^$' -fuzz=${{ matrix.target }} -fuzztime=5m ${{ matrix.package }}
+
+      - name: Upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: ${{ matrix.package }}testdata/fuzz/
+          if-no-files-found: ignore
