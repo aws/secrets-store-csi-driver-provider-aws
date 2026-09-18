@@ -11,6 +11,8 @@ kubeletPath: "/var/lib/kubelet"
 
 driverWritesSecrets: false
 
+logFormatJSON: false
+
 commonLabels: {}
 podLabels: {}
 podAnnotations: {}

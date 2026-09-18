@@ -55,6 +55,9 @@ spec:
             {{- if .Values.podIdentityHttpTimeout }}
             - --pod-identity-http-timeout={{ .Values.podIdentityHttpTimeout }}
             {{- end }}
+            {{- if eq (toString .Values.logFormatJSON) "true" }}
+            - --log-format-json=true
+            {{- end }}
           resources:
 {{ toYaml .Values.resources | indent 12 }}
           securityContext:
