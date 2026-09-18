@@ -45,3 +45,10 @@ aws iam attach-role-policy \
    - `./run-tests.sh x64-pod-identity` will run only x64 Pod Identity tests
    - `./run-tests.sh arm-irsa` will run only ARM IRSA tests
    - `./run-tests.sh arm-pod-identity` will run only ARM Pod Identity tests
+
+### Running tests with the EKS managed addon
+
+To install the provider as an EKS managed addon instead of via Helm, use the `--addon` flag. This does not require `PRIVREPO`, `GITHUB_ACTOR`, or `GITHUB_TOKEN`.
+
+   - `./run-tests.sh --addon x64-irsa` will install the provider as an EKS addon and run x64 IRSA tests
+   - `./run-tests.sh --addon --addon-version v2.2.2-eksbuild.2 x64-irsa` will install a specific addon version
