@@ -83,7 +83,6 @@ jobs:
       imageTagAmd64: latest-amd64-${{ needs.build-docker.outputs.privTagSuffix }}
       imageTagArm64: latest-arm64-${{ needs.build-docker.outputs.privTagSuffix }}
     permissions:
-      id-token: write
       contents: read
       packages: read
     secrets: inherit
