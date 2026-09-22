@@ -61,6 +61,14 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/test-build:latest-${{ matrix.arch }}-${{ github.run_id }}
 
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/test-build:latest-${{ matrix.arch }}-${{ github.run_id }}
+          format: table
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
       - name: Output image metadata
         id: output-image
         run: |
