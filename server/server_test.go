@@ -580,6 +580,66 @@ var mountTests []testCase = []testCase{
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
+	{ // Mount JMES Path Not Found - Secrets Manager
+		testName:   "Mount JMES Path Not Found Secrets Manager",
+		attributes: stdAttributes,
+		mountObjs: []map[string]interface{}{
+			{
+				"objectName": "TestSecret1",
+				"objectType": "secretsmanager",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "HELLO",
+						"objectAlias": "hello-value",
+					},
+					{
+						"path":        "WORLD",
+						"objectAlias": "world-value",
+					},
+				},
+			},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String(`{"HELLO":"WORLD"}`), VersionId: aws.String("1")},
+		},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     `JMESPath "WORLD" for object alias "world-value" was not found in secret "TestSecret1"`,
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Mount JMES Path Not Found - Parameter Store
+		testName:   "Mount JMES Path Not Found Parameter Store",
+		attributes: stdAttributes,
+		mountObjs: []map[string]interface{}{
+			{
+				"objectName": "TestParm1",
+				"objectType": "ssmparameter",
+				"jmesPath": []map[string]string{
+					{
+						"path":        "HELLO",
+						"objectAlias": "hello-value",
+					},
+					{
+						"path":        "WORLD",
+						"objectAlias": "world-value",
+					},
+				},
+			},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{
+			{
+				Parameters: []ssmtypes.Parameter{
+					{Name: aws.String("TestParm1"), Value: aws.String(`{"HELLO":"WORLD"}`), Version: 1},
+				},
+			},
+		},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     `JMESPath "WORLD" for object alias "world-value" was not found in secret "TestParm1"`,
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
 	{ // Vanila success case.
 		testName:   "New Mount Success",
 		attributes: stdAttributes,
