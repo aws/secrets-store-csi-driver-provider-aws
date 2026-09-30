@@ -5,11 +5,13 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   unit-test:
     uses: ./.github/workflows/go.yml
+    permissions:
+      contents: read
+      id-token: write
   extract-image-info:
     runs-on: ubuntu-latest
     outputs:
