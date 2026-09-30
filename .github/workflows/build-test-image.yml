@@ -85,4 +85,6 @@ jobs:
       id-token: write
       contents: read
       packages: read
-    secrets: inherit
+    secrets:
+      ROLE_ARN: ${{ secrets.ROLE_ARN }}
+      POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}

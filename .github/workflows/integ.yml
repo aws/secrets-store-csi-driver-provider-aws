@@ -18,6 +18,13 @@ on:
         required: true
         type: string
         default: latest
+    secrets:
+      ROLE_ARN:
+        description: 'IAM role the integration tests assume'
+        required: true
+      POD_IDENTITY_ROLE_ARN:
+        description: 'IAM role for the pod identity tests'
+        required: true
   workflow_dispatch:
     inputs: *inputs
 
