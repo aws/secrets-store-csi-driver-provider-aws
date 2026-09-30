@@ -7,9 +7,7 @@ on:
     types: [labeled]
 
 permissions:
-  id-token: write
   contents: read
-  packages: write
 
 jobs:
   build-docker:
