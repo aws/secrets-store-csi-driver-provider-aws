@@ -76,7 +76,7 @@ jobs:
       github.event_name != 'pull_request_target' ||
       contains(github.event.pull_request.labels.*.name, 'safe-to-test')
     needs: build-docker
-    uses: ./.github/workflows/integ.yml
+    uses: $/.github/workflows/integ.yml
     with:
       imageRepo: ${{ needs.build-docker.outputs.privRepo }}
       imageTagAmd64: latest-amd64-${{ needs.build-docker.outputs.privTagSuffix }}
