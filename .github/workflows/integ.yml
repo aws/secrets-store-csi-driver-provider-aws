@@ -18,6 +18,13 @@ on:
         required: true
         type: string
         default: latest
+    secrets:
+      ROLE_ARN:
+        description: 'IAM role the integration tests assume'
+        required: true
+      POD_IDENTITY_ROLE_ARN:
+        description: 'IAM role for the pod identity tests'
+        required: true
   workflow_dispatch:
     inputs: *inputs
 
@@ -57,28 +64,34 @@ jobs:
     env:
       imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
     steps:
-      - name: Context
-        run: echo "Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}"
-
       - name: Harden Runner
-        uses: step-security/harden-runner@v2.19.4
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
+      - name: Context
+        run: echo "Running integration tests for ${IMAGE_REPO}:${imageTag}"
+        env:
+          IMAGE_REPO: ${{ inputs.imageRepo }}
+
       - name: Setup kubectl
-        uses: azure/setup-kubectl@v5
+        uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
 
       - name: Setup Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
       - name: Setup eksctl
+        # Not a `uses:` step, so Dependabot won't bump this. Update it by hand.
+        # Bumping it also changes the Kubernetes version the tests create.
+        env:
+          EKSCTL_VERSION: v0.230.0
         run: |
           ARCH=${{ matrix.arch }}
           PLATFORM=$(uname -s)_$ARCH
 
-          curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+          curl -sLO "https://github.com/eksctl-io/eksctl/releases/download/$EKSCTL_VERSION/eksctl_$PLATFORM.tar.gz"
 
-          curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_checksums.txt" | grep $PLATFORM | sha256sum --check
+          curl -sL "https://github.com/eksctl-io/eksctl/releases/download/$EKSCTL_VERSION/eksctl_checksums.txt" | grep $PLATFORM | sha256sum --check
 
           tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
 
@@ -87,7 +100,7 @@ jobs:
       - run: eksctl version
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3"
 
@@ -96,15 +109,17 @@ jobs:
 
       - name: Setup Bats and bats libs
         id: setup-bats
-        uses: bats-core/bats-action@4.0.0
+        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43 # 4.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.ROLE_ARN }}
           role-session-name: csi-driver-ci-${{ github.run_id }}-${{ matrix.arch }}
