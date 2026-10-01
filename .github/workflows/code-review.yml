@@ -1,6 +1,8 @@
 name: Claude Code Review
 on:
-  pull_request_target:
+  # Claude reads PR code while holding AWS and GitHub keys. A bad PR could trick
+  # it into posting either key. Accepted for now; see the PR that added this comment.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] see comment above
     types: [opened, synchronize, ready_for_review, reopened]
 
 concurrency:
@@ -30,7 +32,9 @@ jobs:
           role-to-assume: ${{ secrets.CODE_REVIEW_ROLE }}
           aws-region: us-west-2
 
-      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      # Token isn't scoped down, so it gets all of the app's permissions.
+      # Not changed yet; see the PR that added this comment.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # zizmor: ignore[github-app] # v3.2.0
         id: app-token
         with:
           client-id: ${{ vars.APP_CLIENT_ID }}

@@ -1,7 +1,8 @@
 name: Remove safe-to-test label when new commits are pushed
 
 on:
-  pull_request_target:
+  # No checkout and never runs PR code; it only removes the safe-to-test label.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] see comment above
     types: [synchronize]
 
 jobs:

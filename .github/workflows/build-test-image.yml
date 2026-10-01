@@ -3,7 +3,9 @@ name: Build and push test docker image
 on:
   push:
     branches: ["main"]
-  pull_request_target:
+  # Builds fork PR code once a maintainer adds safe-to-test. The label check has
+  # known gaps; see the PR that added this comment.
+  pull_request_target: # zizmor: ignore[dangerous-triggers] see comment above
     types: [labeled]
 
 permissions:
