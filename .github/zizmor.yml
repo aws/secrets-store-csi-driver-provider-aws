@@ -1,0 +1,4 @@
+rules:
+  # Not adding a Dependabot cooldown for now.
+  dependabot-cooldown:
+    disable: true
