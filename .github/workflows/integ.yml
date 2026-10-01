@@ -64,15 +64,15 @@ jobs:
     env:
       imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
     steps:
-      - name: Context
-        run: echo "Running integration tests for ${IMAGE_REPO}:${imageTag}"
-        env:
-          IMAGE_REPO: ${{ inputs.imageRepo }}
-
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
+
+      - name: Context
+        run: echo "Running integration tests for ${IMAGE_REPO}:${imageTag}"
+        env:
+          IMAGE_REPO: ${{ inputs.imageRepo }}
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
