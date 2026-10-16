@@ -143,6 +143,33 @@ validate_jmes_mount() {
 	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD
 	assert_success
 
+	# Record which image the provider pod runs (the cluster is deleted afterwards) and check it is exactly the
+	# image this run was given. .github/scripts/tests/image-check.bats runs the lines between the two markers
+	# below.
+	# BEGIN image-check
+	# stderr goes to a file so a kubectl warning can't end up in the image name (`run` mixes it into $output).
+	# It is logged if the query fails, because the cluster is deleted afterwards.
+	kubectl_err="$BATS_TEST_TMPDIR/kubectl-image.err"
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD -o jsonpath='{.spec.containers[0].image}' 2>'$kubectl_err'"
+	if [[ "$status" != 0 ]]; then
+		log "kubectl stderr: $(cat "$kubectl_err")"
+	fi
+	assert_success
+	log "provider image: $output"
+	pod_image="$output"
+	if [[ -n "${EXPECT_DIGEST:-}" ]]; then
+		# Independent proof: the digest comes straight from the workflow input, not through PRIVTAG.
+		assert_match "@${EXPECT_DIGEST}\$" "$pod_image"
+		log "✔ digest check passed (${EXPECT_DIGEST})"
+	fi
+	if [[ -n "${PRIVTAG:-}" ]]; then
+		# Helm rendered exactly the image we asked for.
+		assert_equal "${PRIVREPO}:${PRIVTAG}" "$pod_image"
+	fi
+	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD -o jsonpath='{.status.containerStatuses[0].imageID}'
+	log "provider imageID (informational): $output"
+	# END image-check
+
 	log "AWS provider installation completed"
 }
 

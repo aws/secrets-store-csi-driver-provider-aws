@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+#
+# Test fake for curl. Accepts only the exact flag set validate-release-version.sh uses, checks the URL and the
+# headers each request type needs, and replays recorded responses from fixtures/.
+#
+# $FAKE_DIR/routes has one line per URL: "<url> <fixture>[,<fixture>...]". The Nth call to a URL replays the Nth
+# fixture (the last one repeats). A fixture is <name>.headers (status line first) plus an optional <name>.body.
+# The fixture name "neterror" simulates a DNS failure the way real curl reports it.
+#
+# Every call is logged to $FAKE_DIR/curl.calls as "<max-time> <url>". Anything unexpected is appended to
+# $FAKE_VIOLATIONS and the fake exits 99, so the test's teardown fails.
+
+set -euo pipefail
+
+fixtures="${FAKE_FIXTURES:-$(cd "$(dirname "$0")/../fixtures" && pwd)}"
+ecr="${RELEASE_CHECK_ECR_URL:?}"
+repo_path="aws-secrets-manager/secrets-store-csi-driver-provider-aws"
+accept="application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
+
+violation() {
+	echo "curl: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+if [[ $# -lt 11 || "$1" != --silent || "$2" != --show-error || "$3" != --max-time || "$5" != --dump-header ||
+	"$7" != --output || "$9" != --write-out || "${10}" != '%{http_code}' ]]; then
+	violation "unexpected leading flags: $*"
+fi
+max_time=$4 headers_out=$6 body_out=$8
+shift 10
+if [[ ! "$max_time" =~ ^[0-9]+$ ]] || ((max_time < 5 || max_time > 15)); then
+	violation "--max-time $max_time is outside 5..15"
+fi
+
+head=0 auth="" accept_seen=""
+while [[ $# -gt 1 ]]; do
+	case "$1" in
+	--head) head=1 ;;
+	--header)
+		case "$2" in
+		"Authorization: "*) auth=$2 ;;
+		"Accept: "*) accept_seen=$2 ;;
+		*) violation "unexpected header: $2" ;;
+		esac
+		shift
+		;;
+	*) violation "unexpected argument: $1" ;;
+	esac
+	shift
+done
+[[ $# -eq 1 ]] || violation "no URL"
+url=$1
+
+case "$url" in
+"$ecr/token/?scope=repository:$repo_path:pull")
+	[[ $head == 0 && -z "$auth" && -z "$accept_seen" ]] || violation "token request with wrong flags"
+	;;
+"$ecr/v2/$repo_path/manifests/"*)
+	[[ $head == 1 ]] || violation "manifest request without --head"
+	[[ "$auth" == "Authorization: Bearer fake-token" ]] || violation "manifest request with auth '$auth'"
+	[[ "$accept_seen" == "Accept: $accept" ]] || violation "manifest request with '$accept_seen'"
+	;;
+"$ecr/v2/$repo_path/tags/list?"*)
+	[[ $head == 0 && -z "$accept_seen" ]] || violation "tag list request with wrong flags"
+	[[ "$auth" == "Authorization: Bearer fake-token" ]] || violation "tag list request with auth '$auth'"
+	;;
+*) violation "unexpected URL: $url" ;;
+esac
+
+echo "$max_time $url" >>"$FAKE_DIR/curl.calls"
+
+route=$(awk -v url="$url" '$1 == url { print $2 }' "$FAKE_DIR/routes")
+[[ -n "$route" ]] || violation "no route for $url"
+calls=$(awk -v url="$url" '$2 == url' "$FAKE_DIR/curl.calls" | wc -l | tr -d ' ')
+IFS=, read -r -a responses <<<"$route"
+index=$((calls - 1))
+if ((index >= ${#responses[@]})); then
+	index=$((${#responses[@]} - 1))
+fi
+fixture=${responses[$index]}
+
+if [[ "$fixture" == neterror ]]; then
+	# Real curl empties the --dump-header file but leaves an existing --output file alone.
+	: >"$headers_out"
+	printf '000'
+	echo "curl: (6) Could not resolve host: fake.invalid" >&2
+	exit 6
+fi
+
+# A test's own fixtures (in $FAKE_DIR/fixtures) win over the shared ones.
+if [[ -f "$FAKE_DIR/fixtures/$fixture.headers" ]]; then
+	fixtures="$FAKE_DIR/fixtures"
+fi
+[[ -f "$fixtures/$fixture.headers" ]] || violation "missing fixture $fixture.headers"
+cp "$fixtures/$fixture.headers" "$headers_out"
+if ((head == 1)); then
+	cp "$fixtures/$fixture.headers" "$body_out" # with --head, curl writes the headers to --output too
+elif [[ -f "$fixtures/$fixture.body" ]]; then
+	cp "$fixtures/$fixture.body" "$body_out"
+else
+	: >"$body_out"
+fi
+status=$(head -n 1 "$fixtures/$fixture.headers" | awk '{ print $2 }')
+printf '%s' "$status"

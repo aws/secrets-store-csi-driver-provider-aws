@@ -18,6 +18,11 @@ on:
         required: true
         type: string
         default: latest
+      imageDigest:
+        description: 'Image index digest (sha256:...). When set, the tests pull this exact image. The tag inputs stay as a readable label.'
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs: *inputs
 
@@ -103,6 +108,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # Checks every image input (in every cell) and sets PRIVTAG, before any AWS login or cluster.
+      - name: Resolve image
+        run: bash .github/scripts/resolve-integ-image.sh
+        env:
+          IMAGE_REPO: ${{ inputs.imageRepo }}
+          TAG_AMD64: ${{ inputs.imageTagAmd64 }}
+          TAG_ARM64: ${{ inputs.imageTagArm64 }}
+          IMAGE_TAG: ${{ env.imageTag }}
+          IMAGE_DIGEST: ${{ inputs.imageDigest }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -124,7 +139,9 @@ jobs:
         env:
           POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
           PRIVREPO: ${{ inputs.imageRepo }}
-          PRIVTAG: ${{ env.imageTag }}
+          # PRIVTAG comes from "Resolve image" (through $GITHUB_ENV). EXPECT_DIGEST is a separate copy of the
+          # input, so the tests can check PRIVTAG against it.
+          EXPECT_DIGEST: ${{ inputs.imageDigest }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGION: us-west-2
