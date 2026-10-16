@@ -1,3 +1,5 @@
 # Recorded HTTP headers end in \r\n. Keep them byte-for-byte.
 *.headers -text
 *.body -text
+# A recorded image index: its sha256 is its digest, so not one byte may change.
+*.json -text

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#
+# Test fake for go. Accepts only `go version -m <rootfs>/linux_<arch>/bin/secrets-store-csi-driver-provider-aws`
+# and prints $FAKE_DIR/go-<arch>.out with @BINARY@ replaced by the path. Tests make that file from
+# fixtures/go-version-m-<arch>.txt, recorded from a real `go version -m` of a binary built with the exact build
+# args release-tags.sh writes (version 3.1.4). With $FAKE_DIR/go-<arch>.exit, it exits with that status instead.
+# Every call is logged to $FAKE_DIR/go.calls. Anything unexpected is appended to $FAKE_VIOLATIONS, exit 99.
+
+set -euo pipefail
+
+violation() {
+	echo "go: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+echo "$*" >>"$FAKE_DIR/go.calls"
+
+[[ $# -eq 3 && "$1" == version && "$2" == -m ]] || violation "unexpected arguments: $*"
+path=$3
+arch_re='/linux_(amd64|arm64)/bin/secrets-store-csi-driver-provider-aws$'
+[[ "$path" =~ $arch_re ]] || violation "unexpected binary path: $path"
+arch=${BASH_REMATCH[1]}
+
+if [[ -f "$FAKE_DIR/go-$arch.exit" ]]; then
+	echo "$path: not executable file" >&2
+	exit "$(cat "$FAKE_DIR/go-$arch.exit")"
+fi
+[[ -f "$FAKE_DIR/go-$arch.out" ]] || violation "no go-$arch.out"
+while IFS= read -r line || [[ -n "$line" ]]; do
+	printf '%s\n' "${line//@BINARY@/$path}"
+done <"$FAKE_DIR/go-$arch.out"
