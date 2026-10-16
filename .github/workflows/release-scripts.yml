@@ -1,0 +1,84 @@
+name: Release Scripts
+
+# Tests the release scripts (bats + ShellCheck), the integ image check (image-check.bats), and that the chart renders a
+# digest-pinned image. Runs the PR's own files, with a read-only token and no AWS access.
+
+on:
+  pull_request:
+    paths: &paths
+      - '.github/scripts/**'
+      - '.github/workflows/release-scripts.yml'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/integ.yml'
+      - 'Makefile'
+      - 'charts/secrets-store-csi-driver-provider-aws/**'
+      - 'tests/integration.bats.template'
+      - 'tests/helpers.bash'
+  push:
+    branches: [main]
+    paths: *paths
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test release scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Bats
+        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43 # 4.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          bats-version: 1.13.0
+
+      - name: ShellCheck
+        run: shellcheck .github/scripts/*.sh .github/scripts/tests/fake-bin/*
+
+      - name: Run bats tests
+        run: bats .github/scripts/tests
+
+      - name: Setup Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.19.0
+
+      # integ.yml passes the digest as "tag@digest" in image.tag; check the chart renders it as one pinned reference.
+      - name: Check the chart renders a digest-pinned image
+        env:
+          REPO: 123456789012.dkr.ecr.us-west-2.amazonaws.com/ascp
+          TAG: 3.1.4@sha256:cb376bab6ab0deb8083251f52a36f38b25251f53ef0671c0c1e0f7ab843e08e6
+        run: |
+          helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+          helm dependency build charts/secrets-store-csi-driver-provider-aws
+          helm template x charts/secrets-store-csi-driver-provider-aws \
+            --set "image.repository=$REPO" --set "image.tag=$TAG" \
+            --set secrets-store-csi-driver.install=false \
+            --show-only templates/daemonset.yaml > rendered.yaml
+          mapfile -t images < <(grep -E '^[[:space:]]*image:' rendered.yaml)
+          if [[ ${#images[@]} -ne 1 ]]; then
+            echo "::error::expected exactly one image: line, found ${#images[@]}"
+            cat rendered.yaml
+            exit 1
+          fi
+          image=${images[0]#*image: }
+          image=${image%\"}
+          image=${image#\"}
+          if [[ "$image" != "$REPO:$TAG" ]]; then
+            echo "::error::rendered image '$image', expected '$REPO:$TAG'"
+            exit 1
+          fi
+          echo "rendered image: $image"

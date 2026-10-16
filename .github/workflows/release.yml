@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 3.1.5 (no "v")'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  validate-version:
+    name: Validate version
+    runs-on: ubuntu-latest
+    # The script stops itself after 6 minutes and prints its summary; this is only a backstop.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Check the version
+        run: bash .github/scripts/validate-release-version.sh
+        env:
+          VERSION: ${{ inputs.version }}

@@ -1,0 +1,6 @@
+HTTP/2 200 
+date: Wed, 14 Oct 2026 20:16:28 GMT
+content-type: text/plain; charset=utf-8
+content-length: 1170
+docker-distribution-api-version: registry/2.0
+
