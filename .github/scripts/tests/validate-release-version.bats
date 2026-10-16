@@ -644,6 +644,74 @@ bad_link() {
 	expect_eq "$(find "$TMPDIR" -mindepth 1 | wc -l | tr -d ' ')" 0
 }
 
+# --- practice runs -----------------------------------------------------------------------------------------------
+
+@test "practice: main's own version passes, checks 3-5 are skipped, and nothing is called" {
+	export PRACTICE=true VERSION=3.1.4
+	set_version 3.1.4
+	echo taken >"$FAKE_DIR/git.response" # would fail the git tag check if it ran
+	run_check
+	expect_status 0
+	expect_eq "$(result_lines)" "✔ on main
+✔ 3.1.4 is a valid version
+✔ Makefile, Chart.yaml and values.yaml all say 3.1.4
+– skipped: practice run
+– skipped: practice run
+– skipped: practice run
+→ all checks passed (practice)"
+	expect_eq "$(count_lines "$FAKE_DIR/curl.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/git.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/timeout.calls")" 0
+}
+
+@test "practice: a version that doesn't match the repo files is refused" {
+	export PRACTICE=true VERSION=3.1.5
+	set_version 3.1.4
+	run_check
+	expect_status 1
+	expect_results ok ok "✘ repo files don't match 3.1.5: Makefile says 3.1.4; Chart.yaml says 3.1.4; values.yaml image.tag says 3.1.4" ok ok ok
+	expect_eq "$(count_lines "$FAKE_DIR/curl.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/git.calls")" 0
+}
+
+@test "practice: a malformed version keeps the 'needs a valid version' skips" {
+	export PRACTICE=true VERSION=v3.1.4
+	run_check
+	expect_status 1
+	expect_eq "$(result_lines)" "✔ on main
+✘ v3.1.4 is not a valid version: use X.Y.Z, e.g. 3.1.5 (no \"v\", no suffix, no leading zeros)
+– skipped: repo files check needs a valid version
+– skipped: git tag check needs a valid version
+– skipped: ECR Public check needs a valid version
+– skipped: version order check needs a valid version
+→ 1 problem (practice)"
+}
+
+@test "practice: a run that isn't on main is still refused" {
+	export PRACTICE=true VERSION=3.1.4 GITHUB_REF=refs/heads/feature
+	set_version 3.1.4
+	run_check
+	expect_status 1
+	expect_results "✘ not on main (running on refs/heads/feature); releases run from main only" ok ok ok ok ok
+}
+
+@test "a missing or bad PRACTICE stops before any check, with no result lines" {
+	local bad
+	good_release 3.1.5
+	for bad in "" True FALSE yes 1 "true " $'true\nfalse'; do
+		export PRACTICE=$bad
+		run_check
+		expect_status 2
+		expect_eq "$output" "PRACTICE must be true or false"
+	done
+	unset PRACTICE
+	run_check
+	expect_status 2
+	expect_eq "$output" "PRACTICE must be true or false"
+	expect_eq "$(count_lines "$FAKE_DIR/curl.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/git.calls")" 0
+}
+
 # --- live smoke test (by hand only: LIVE=1 bats .github/scripts/tests) --------------------------------------------
 
 @test "live: 3.1.4 against the real registry and GitHub lists the 3 expected problems" {

@@ -1,12 +1,36 @@
 name: Release
 
+# Builds the image once (linux/amd64 + linux/arm64), runs the integration tests on that exact digest, then adds the
+# release tag to that digest in the private staging repo. Nothing is published to ECR Public.
+#
+# "Practice run" (ticked by default) uses the version already on main and tags rehearsal-<run id>, which the
+# staging repo deletes after 14 days. Untick it for a real release: that writes a permanent <version> tag.
+#
+# Re-run buttons:
+# - Re-run failed jobs after build succeeded (integ or stage failed): reuses build's digest; no rebuild.
+# - Re-run failed jobs after build failed: builds again from scratch; the new digest replaces the -testing tag.
+# - Re-run the stage job alone after it succeeded: "already staged", success.
+# - Re-run all jobs before stage ran (e.g. integ failed): rebuilds and tests the new digest. Expected.
+# - Re-run all jobs after stage ran: fails at "Check the tag is free" on purpose (the tag is permanent). Start a
+#   new run instead (practice: new run id, so new tags; real: a new version). A practice run older than 14 days
+#   has lost its rehearsal tag, so it passes that check and builds again; harmless.
+# - "Check the digest" failed: use Re-run all jobs (re-running failed jobs keeps build's empty output).
+# - Practice runs older than 14 days: their images are deleted, so re-running integ or stage alone fails. Start a
+#   new practice run.
+
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, e.g. 3.1.5 (no "v")'
+        description: 'Version to release, e.g. 3.1.5 (no "v"). For a practice run, the version already on main.'
         required: true
         type: string
+      practice:
+        description: 'Practice run: uses the version already on main and tags rehearsal-<run id>, deleted after 14 days. Untick for a real release.'
+        type: boolean
+        default: true
+
+run-name: Release ${{ inputs.version }}${{ inputs.practice && ' (practice)' || '' }}
 
 permissions: {}
 
@@ -38,3 +62,247 @@ jobs:
         run: bash .github/scripts/validate-release-version.sh
         env:
           VERSION: ${{ inputs.version }}
+          PRACTICE: ${{ inputs.practice }}
+
+  build:
+    name: Build and push
+    needs: validate-version
+    # Only the real repo has the staging role; a fork run skips build, integ and stage instead of failing.
+    if: github.repository == 'aws/secrets-store-csi-driver-provider-aws'
+    runs-on: ubuntu-latest
+    environment: staging
+    # arm64 builds under QEMU.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_RETRY_MODE: standard
+      AWS_MAX_ATTEMPTS: '5'
+      # No build-record artifact or job summary on a public repo.
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+      DOCKER_BUILD_SUMMARY: 'false'
+    outputs:
+      digest: ${{ steps.check.outputs.digest }}
+      imageRepo: ${{ steps.tags.outputs.imageRepo }}
+      region: ${{ steps.tags.outputs.region }}
+      accountId: ${{ steps.tags.outputs.accountId }}
+      testingTag: ${{ steps.tags.outputs.testingTag }}
+      stageTag: ${{ steps.tags.outputs.stageTag }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Work out tags, build args and labels
+        id: tags
+        run: bash .github/scripts/release-tags.sh
+        env:
+          VERSION: ${{ inputs.version }}
+          PRACTICE: ${{ inputs.practice }}
+          STAGING_REGISTRY: ${{ vars.STAGING_REGISTRY }}
+
+      # Tool setup runs before any AWS credentials exist, so these actions never see them.
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+          cache-image: false
+
+      # Two exporters in one build (the pushed image and a local copy) need buildx and BuildKit 0.13 or newer.
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.38.0
+          driver-opts: image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
+          cache-binary: false
+
+      # Credentials go to step outputs only, never to the job environment, so the build action and every post step
+      # run without them. Each AWS step gets them through its own env:.
+      - name: Get AWS credentials
+        id: aws1
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.STAGING_PUSH_ROLE_ARN }}
+          aws-region: ${{ steps.tags.outputs.region }}
+          allowed-account-ids: ${{ steps.tags.outputs.accountId }}
+          mask-aws-account-id: false
+          output-credentials: true
+          output-env-credentials: false
+
+      - name: Check no AWS keys reached the job environment
+        run: bash .github/scripts/staging-image.sh no-env-credentials
+
+      - name: Check the tag is free
+        run: bash .github/scripts/staging-image.sh check-free
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws1.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws1.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws1.outputs.aws-session-token }}
+          AWS_REGION: ${{ steps.tags.outputs.region }}
+          IMAGE_REPO: ${{ steps.tags.outputs.imageRepo }}
+          STAGE_TAG: ${{ steps.tags.outputs.stageTag }}
+          PRACTICE: ${{ inputs.practice }}
+
+      - name: Log in to the staging registry
+        run: bash .github/scripts/staging-image.sh login
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws1.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws1.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws1.outputs.aws-session-token }}
+          AWS_REGION: ${{ steps.tags.outputs.region }}
+          IMAGE_REPO: ${{ steps.tags.outputs.imageRepo }}
+
+      - name: Build and push the image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          sbom: false
+          build-args: ${{ steps.tags.outputs.buildArgs }}
+          labels: ${{ steps.tags.outputs.labels }}
+          # The pushed image, and a local copy of the same build's files for the binary version check.
+          outputs: |
+            type=image,name=${{ steps.tags.outputs.imageRepo }}:${{ steps.tags.outputs.testingTag }},push=true,oci-mediatypes=true
+            type=local,dest=${{ runner.temp }}/rootfs
+
+      # docker login leaves a push-capable registry token in ~/.docker/config.json for 12 hours. Remove it right
+      # after the build, before any other action or post step runs.
+      - name: Log out of the staging registry
+        if: always()
+        run: bash .github/scripts/staging-image.sh logout
+        env:
+          IMAGE_REPO: ${{ steps.tags.outputs.imageRepo }}
+
+      # The build can outlast the 1-hour role session, so get fresh credentials before checking.
+      - name: Get fresh AWS credentials
+        id: aws2
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.STAGING_PUSH_ROLE_ARN }}
+          aws-region: ${{ steps.tags.outputs.region }}
+          allowed-account-ids: ${{ steps.tags.outputs.accountId }}
+          mask-aws-account-id: false
+          output-credentials: true
+          output-env-credentials: false
+
+      - name: Check no AWS keys reached the job environment (again)
+        run: bash .github/scripts/staging-image.sh no-env-credentials
+
+      - name: Check the pushed image
+        id: check
+        run: bash .github/scripts/staging-image.sh check-build
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws2.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws2.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws2.outputs.aws-session-token }}
+          AWS_REGION: ${{ steps.tags.outputs.region }}
+          IMAGE_REPO: ${{ steps.tags.outputs.imageRepo }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ROOTFS: ${{ runner.temp }}/rootfs
+          VERSION: ${{ inputs.version }}
+          PRACTICE: ${{ inputs.practice }}
+          TESTING_TAG: ${{ steps.tags.outputs.testingTag }}
+
+  # Fails the run (a skipped job would leave it green) if build's digest output is ever empty, so integ never
+  # tests the mutable -testing tag instead of the digest.
+  check-digest:
+    name: Check the digest
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Check build produced a digest
+        run: '[[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::build produced no digest"; exit 1; }'
+        env:
+          DIGEST: ${{ needs.build.outputs.digest }}
+
+  integ:
+    name: Integration tests
+    needs: [build, check-digest]
+    uses: $/.github/workflows/integ.yml
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+    with:
+      imageRepo: ${{ needs.build.outputs.imageRepo }}
+      imageTagAmd64: ${{ needs.build.outputs.testingTag }}
+      imageTagArm64: ${{ needs.build.outputs.testingTag }}
+      imageDigest: ${{ needs.build.outputs.digest }}
+    secrets:
+      ROLE_ARN: ${{ secrets.ROLE_ARN }}
+      POD_IDENTITY_ROLE_ARN: ${{ secrets.POD_IDENTITY_ROLE_ARN }}
+
+  stage:
+    name: Stage
+    needs: [build, integ]
+    # Keep this guard in any future `if:`.
+    if: github.repository == 'aws/secrets-store-csi-driver-provider-aws'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_RETRY_MODE: standard
+      AWS_MAX_ATTEMPTS: '5'
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Get AWS credentials
+        id: aws
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.STAGING_PUSH_ROLE_ARN }}
+          aws-region: ${{ needs.build.outputs.region }}
+          allowed-account-ids: ${{ needs.build.outputs.accountId }}
+          mask-aws-account-id: false
+          output-credentials: true
+          output-env-credentials: false
+
+      - name: Check no AWS keys reached the job environment
+        run: bash .github/scripts/staging-image.sh no-env-credentials
+
+      - name: Add the stage tag to the tested digest
+        run: bash .github/scripts/staging-image.sh stage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_REGION: ${{ needs.build.outputs.region }}
+          IMAGE_REPO: ${{ needs.build.outputs.imageRepo }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          STAGE_TAG: ${{ needs.build.outputs.stageTag }}
+          TESTING_TAG: ${{ needs.build.outputs.testingTag }}
+          PRACTICE: ${{ inputs.practice }}
