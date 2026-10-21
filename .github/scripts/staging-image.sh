@@ -25,10 +25,15 @@
 # rule that removes old practice images would remove the release too. Build labels already make that impossible;
 # check-build and stage also refuse a digest that carries a tag of the other mode.
 #
+# The platform check (check_platforms) comes from registry-lib.sh, so the public-registry scripts run the same one.
+#
 # No credentials are written or printed. Bash 3.2 compatible: `set -e` is off inside functions called from `if`,
 # `||` or `&&`, so every command's exit status is tested by hand.
 
 set -euo pipefail
+
+# shellcheck source-path=SCRIPTDIR source=registry-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/registry-lib.sh"
 
 readonly REPO_NAME=ascp
 readonly REPO_RE='^([0-9]{12})\.dkr\.ecr\.([a-z]{2}(-[a-z]+)+-[0-9])\.amazonaws\.com/ascp$'
@@ -345,17 +350,7 @@ cmd_check_build() {
 	read_digest_tags
 	check_mode_separation
 
-	if ! entries=$(jq -r '
-		.manifests // error("no manifests")
-		| map(.platform // error("no platform") | "\(.os)/\(.architecture)\(if .variant then "/" + .variant else "" end)")
-		| sort | join(" ")
-	' "$work_dir/manifest"); then
-		fail "could not read the platforms of $DIGEST"
-	fi
-	case "$entries" in
-	"linux/amd64 linux/arm64" | "linux/amd64 linux/arm64/v8") ok "platforms: $entries" ;;
-	*) fail "expected exactly linux/amd64 and linux/arm64, found: ${entries:-nothing}" ;;
-	esac
+	check_platforms "$work_dir/manifest" "$DIGEST" || exit 1
 
 	if [[ ! -d "$ROOTFS" ]]; then
 		fail "the build's local copy $ROOTFS is missing"
