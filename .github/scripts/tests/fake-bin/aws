@@ -17,6 +17,14 @@
 # Every call is logged to $FAKE_DIR/aws.calls as "<args> | retry=<AWS_RETRY_MODE>,<AWS_MAX_ATTEMPTS>", with a
 # put-image manifest path shown as file://MANIFEST (its bytes are copied to $FAKE_DIR/put-image.manifest).
 # Anything unexpected is appended to $FAKE_VIOLATIONS and the fake exits 99.
+#
+# publish-image.sh's calls, handled before the ecr calls below:
+#   aws ecr-public describe-images --registry-id <id> --repository-name secrets-store-csi-driver-provider-aws
+#       --region us-east-1 --image-ids imageTag=<tag> --output json --cli-read-timeout 30 --cli-connect-timeout 10
+# Route keys are prefixed "public:" (public:describe-images:imageTag=<tag>), in the same routes file; these calls
+# are logged to $FAKE_DIR/aws-public.calls in the same format as aws.calls.
+# Every call, ecr ones included, is also appended to $FAKE_DIR/order.log as "aws <args> | key=<AWS_ACCESS_KEY_ID>",
+# so a test can check which credentials each aws call ran with.
 
 set -euo pipefail
 
@@ -24,6 +32,65 @@ violation() {
 	echo "aws: $*" >>"${FAKE_VIOLATIONS:?}"
 	exit 99
 }
+
+echo "aws $* | key=${AWS_ACCESS_KEY_ID:-}" >>"$FAKE_DIR/order.log"
+
+# replay <key> : prints the Nth reply routed for the key (the last one repeats), then exits with its status.
+replay() {
+	local key=$1 route calls index reply
+	local -a replies
+	echo "$key" >>"$FAKE_DIR/aws.keys"
+	route=$(awk -v key="$key" '$1 == key { print $2 }' "$FAKE_DIR/aws.routes")
+	[[ -n "$route" ]] || violation "no route for $key"
+	calls=$(grep -cxF -- "$key" "$FAKE_DIR/aws.keys")
+	IFS=, read -r -a replies <<<"$route"
+	index=$((calls - 1))
+	if ((index >= ${#replies[@]})); then
+		index=$((${#replies[@]} - 1))
+	fi
+	reply="$FAKE_DIR/aws/${replies[$index]}"
+	[[ -f "$reply.out" || -f "$reply.exit" ]] || violation "missing reply ${replies[$index]}"
+	if [[ -f "$reply.out" ]]; then
+		cat "$reply.out"
+	fi
+	if [[ -f "$reply.err" ]]; then
+		cat "$reply.err" >&2
+	fi
+	if [[ -f "$reply.exit" ]]; then
+		exit "$(cat "$reply.exit")"
+	fi
+	exit 0
+}
+
+# --- ecr-public --------------------------------------------------------------------------------------------------
+
+if [[ "${1:-}" == ecr-public ]]; then
+	service=$1
+	operation=${2:-}
+	shift 2 || violation "unexpected call: $*"
+	args=("$@")
+	n=${#args[@]}
+	if ((n < 4)) || [[ "${args[n - 4]}" != --cli-read-timeout || "${args[n - 3]}" != 30 ||
+		"${args[n - 2]}" != --cli-connect-timeout || "${args[n - 1]}" != 10 ]]; then
+		violation "unexpected $service $operation arguments: ${args[*]:-}"
+	fi
+	echo "$service $operation ${args[*]:-} | retry=${AWS_RETRY_MODE:-},${AWS_MAX_ATTEMPTS:-}" >>"$FAKE_DIR/aws-public.calls"
+	case "$service $operation" in
+	"ecr-public describe-images")
+		[[ $n -eq 14 && "${args[0]}" == --registry-id && "${args[1]}" =~ ^[0-9]{12}$ &&
+			"${args[2]}" == --repository-name &&
+			"${args[3]}" == secrets-store-csi-driver-provider-aws &&
+			"${args[4]}" == --region && "${args[5]}" == us-east-1 && "${args[6]}" == --image-ids &&
+			"${args[7]}" =~ ^imageTag=[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ &&
+			"${args[8]}" == --output && "${args[9]}" == json ]] ||
+			violation "unexpected ecr-public describe-images arguments: ${args[*]:-}"
+		replay "public:describe-images:${args[7]}"
+		;;
+	*) violation "unexpected $service operation: $operation" ;;
+	esac
+fi
+
+# --- ecr ---------------------------------------------------------------------------------------------------------
 
 [[ $# -ge 2 && "$1" == ecr ]] || violation "unexpected call: $*"
 operation=$2
