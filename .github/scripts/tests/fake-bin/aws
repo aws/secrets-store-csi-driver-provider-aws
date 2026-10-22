@@ -22,6 +22,7 @@
 #   aws ecr-public get-login-password --region us-east-1 --cli-read-timeout 30 --cli-connect-timeout 10
 #   aws ecr-public describe-images --registry-id <id> --repository-name secrets-store-csi-driver-provider-aws
 #       --region us-east-1 --image-ids imageTag=<tag> --output json --cli-read-timeout 30 --cli-connect-timeout 10
+#   the same describe-images without --image-ids (the whole repo's listing; key public:describe-images)
 # Route keys are prefixed "public:" (public:get-login-password, public:describe-images:imageTag=<tag>), in the same
 # routes file; these calls are logged to $FAKE_DIR/aws-public.calls in the same format as aws.calls.
 # Every call, ecr ones included, is also appended to $FAKE_DIR/order.log as "aws <args> | key=<AWS_ACCESS_KEY_ID>",
@@ -83,6 +84,13 @@ if [[ "${1:-}" == ecr-public ]]; then
 		replay public:get-login-password
 		;;
 	"ecr-public describe-images")
+		# The whole repo's listing (check-fresh): no --image-ids.
+		if [[ $n -eq 12 && "${args[0]}" == --registry-id && "${args[1]}" =~ ^[0-9]{12}$ &&
+			"${args[2]}" == --repository-name && "${args[3]}" == secrets-store-csi-driver-provider-aws &&
+			"${args[4]}" == --region && "${args[5]}" == us-east-1 && "${args[6]}" == --output &&
+			"${args[7]}" == json ]]; then
+			replay public:describe-images
+		fi
 		[[ $n -eq 14 && "${args[0]}" == --registry-id && "${args[1]}" =~ ^[0-9]{12}$ &&
 			"${args[2]}" == --repository-name &&
 			"${args[3]}" == secrets-store-csi-driver-provider-aws &&
