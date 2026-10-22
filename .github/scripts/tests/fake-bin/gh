@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#
+# Test fake for the GitHub CLI. Accepts only the calls bump-manifest.sh makes, and only with GH_TOKEN set:
+#   gh pr list --repo <repo> --head <branch> --state open --json <bump-manifest.sh's fields>
+#                         prints $FAKE_DIR/gh.prs (default "[]"); $FAKE_DIR/gh.list "exit:<n>" fails instead
+#   gh auth setup-git     does nothing
+#   gh pr create --repo <repo> --base main --head <branch> --title <title> --body-file <file>
+#                         copies the body to $FAKE_DIR/gh.body and prints a made-up pull request URL
+# Every call is logged to $FAKE_DIR/gh.calls. Anything else (a merge, say) goes to $FAKE_VIOLATIONS, exit 99.
+
+set -euo pipefail
+
+violation() {
+	echo "gh: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+printf '%s\n' "$*" >>"$FAKE_DIR/gh.calls"
+
+[[ -n "${GH_TOKEN:-}" ]] || violation "GH_TOKEN is not set"
+repo=${GITHUB_REPOSITORY:?}
+
+if [[ $# -eq 10 && "$1 $2 $3 $4 $5" == "pr list --repo $repo --head" && "$7 $8 $9" == "--state open --json" &&
+	"${10}" == number,url,isCrossRepository,headRepositoryOwner,baseRefName,files ]]; then
+	response=$(cat "$FAKE_DIR/gh.list" 2>/dev/null || echo ok)
+	case "$response" in
+	ok) cat "$FAKE_DIR/gh.prs" 2>/dev/null || echo '[]' ;;
+	exit:*) exit "${response#exit:}" ;;
+	*) violation "unknown gh.list '$response'" ;;
+	esac
+elif [[ "$*" == "auth setup-git" ]]; then
+	:
+elif [[ $# -eq 12 && "$1 $2 $3 $4 $5 $6 $7" == "pr create --repo $repo --base main --head" && "$9" == --title &&
+	"${11}" == --body-file ]]; then
+	cp "${12}" "$FAKE_DIR/gh.body"
+	echo "https://github.com/$repo/pull/4242"
+else
+	violation "unexpected call: $*"
+fi

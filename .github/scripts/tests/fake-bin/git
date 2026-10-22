@@ -3,6 +3,8 @@
 # Test fake for git: a checker in front of real git. Accepts only the exact `git ls-remote` call
 # validate-release-version.sh makes, then runs the real git ($FAKE_REAL_GIT). The tests point the GitHub URL at a
 # local bare repo (GIT_CONFIG_* insteadOf), so the answer comes from real git on real tags.
+# With FAKE_REAL_GIT set (bump-manifest.bats), any other call whose first argument is -C runs that real git on a
+# local test repo instead.
 # Every call is logged to $FAKE_DIR/git.calls. Anything unexpected goes to $FAKE_VIOLATIONS, exit 99.
 
 set -euo pipefail
@@ -15,6 +17,9 @@ violation() {
 echo "$*" >>"$FAKE_DIR/git.calls"
 
 [[ "${GIT_TERMINAL_PROMPT:-}" == 0 ]] || violation "GIT_TERMINAL_PROMPT is '${GIT_TERMINAL_PROMPT:-}', not 0"
+if [[ -n "${FAKE_REAL_GIT:-}" && "${1:-}" == -C ]]; then
+	exec "$FAKE_REAL_GIT" "$@"
+fi
 if [[ $# -ne 10 || "$1" != -c || "$2" != http.lowSpeedLimit=1000 || "$3" != -c || "$4" != http.lowSpeedTime=20 ||
 	"$5" != ls-remote || "$6" != --exit-code || "$7" != --tags ]]; then
 	violation "unexpected arguments: $*"

@@ -12,6 +12,7 @@ on:
       - '.github/workflows/integ.yml'
       - 'Makefile'
       - 'charts/secrets-store-csi-driver-provider-aws/**'
+      - 'deployment/aws-provider-installer.yaml'
       - 'tests/integration.bats.template'
       - 'tests/helpers.bash'
   push:
