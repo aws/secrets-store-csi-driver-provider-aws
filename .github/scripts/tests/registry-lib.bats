@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 #
-# Tests for registry-lib.sh (the checks the release scripts source). Each test sources the library into a fresh
-# bash with fatal-free ok/fail printers and calls one function. Neither check uses the network.
+# Tests for registry-lib.sh (the helpers and checks the release scripts source). Each test sources the library into
+# a fresh bash with fatal-free ok/fail printers and calls one function. The fake curl (fake-bin/) replays recorded
+# replies, so no test touches a registry.
 
 load test_helper
 
@@ -11,6 +12,10 @@ SANDBOX_PATH=example-sandbox/secrets-store-csi-driver-provider-aws
 
 setup() {
 	common_setup
+	export REGISTRY_URL=$ECR REGISTRY_RETRY_SCALE=0 REGISTRY_PACE_SECONDS=0 REGISTRY_DEADLINE=300
+	export REGISTRY_REPO_PATH=$REPO_PATH
+	export REGISTRY_WORK_DIR="$BATS_TEST_TMPDIR/work"
+	mkdir -p "$REGISTRY_WORK_DIR"
 	unset PUBLIC_REPO
 	# The recorded public 3.1.4 index without its 2 attestation entries (as staging-image.bats makes it).
 	GOOD_INDEX="$BATS_TEST_TMPDIR/good-index.json"
@@ -36,9 +41,10 @@ lib() {
 	' lib "$LIB" "$@"
 }
 
-@test "it is shared: staging-image.sh and publish-image.sh source it" {
+@test "it is shared: staging-image.sh, publish-image.sh and verify-public-image.sh source it" {
 	grep -qxF 'source "$(dirname "${BASH_SOURCE[0]}")/registry-lib.sh"' "$SCRIPTS_DIR/staging-image.sh"
 	grep -qxF 'source "$(dirname "${BASH_SOURCE[0]}")/registry-lib.sh"' "$SCRIPTS_DIR/publish-image.sh"
+	grep -qxF 'source "$(dirname "${BASH_SOURCE[0]}")/registry-lib.sh"' "$SCRIPTS_DIR/verify-public-image.sh"
 }
 
 # --- check_target ------------------------------------------------------------------------------------------------
@@ -121,4 +127,17 @@ platforms() {
 	has_line "✘ could not read the platforms of the-index"
 	has_line "rc=1"
 	lacks_text "✔"
+}
+
+# --- HTTP helpers ------------------------------------------------------------------------------------------------
+
+@test "list_tags: follows the recorded page link and lists every tag" {
+	route "$(token_url)" token
+	route "$(tags_url)" tags-page1
+	route "$(page2_url)" tags-page2
+	lib list_tags "$BATS_TEST_TMPDIR/tags"
+	has_line "rc=0"
+	grep -qxF 3.1.4 "$BATS_TEST_TMPDIR/tags"
+	grep -qxF latest "$BATS_TEST_TMPDIR/tags"
+	expect_eq "$(calls_to "$(page2_url)")" 1
 }
