@@ -36,6 +36,11 @@ lib() {
 	' lib "$LIB" "$@"
 }
 
+@test "it is shared: staging-image.sh and publish-image.sh source it" {
+	grep -qxF 'source "$(dirname "${BASH_SOURCE[0]}")/registry-lib.sh"' "$SCRIPTS_DIR/staging-image.sh"
+	grep -qxF 'source "$(dirname "${BASH_SOURCE[0]}")/registry-lib.sh"' "$SCRIPTS_DIR/publish-image.sh"
+}
+
 # --- check_target ------------------------------------------------------------------------------------------------
 
 @test "check_target: a real run must target the production repo" {
