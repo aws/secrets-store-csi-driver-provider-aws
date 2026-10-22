@@ -9,10 +9,11 @@ on:
       - '.github/scripts/**'
       - '.github/workflows/release-scripts.yml'
       - '.github/workflows/release.yml'
+      - '.github/workflows/release-chart.yml'
       - '.github/workflows/integ.yml'
       - 'Makefile'
       - 'charts/secrets-store-csi-driver-provider-aws/**'
-      - 'deployment/aws-provider-installer.yaml'
+      - 'deployment/**'
       - 'tests/integration.bats.template'
       - 'tests/helpers.bash'
   push:
