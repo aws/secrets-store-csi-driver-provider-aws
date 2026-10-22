@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
-# Tests for publish-image.sh (the Release workflow's steps that publish the tested image to ECR Public). Fake aws
-# and crane (fake-bin/) answer from per-test replies, so no test touches AWS or a registry. The account IDs
+# Tests for publish-image.sh (the Release workflow's steps that publish the tested image to ECR Public). Fake aws,
+# crane and curl (fake-bin/) answer from per-test replies, so no test touches AWS or a registry. The account IDs
 # are the AWS documentation's example accounts.
 
 load test_helper
@@ -19,6 +19,8 @@ OTHER_DIGEST=sha256:111111111111111111111111111111111111111111111111111111111111
 TIMEOUTS="--output json --cli-read-timeout 30 --cli-connect-timeout 10"
 PUBLIC_ARGS="--registry-id $PUBLISH_ACCOUNT --repository-name secrets-store-csi-driver-provider-aws --region us-east-1"
 LABEL=com.amazonaws.secrets-store-csi-driver-provider-aws.release.mode
+CRANE_X86_64_URL=https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz
+CRANE_ARM64_URL=https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_arm64.tar.gz
 
 setup() {
 	common_setup
@@ -44,8 +46,10 @@ setup() {
 	export AWS_ACCESS_KEY_ID=AKIAPUBLISHMARKER AWS_SECRET_ACCESS_KEY=SECRETPUBLISHMARKER
 	export AWS_SESSION_TOKEN=TOKENPUBLISHMARKER
 	export GITHUB_REPOSITORY=aws/secrets-store-csi-driver-provider-aws GITHUB_RUN_ID=7 GITHUB_RUN_ATTEMPT=1
-	export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output"
+	export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output" GITHUB_PATH="$BATS_TEST_TMPDIR/github_path"
+	export RUNNER_ARCH=X64
 	: >"$GITHUB_OUTPUT"
+	: >"$GITHUB_PATH"
 }
 
 teardown() {
@@ -260,6 +264,124 @@ y" " arn:aws:iam::$PUBLISH_ACCOUNT:role/x"; do
 	done
 }
 
+# --- install-crane -----------------------------------------------------------------------------------------------
+
+@test "install-crane: a download that doesn't match the pinned sha256 is refused and nothing is installed" {
+	local arch url
+	for arch in X64:$CRANE_X86_64_URL ARM64:$CRANE_ARM64_URL; do
+		setup
+		export RUNNER_ARCH=${arch%%:*}
+		url=${arch#*:}
+		printf 'not the crane release' >"$FAKE_DIR/fixtures/tampered.download"
+		route "$url" tampered
+		publish install-crane
+		expect_status 1
+		has_text "✘ the crane v0.22.1 download hashes to $(digest_of "$FAKE_DIR/fixtures/tampered.download"), not the pinned "
+		expect_eq "$(cat "$FAKE_DIR/curl.calls")" "120 $url"
+		expect_eq "$(cat "$GITHUB_PATH")" ""
+		if [[ -e "$RUNNER_TEMP/bin/crane" ]]; then
+			echo "crane was installed"
+			return 1
+		fi
+		expect_clean
+	done
+}
+
+@test "install-crane: a failed download fails" {
+	local reply
+	for reply in neterror http404; do
+		setup
+		route "$CRANE_X86_64_URL" "$reply"
+		publish install-crane
+		expect_status 1
+		has_line "✘ could not download $CRANE_X86_64_URL (curl exit $([[ $reply == neterror ]] && echo 6 || echo 22))"
+		expect_eq "$(cat "$GITHUB_PATH")" ""
+		if [[ -e "$RUNNER_TEMP/bin/crane" ]]; then
+			echo "crane was installed"
+			return 1
+		fi
+		expect_clean
+	done
+}
+
+@test "install-crane: an unknown runner arch fails before any download" {
+	local arch
+	for arch in X86 ARM x64; do
+		setup
+		export RUNNER_ARCH=$arch
+		publish install-crane
+		expect_status 1
+		has_line "✘ no pinned crane for RUNNER_ARCH $arch (only X64 and ARM64)"
+		expect_eq "$(count_lines "$FAKE_DIR/curl.calls")" 0
+		expect_clean
+	done
+	setup
+	export RUNNER_ARCH=""
+	publish install-crane
+	expect_status 1
+	has_line "✘ RUNNER_ARCH is not set"
+	expect_eq "$(count_lines "$FAKE_DIR/curl.calls")" 0
+}
+
+# pinned_copy <tarball> : a copy of the scripts whose x86_64 pin is <tarball>'s sha256, so the install path can run on
+# a made-up release. Only the copy changes; the real pin has no override.
+pinned_copy() {
+	local copy="$BATS_TEST_TMPDIR/pinned-scripts"
+	mkdir -p "$copy"
+	cp "$SCRIPTS_DIR/publish-image.sh" "$SCRIPTS_DIR/registry-lib.sh" "$copy/"
+	edit_file "$copy/publish-image.sh" "s/^readonly CRANE_SHA256_X86_64=.*/readonly CRANE_SHA256_X86_64=$(digest_of "$1")/"
+	grep -qxF "readonly CRANE_SHA256_X86_64=$(digest_of "$1")" "$copy/publish-image.sh"
+	SCRIPT="$copy/publish-image.sh"
+}
+
+@test "install-crane: a release that matches the pin is extracted into RUNNER_TEMP/bin and put on the PATH" {
+	mkdir -p "$BATS_TEST_TMPDIR/release"
+	printf '#!/bin/sh\necho fake crane\n' >"$BATS_TEST_TMPDIR/release/crane"
+	tar -czf "$FAKE_DIR/fixtures/release.download" -C "$BATS_TEST_TMPDIR/release" crane
+	pinned_copy "$FAKE_DIR/fixtures/release.download"
+	route "$CRANE_X86_64_URL" release
+	publish install-crane
+	expect_status 0
+	has_line "✔ installed crane v0.22.1 (Linux_x86_64, sha256 $(digest_of "$FAKE_DIR/fixtures/release.download")) into $RUNNER_TEMP/bin"
+	expect_eq "$(cat "$GITHUB_PATH")" "$RUNNER_TEMP/bin"
+	expect_eq "$("$RUNNER_TEMP/bin/crane")" "fake crane"
+	expect_clean
+}
+
+@test "install-crane: a release with no crane file is refused" {
+	mkdir -p "$BATS_TEST_TMPDIR/release"
+	printf 'not crane\n' >"$BATS_TEST_TMPDIR/release/README"
+	tar -czf "$FAKE_DIR/fixtures/release.download" -C "$BATS_TEST_TMPDIR/release" README
+	pinned_copy "$FAKE_DIR/fixtures/release.download"
+	route "$CRANE_X86_64_URL" release
+	publish install-crane
+	expect_status 1
+	has_line "✘ could not extract crane from the v0.22.1 download"
+	expect_eq "$(cat "$GITHUB_PATH")" ""
+	expect_clean
+}
+
+# By hand only: LIVE=1 bats .github/scripts/tests
+@test "live: install-crane downloads the pinned release for both arches and installs it" {
+	if [[ "${LIVE:-0}" != 1 ]]; then
+		skip "set LIVE=1 to download the real crane release"
+	fi
+	local arch
+	for arch in X64 ARM64; do
+		setup
+		export PATH="${PATH#"$BATS_TEST_DIRNAME/fake-bin:"}" RUNNER_ARCH=$arch
+		publish install-crane
+		expect_status 0
+		has_text "✔ installed crane v0.22.1 "
+		expect_eq "$(cat "$GITHUB_PATH")" "$RUNNER_TEMP/bin"
+		if [[ ! -f "$RUNNER_TEMP/bin/crane" || ! -x "$RUNNER_TEMP/bin/crane" ]]; then
+			echo "crane is not installed as an executable file"
+			return 1
+		fi
+		expect_clean
+	done
+}
+
 # --- precheck-version-tags ---------------------------------------------------------------------------------------
 
 @test "precheck: every tag free passes, after reading all three, with the publish credentials" {
@@ -428,12 +550,12 @@ crane manifest $SANDBOX@$DIGEST"
 	expect_clean
 }
 
-@test "copy: a write that never becomes visible fails closed after 6 reads" {
+@test "copy: a tag that never reads back as the digest fails closed after 6 reads" {
 	good_routes
 	tag_route rehearsal-7 absent
 	publish copy-version-tags
 	expect_status 1
-	has_line "✘ write not visible after 6 attempts: rehearsal-7 still reads as absent, not $DIGEST"
+	has_line "✘ after 6 reads, rehearsal-7 still reads as absent, not $DIGEST"
 	expect_eq "$(describes_of rehearsal-7)" 7
 	expect_eq "$(crane_writes)" "copy rehearsal-7"
 	expect_clean
@@ -503,7 +625,7 @@ crane manifest $SANDBOX@$DIGEST"
 @test "an unknown command is a usage error that lists only the publish commands" {
 	publish verify
 	expect_status 2
-	expect_eq "$output" "usage: $SCRIPT no-env-credentials | role-accounts | precheck-version-tags | copy-version-tags"
+	expect_eq "$output" "usage: $SCRIPT no-env-credentials | install-crane | role-accounts | precheck-version-tags | copy-version-tags"
 	publish
 	expect_status 2
 }

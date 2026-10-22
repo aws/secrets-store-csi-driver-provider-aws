@@ -1,10 +1,16 @@
 name: Release
 
-# Builds the image once (linux/amd64 + linux/arm64), runs the integration tests on that exact digest, then adds the
-# release tag to that digest in the private staging repo. Nothing is published to ECR Public.
+# Builds the image once (linux/amd64 + linux/arm64), runs the integration tests on that exact digest, adds the
+# release tag to that digest in the private staging repo, then copies that same digest to ECR Public under the
+# three version tags.
 #
 # "Practice run" (ticked by default) uses the version already on main and tags rehearsal-<run id>, which the
-# staging repo deletes after 14 days. Untick it for a real release: that writes a permanent <version> tag.
+# staging repo deletes after 14 days. It publishes to the sandbox public repo (the sandbox environment, no
+# approval), under rehearsal-<run id> tags only. Untick it for a real release: that writes a permanent <version>
+# tag, then, after an approval in the prod environment, the permanent public version tags.
+#
+# One run at a time (the release-image concurrency group): a real run waiting for its approval holds the group,
+# so later runs, practice ones too, wait behind it.
 #
 # Re-run buttons:
 # - Re-run failed jobs after build succeeded (integ or stage failed): reuses build's digest; no rebuild.
@@ -15,8 +21,14 @@ name: Release
 #   new run instead (practice: new run id, so new tags; real: a new version). A practice run older than 14 days
 #   has lost its rehearsal tag, so it passes that check and builds again; harmless.
 # - "Check the digest" failed: use Re-run all jobs (re-running failed jobs keeps build's empty output).
-# - Practice runs older than 14 days: their images are deleted, so re-running integ or stage alone fails. Start a
-#   new practice run.
+# - Practice runs older than 14 days: their images are deleted, so re-running integ, stage or
+#   publish-version-tags alone fails. Start a new practice run.
+# - Re-running publish-version-tags (after it failed or succeeded): skips the version tags already on build's
+#   digest and writes only the rest. A real run waits for approval again.
+# - "Check the version tags are free" failed because a tag is on another digest: nothing was written. This
+#   workflow can't move a public version tag, so start a new run (practice) or release a new version (real).
+# - "Copy the tested image to the version tags" stopped on a tag that points at another digest: don't re-run;
+#   check that tag first.
 
 on:
   workflow_dispatch:
@@ -306,3 +318,101 @@ jobs:
           STAGE_TAG: ${{ needs.build.outputs.stageTag }}
           TESTING_TAG: ${{ needs.build.outputs.testingTag }}
           PRACTICE: ${{ inputs.practice }}
+
+  # A real run's prod environment waits for a reviewer other than the releaser.
+  publish-version-tags:
+    name: Publish the version tags
+    needs: [build, stage]
+    # Keep this guard in any future `if:`.
+    if: github.repository == 'aws/secrets-store-csi-driver-provider-aws'
+    # A fixed image, not ubuntu-latest (which moves to a new Ubuntu release in November 2026): the steps rely on
+    # the preinstalled aws, jq and python3.
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.practice && 'sandbox' || 'prod' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_RETRY_MODE: standard
+      AWS_MAX_ATTEMPTS: '5'
+    outputs:
+      publicRepo: ${{ steps.copy.outputs.publicRepo }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Work out the public tags
+        id: tags
+        run: bash .github/scripts/public-tags.sh
+        env:
+          VERSION: ${{ inputs.version }}
+          PRACTICE: ${{ inputs.practice }}
+
+      - name: Check the role ARNs
+        id: accounts
+        run: bash .github/scripts/publish-image.sh role-accounts
+        env:
+          PUBLISH_ROLE_ARN: ${{ vars.PUBLISH_ROLE_ARN }}
+          STAGING_PULL_ROLE_ARN: ${{ vars.STAGING_PULL_ROLE_ARN }}
+
+      # Tool setup runs before any AWS credentials exist: a pinned crane release, checked against a pinned sha256.
+      - name: Install crane
+        run: bash .github/scripts/publish-image.sh install-crane
+
+      # Credentials go to step outputs only, never to the job environment; each AWS step gets them through its own
+      # env:. allowed-account-ids comes from the same ARN the role-accounts step checked.
+      - name: Get AWS credentials
+        id: aws
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.PUBLISH_ROLE_ARN }}
+          # ECR Public's auth and the CLI's ecr-public commands use us-east-1 (it also has a us-west-2 endpoint,
+          # not used here).
+          aws-region: us-east-1
+          allowed-account-ids: ${{ steps.accounts.outputs.publishAccountId }}
+          mask-aws-account-id: false
+          output-credentials: true
+          output-env-credentials: false
+
+      - name: Check no AWS keys reached the job environment
+        run: bash .github/scripts/publish-image.sh no-env-credentials
+
+      - name: Check the version tags are free
+        run: bash .github/scripts/publish-image.sh precheck-version-tags
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          PUBLIC_REPO: ${{ vars.PUBLIC_REPO }}
+          PRACTICE: ${{ inputs.practice }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          VERSION_TAGS: ${{ steps.tags.outputs.versionTags }}
+          PUBLISH_ACCOUNT_ID: ${{ steps.accounts.outputs.publishAccountId }}
+
+      - name: Copy the tested image to the version tags
+        id: copy
+        run: bash .github/scripts/publish-image.sh copy-version-tags
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          PUBLIC_REPO: ${{ vars.PUBLIC_REPO }}
+          PRACTICE: ${{ inputs.practice }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          VERSION_TAGS: ${{ steps.tags.outputs.versionTags }}
+          PUBLISH_ACCOUNT_ID: ${{ steps.accounts.outputs.publishAccountId }}
+          IMAGE_REPO: ${{ needs.build.outputs.imageRepo }}
+          STAGING_PULL_ROLE_ARN: ${{ vars.STAGING_PULL_ROLE_ARN }}
+
+      # The copy step removes its registry logins itself, on every exit. This is a backstop for a killed process.
+      - name: Remove any registry logins left behind
+        if: always()
+        run: rm -rf "${RUNNER_TEMP:?}"/dc.*
