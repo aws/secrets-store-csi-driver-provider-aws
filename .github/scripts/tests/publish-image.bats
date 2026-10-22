@@ -136,9 +136,6 @@ staging_tags() {
 
 crane_route() { set_route crane "$@"; }
 
-# route <url> <fixture>[,<fixture>...] : a reply for the fake curl (the crane download).
-route() { echo "$1 $2" >>"$FAKE_DIR/routes"; }
-
 # crane_config <mode label value> : both platforms' image configs carry this mode label ("" for none).
 crane_config() {
 	if [[ -n "$1" ]]; then
