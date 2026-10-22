@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+#
+# Test fake for crane. Accepts only the exact calls publish-image.sh makes:
+#   crane auth login <registry> -u AWS --password-stdin            reads the password from stdin into
+#                                                                  $FAKE_DIR/crane-login.<registry>; adds an entry to
+#                                                                  $DOCKER_CONFIG/config.json
+#   crane config --platform linux/<amd64|arm64> <staging repo>@<digest>
+#   crane copy <staging repo>@<digest> public.ecr.aws/<a>/<b>:<tag>
+#   crane manifest public.ecr.aws/<a>/<b>@<digest>
+# with <registry> public.ecr.aws or <account>.dkr.ecr.<region>.amazonaws.com, and <staging repo> <registry>/ascp.
+# Every call must run with DOCKER_CONFIG set to a directory under $RUNNER_TEMP named dc.*: crane reads its logins
+# from there, and an unset one would mean ~/.docker.
+#
+# $FAKE_DIR/crane.routes has one line per request: "<key> <reply>[,<reply>...]". The Nth call with a key gets the
+# Nth reply (the last one repeats). Keys: login:<registry> (optional; no route means success),
+# config:linux/<arch>, copy:<tag>, manifest. A reply is $FAKE_DIR/crane/<reply>.out (stdout, byte for
+# byte), plus <reply>.err and <reply>.exit for a failure. The reply "signal:TERM" sends SIGTERM to the calling
+# script and exits 143, as if the job had been cancelled during that call. Messages are made up, not recorded.
+#
+# Every call is logged to $FAKE_DIR/crane.calls as its arguments, to $FAKE_DIR/crane.docker-config as the
+# DOCKER_CONFIG it ran with, and to $FAKE_DIR/order.log as "crane <args>". Anything unexpected is appended to
+# $FAKE_VIOLATIONS and the fake exits 99.
+
+set -euo pipefail
+
+violation() {
+	echo "crane: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+readonly REGISTRY_RE='^(public\.ecr\.aws|[0-9]{12}\.dkr\.ecr\.[a-z]{2}(-[a-z]+)+-[0-9]\.amazonaws\.com)$'
+readonly STAGING_RE='^[0-9]{12}\.dkr\.ecr\.[a-z]{2}(-[a-z]+)+-[0-9]\.amazonaws\.com/ascp@sha256:[0-9a-f]{64}$'
+readonly PUBLIC_TAG_RE='^public\.ecr\.aws/[a-z0-9._-]+/[a-z0-9._-]+:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
+readonly PUBLIC_DIGEST_RE='^public\.ecr\.aws/[a-z0-9._-]+/[a-z0-9._-]+@sha256:[0-9a-f]{64}$'
+
+runner_temp=${RUNNER_TEMP:-}
+[[ -n "$runner_temp" ]] || violation "RUNNER_TEMP is not set"
+[[ -n "${DOCKER_CONFIG:-}" ]] || violation "DOCKER_CONFIG is not set: $*"
+[[ "$DOCKER_CONFIG" == "$runner_temp"/dc.* && "$DOCKER_CONFIG" != */../* && -d "$DOCKER_CONFIG" ]] ||
+	violation "DOCKER_CONFIG $DOCKER_CONFIG is not a dc.* directory under RUNNER_TEMP: $*"
+
+key=""
+case "${1:-} ${2:-}" in
+"auth login")
+	[[ $# -eq 6 && "$3" =~ $REGISTRY_RE && "$4" == -u && "$5" == AWS && "$6" == --password-stdin ]] ||
+		violation "unexpected auth login arguments: $*"
+	# Read the whole password before logging, so the log order never depends on the pipe.
+	cat >"$FAKE_DIR/crane-login.$3"
+	printf '{"auths":{"%s":{"auth":"made-up"}}}\n' "$3" >>"$DOCKER_CONFIG/config.json"
+	key="login:$3"
+	;;
+"config --platform")
+	[[ $# -eq 4 && ("$3" == linux/amd64 || "$3" == linux/arm64) && "$4" =~ $STAGING_RE ]] ||
+		violation "unexpected config arguments: $*"
+	key="config:$3"
+	;;
+copy\ *)
+	[[ $# -eq 3 && "$2" =~ $STAGING_RE && "$3" =~ $PUBLIC_TAG_RE ]] || violation "unexpected copy arguments: $*"
+	key="copy:${3##*:}"
+	;;
+manifest\ *)
+	[[ $# -eq 2 && "$2" =~ $PUBLIC_DIGEST_RE ]] || violation "unexpected manifest arguments: $*"
+	key=manifest
+	;;
+*) violation "unexpected call: $*" ;;
+esac
+
+echo "$*" >>"$FAKE_DIR/crane.calls"
+echo "$DOCKER_CONFIG" >>"$FAKE_DIR/crane.docker-config"
+echo "crane $*" >>"$FAKE_DIR/order.log"
+echo "$key" >>"$FAKE_DIR/crane.keys"
+
+route=$(awk -v key="$key" '$1 == key { print $2 }' "$FAKE_DIR/crane.routes")
+if [[ -z "$route" ]]; then
+	if [[ "$key" == login:* ]]; then
+		echo "logged in via $DOCKER_CONFIG/config.json" >&2
+		exit 0
+	fi
+	violation "no route for $key"
+fi
+calls=$(grep -cxF -- "$key" "$FAKE_DIR/crane.keys")
+IFS=, read -r -a replies <<<"$route"
+index=$((calls - 1))
+if ((index >= ${#replies[@]})); then
+	index=$((${#replies[@]} - 1))
+fi
+if [[ "${replies[$index]}" == signal:TERM ]]; then
+	kill -TERM "$PPID"
+	exit 143
+fi
+reply="$FAKE_DIR/crane/${replies[$index]}"
+[[ -f "$reply.out" || -f "$reply.exit" ]] || violation "missing reply ${replies[$index]}"
+if [[ -f "$reply.out" ]]; then
+	cat "$reply.out"
+fi
+if [[ -f "$reply.err" ]]; then
+	cat "$reply.err" >&2
+fi
+if [[ -f "$reply.exit" ]]; then
+	exit "$(cat "$reply.exit")"
+fi
