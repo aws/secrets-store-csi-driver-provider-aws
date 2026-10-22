@@ -3,8 +3,9 @@ name: Release
 # Builds the image once (linux/amd64 + linux/arm64), runs the integration tests on that exact digest, adds the
 # release tag to that digest in the private staging repo, then copies that same digest to ECR Public under the
 # three version tags, checks anonymously, with no AWS credentials, that each of them serves it, runs the
-# integration tests again on the public image, points the six alias tags at it, latest last, and finally checks
-# anonymously that each alias serves it.
+# integration tests again on the public image, points the six alias tags at it, latest last, checks anonymously
+# that each alias serves it, and finally, in a real run, opens a pull request that points
+# deployment/aws-provider-installer.yaml at the new version.
 #
 # "Practice run" (ticked by default) uses the version already on main and tags rehearsal-<run id>, which the
 # staging repo deletes after 14 days. It publishes to the sandbox public repo (the sandbox environment, no
@@ -41,6 +42,10 @@ name: Release
 #   re-run; check that first. If it could not read the releases, re-run it.
 # - verify-alias-tags failed: it only reads and needs no approval, so re-run it alone (Re-run failed jobs). If it
 #   said an alias "is on another image", check that alias first; re-run once it points at build's digest.
+# - bump-manifest-pr failed: it needs no approval, so re-run it alone. It reuses a branch or open pull request an
+#   earlier attempt made if that holds the same change, and never force-pushes. If it said main "has moved on to
+#   another version", the image release is fine: bump deployment/aws-provider-installer.yaml by hand only if that
+#   newer version is not released yet; otherwise its own release opens the pull request.
 
 on:
   workflow_dispatch:
@@ -634,3 +639,49 @@ jobs:
           DIGEST: ${{ needs.build.outputs.digest }}
           ALIAS_TAGS: ${{ steps.tags.outputs.aliasTags }}
           PREVIOUS_DIGESTS: ${{ needs.publish-alias-tags.outputs.previousDigests }}
+
+  # Real runs only, once every alias serves the new image: a pull request that points the raw install manifest
+  # (served straight from main) at the new version. Nothing here merges it: main's rules need human approvals.
+  bump-manifest-pr:
+    name: Open the install manifest pull request
+    needs: [build, publish-version-tags, verify-alias-tags]
+    # Keep this guard in any future `if:`.
+    if: github.repository == 'aws/secrets-store-csi-driver-provider-aws' && !inputs.practice
+    # A fixed image, not ubuntu-latest: the steps rely on the preinstalled git, gh and python3.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # push the release/bump-manifest-<version> branch
+      pull-requests: write # open the pull request
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      # The latest main, with full history for the comparisons in open-pr.
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Point the install manifest at the new version
+        id: edit
+        run: bash .github/scripts/bump-manifest.sh edit
+        env:
+          PUBLIC_REPO: ${{ needs.publish-version-tags.outputs.publicRepo }}
+          PRACTICE: ${{ inputs.practice }}
+          VERSION: ${{ inputs.version }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+
+      # The only step with the token.
+      - name: Open the pull request
+        if: steps.edit.outputs.changed == 'true'
+        run: bash .github/scripts/bump-manifest.sh open-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLIC_REPO: ${{ needs.publish-version-tags.outputs.publicRepo }}
+          PRACTICE: ${{ inputs.practice }}
+          VERSION: ${{ inputs.version }}

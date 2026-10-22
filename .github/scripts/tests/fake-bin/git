@@ -6,6 +6,8 @@
 #   taken          refs/tags/<version> exists (recorded output)
 #   taken-old      refs/tags/secrets-store-csi-driver-provider-aws-<version> exists
 #   exit:<n>       exit with status n
+# With FAKE_REAL_GIT set (bump-manifest.bats), any other call whose first argument is -C runs that real git on a
+# local test repo instead.
 # Every call is logged to $FAKE_DIR/git.calls. Anything unexpected goes to $FAKE_VIOLATIONS, exit 99.
 
 set -euo pipefail
@@ -20,6 +22,9 @@ violation() {
 echo "$*" >>"$FAKE_DIR/git.calls"
 
 [[ "${GIT_TERMINAL_PROMPT:-}" == 0 ]] || violation "GIT_TERMINAL_PROMPT is '${GIT_TERMINAL_PROMPT:-}', not 0"
+if [[ -n "${FAKE_REAL_GIT:-}" && "${1:-}" == -C ]]; then
+	exec "$FAKE_REAL_GIT" "$@"
+fi
 if [[ $# -ne 10 || "$1" != -c || "$2" != http.lowSpeedLimit=1000 || "$3" != -c || "$4" != http.lowSpeedTime=20 ||
 	"$5" != ls-remote || "$6" != --exit-code || "$7" != --tags ]]; then
 	violation "unexpected arguments: $*"

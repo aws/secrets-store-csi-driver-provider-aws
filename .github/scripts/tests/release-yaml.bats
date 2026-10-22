@@ -400,3 +400,51 @@ check_no_credential_path() {
 	expect_eq "$(count_matching "$step" '^          ALIAS_TAGS: \$\{\{ steps\.tags\.outputs\.aliasTags \}\}$')" 1
 	expect_eq "$(count_matching "$step" '^          PREVIOUS_DIGESTS: \$\{\{ needs\.publish-alias-tags\.outputs\.previousDigests \}\}$')" 1
 }
+
+# --- bump-manifest-pr ------------------------------------------------------------------------------------------------
+
+@test "bump-manifest-pr: real runs only, no environment, and only the write permissions a pull request needs" {
+	local block permissions
+	block=$(job_block "$RELEASE" bump-manifest-pr)
+	expect_eq "$(printf '%s\n' "$block" | needs_of | tr '\n' ' ')" "build publish-version-tags verify-alias-tags "
+	expect_eq "$(count_matching "$block" "^    # Keep this guard in any future \`if:\`\\.$")" 1
+	expect_eq "$(count_matching "$block" "^    if: github\\.repository == 'aws/secrets-store-csi-driver-provider-aws' && !inputs\\.practice$")" 1
+	expect_eq "$(count_matching "$block" '^    if:')" 1
+	expect_eq "$(count_matching "$block" '^ +environment:')" 0
+	permissions=$(printf '%s\n' "$block" | awk '/^    permissions:$/ { inside = 1; next } inside && /^    [^ ]/ { exit } inside')
+	expect_eq "$(printf '%s\n' "$permissions" | sed 's/ *#.*//')" "      contents: write
+      pull-requests: write"
+	expect_eq "$(count_matching "$block" '^    runs-on: ubuntu-24\.04$')" 1
+	expect_eq "$(count_matching "$block" '^    timeout-minutes: 10$')" 1
+}
+
+@test "bump-manifest-pr: checks out main with full history, and only the open-pr step gets the token" {
+	local block step
+	block=$(job_block "$RELEASE" bump-manifest-pr)
+	step=$(step_block "$block" "Checkout")
+	expect_eq "$(count_matching "$step" '^          ref: main$')" 1
+	expect_eq "$(count_matching "$step" '^          persist-credentials: false$')" 1
+	expect_eq "$(count_matching "$step" '^          fetch-depth: 0$')" 1
+	step=$(step_block "$block" "Point the install manifest at the new version")
+	expect_eq "$(count_matching "$step" '^        run: bash \.github/scripts/bump-manifest\.sh edit$')" 1
+	expect_eq "$(count_matching "$step" '^          DIGEST: \$\{\{ needs\.build\.outputs\.digest \}\}$')" 1
+	step=$(step_block "$block" "Open the pull request")
+	expect_eq "$(count_matching "$step" "^        if: steps\\.edit\\.outputs\\.changed == 'true'$")" 1
+	expect_eq "$(count_matching "$step" '^        run: bash \.github/scripts/bump-manifest\.sh open-pr$')" 1
+	expect_eq "$(count_matching "$step" '^          GH_TOKEN: \$\{\{ github\.token \}\}$')" 1
+	expect_eq "$(count_matching "$block" 'GH_TOKEN|GITHUB_TOKEN|github\.token|secrets\.')" 1
+	# Both steps read the repo publish-version-tags wrote to, and the practice flag check_target needs.
+	expect_eq "$(count_matching "$block" '^          PUBLIC_REPO: \$\{\{ needs\.publish-version-tags\.outputs\.publicRepo \}\}$')" 2
+	expect_eq "$(count_matching "$block" '^          PRACTICE: \$\{\{ inputs\.practice \}\}$')" 2
+}
+
+@test "nothing in the release workflow or its scripts merges a pull request" {
+	local file hits
+	for file in "$RELEASE" "$SCRIPTS_DIR"/*.sh; do
+		hits=$(grep -v '^ *#' "$file" | grep -niE 'gh +pr +merge|gh +api .*merge|--auto|--admin|auto-?merge|merge_method|/merges|mergePullRequest' || true)
+		if [[ -n "$hits" ]]; then
+			printf '%s:\n%s\n' "$file" "$hits"
+			return 1
+		fi
+	done
+}
