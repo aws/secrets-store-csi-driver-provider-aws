@@ -312,3 +312,71 @@ check_no_credential_path() {
 	expect_eq "$(count_matching "$step" '^          VERSION_TAGS: \$\{\{ steps\.tags\.outputs\.versionTags \}\}$')" 1
 	expect_eq "$(count_matching "$step" "^          AWS_EC2_METADATA_DISABLED: 'true'$")" 1
 }
+
+# --- public-image-integ ----------------------------------------------------------------------------------------------
+
+@test "public-image-integ: tests the public repo, pinned by build's digest, with the secrets passed by name" {
+	local block
+	block=$(job_block "$RELEASE" public-image-integ)
+	expect_eq "$(printf '%s\n' "$block" | needs_of | tr '\n' ' ')" "build publish-version-tags verify-image "
+	expect_eq "$(count_matching "$block" "^    if: github\\.repository == 'aws/secrets-store-csi-driver-provider-aws'$")" 1
+	expect_eq "$(count_matching "$block" '^    uses: \$/\.github/workflows/integ\.yml$')" 1
+	expect_eq "$(count_matching "$block" '^      imageRepo: \$\{\{ needs\.publish-version-tags\.outputs\.publicRepo \}\}$')" 1
+	expect_eq "$(count_matching "$block" '^      imageTagAmd64: \$\{\{ needs\.build\.outputs\.stageTag \}\}$')" 1
+	expect_eq "$(count_matching "$block" '^      imageTagArm64: \$\{\{ needs\.build\.outputs\.stageTag \}\}$')" 1
+	expect_eq "$(count_matching "$block" '^      imageDigest: \$\{\{ needs\.build\.outputs\.digest \}\}$')" 1
+	expect_eq "$(count_matching "$block" '^      ROLE_ARN: \$\{\{ secrets\.ROLE_ARN \}\}$')" 1
+	expect_eq "$(count_matching "$block" '^      POD_IDENTITY_ROLE_ARN: \$\{\{ secrets\.POD_IDENTITY_ROLE_ARN \}\}$')" 1
+}
+
+@test "public-image-integ: build's stageTag is the first version tag, in real and practice runs" {
+	local practice stage first
+	for practice in false true; do
+		: >"$BATS_TEST_TMPDIR/out"
+		GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out" VERSION=3.1.5 PRACTICE=$practice STAGING_REGISTRY=111122223333.dkr.ecr.us-west-2.amazonaws.com \
+			GITHUB_RUN_ID=7 GITHUB_RUN_ATTEMPT=1 GITHUB_SHA=0123456789abcdef0123456789abcdef01234567 \
+			bash "$SCRIPTS_DIR/release-tags.sh" >/dev/null
+		GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out" VERSION=3.1.5 PRACTICE=$practice GITHUB_RUN_ID=7 \
+			bash "$SCRIPTS_DIR/public-tags.sh" >/dev/null
+		stage=$(sed -n 's/^stageTag=//p' "$BATS_TEST_TMPDIR/out")
+		first=$(sed -n 's/^versionTags=//p' "$BATS_TEST_TMPDIR/out" | cut -d' ' -f1)
+		expect_eq "$stage" "$first"
+	done
+	expect_eq "$stage" rehearsal-7
+}
+
+# --- publish-alias-tags ----------------------------------------------------------------------------------------------
+
+@test "publish-alias-tags: needs, guard, environment, permissions and output" {
+	local block permissions
+	block=$(job_block "$RELEASE" publish-alias-tags)
+	expect_eq "$(printf '%s\n' "$block" | needs_of | tr '\n' ' ')" "build publish-version-tags verify-image public-image-integ "
+	expect_eq "$(count_matching "$block" "^    if: github\\.repository == 'aws/secrets-store-csi-driver-provider-aws'$")" 1
+	expect_eq "$(count_matching "$block" "^    environment: \\$\\{\\{ inputs\\.practice && 'sandbox' \\|\\| 'prod' \\}\\}$")" 1
+	permissions=$(printf '%s\n' "$block" | awk '/^    permissions:$/ { inside = 1; next } inside && /^    [^ ]/ { exit } inside')
+	expect_eq "$permissions" "      contents: read
+      id-token: write"
+	expect_eq "$(count_matching "$block" '^      previousDigests: \$\{\{ steps\.copy\.outputs\.previousDigests \}\}$')" 1
+}
+
+@test "publish-alias-tags: checks the repo, then credentials, then freshness, then the alias write" {
+	local block repo tags accounts crane creds noenv fresh copy cleanup
+	block=$(job_block "$RELEASE" publish-alias-tags)
+	repo=$(step_line "$block" "Check the public repo is the one the version tags went to")
+	tags=$(step_line "$block" "Work out the public tags")
+	accounts=$(step_line "$block" "Check the role ARNs")
+	crane=$(step_line "$block" "Install crane")
+	creds=$(step_line "$block" "Get AWS credentials")
+	noenv=$(step_line "$block" "Check no AWS keys reached the job environment")
+	fresh=$(step_line "$block" "Check no newer release is published")
+	copy=$(step_line "$block" "Point the alias tags at the tested image")
+	cleanup=$(step_line "$block" "Remove any registry logins left behind")
+	if ! ((repo < tags && tags < accounts && accounts < crane && crane < creds && creds < noenv &&
+		noenv < fresh && fresh < copy && copy < cleanup)); then
+		echo "order: repo $repo, tags $tags, accounts $accounts, crane $crane, creds $creds, no-env $noenv, fresh $fresh, copy $copy, cleanup $cleanup"
+		return 1
+	fi
+	# Nothing runs between the freshness check and the alias writes.
+	expect_eq "$(printf '%s\n' "$block" | sed -n 's/^      - name: //p' | grep -A1 -xF "Check no newer release is published" | tail -n 1)" \
+		"Point the alias tags at the tested image"
+}
