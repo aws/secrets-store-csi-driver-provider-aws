@@ -10,6 +10,7 @@
 load test_helper
 
 RELEASE="$REAL_REPO/.github/workflows/release.yml"
+CHART_RELEASE="$REAL_REPO/.github/workflows/release-chart.yml"
 
 setup() {
 	common_setup
@@ -120,6 +121,15 @@ YAML
 		return 1
 	fi
 	job_ids "$RELEASE" | grep -qxF publish-version-tags
+}
+
+@test "release-chart.yml: every needs.<job>.outputs reference names a job in that job's own needs" {
+	run check_direct_needs "$CHART_RELEASE"
+	expect_status 0
+	expect_eq "$output" ""
+	# Not vacuous: the parser finds the jobs that read extract-image-info's outputs.
+	job_ids "$CHART_RELEASE" | grep -qxF check-image-public
+	job_ids "$CHART_RELEASE" | grep -qxF integration-tests
 }
 
 # --- publish-version-tags --------------------------------------------------------------------------------------------
@@ -444,6 +454,51 @@ check_no_credential_path() {
 		hits=$(grep -v '^ *#' "$file" | grep -niE 'gh +pr +merge|gh +api .*merge|--auto|--admin|auto-?merge|merge_method|/merges|mergePullRequest' || true)
 		if [[ -n "$hits" ]]; then
 			printf '%s:\n%s\n' "$file" "$hits"
+			return 1
+		fi
+	done
+}
+
+# --- release-chart.yml: check-image-public ---------------------------------------------------------------------------
+
+@test "check-image-public: reads only, hardens the runner first, and checks extract-image-info's repo and tag" {
+	local block permissions step
+	block=$(job_block "$CHART_RELEASE" check-image-public)
+	expect_eq "$(printf '%s\n' "$block" | needs_of | tr '\n' ' ')" "extract-image-info "
+	permissions=$(printf '%s\n' "$block" | awk '/^    permissions:$/ { inside = 1; next } inside && /^    [^ ]/ { exit } inside')
+	expect_eq "$permissions" "      contents: read"
+	expect_eq "$(printf '%s\n' "$block" | sed -n 's/^      - name: //p' | tr '\n' '|')" \
+		"Harden Runner|Checkout|Check the image is public|"
+	step_block "$block" "Checkout" | grep -qxF '          persist-credentials: false'
+	step=$(step_block "$block" "Check the image is public")
+	expect_eq "$(count_matching "$step" '^        run: bash \.github/scripts/chart-image-public\.sh$')" 1
+	expect_eq "$(count_matching "$step" '^          IMAGE_REPO: \$\{\{ needs\.extract-image-info\.outputs\.imageRepo \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          IMAGE_TAG: \$\{\{ needs\.extract-image-info\.outputs\.imageTag \}\}$')" 1
+	expect_eq "$(count_matching "$block" 'secrets|id-token|environment:')" 0
+}
+
+@test "check-image-public: the integration tests and the chart release both wait for it" {
+	expect_eq "$(job_block "$CHART_RELEASE" release | needs_of | tr '\n' ' ')" \
+		"unit-test integration-tests check-image-public "
+	expect_eq "$(job_block "$CHART_RELEASE" integration-tests | needs_of | tr '\n' ' ')" \
+		"extract-image-info check-image-public "
+}
+
+@test "release-scripts.yml runs these tests when a workflow or file they read changes" {
+	local patterns file pattern found
+	patterns=$(awk '/paths: &paths$/ { inside = 1; next } inside && !/^      - / { exit }
+		inside { sub(/^      - /, ""); gsub(/'\''/, ""); print }' "$REAL_REPO/.github/workflows/release-scripts.yml")
+	for file in .github/workflows/release.yml .github/workflows/release-chart.yml .github/workflows/integ.yml \
+		.github/scripts/chart-image-public.sh deployment/aws-provider-installer.yaml "$CHART_DIR/values.yaml"; do
+		found=0
+		while IFS= read -r pattern; do
+			# shellcheck disable=SC2053 # the pattern is a glob on purpose
+			if [[ "$file" == $pattern ]]; then
+				found=1
+			fi
+		done <<<"$patterns"
+		if ((found == 0)); then
+			echo "release-scripts.yml's paths miss $file"
 			return 1
 		fi
 	done
