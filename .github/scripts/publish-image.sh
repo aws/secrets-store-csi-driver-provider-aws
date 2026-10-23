@@ -3,6 +3,8 @@
 # The Release workflow's steps that publish the tested image to ECR Public. One command per call:
 #
 #   no-env-credentials     fails if AWS keys are in the job environment (they must only come from step outputs)
+#   install-crane          downloads the pinned crane release for this runner, checks its sha256, and puts crane on
+#                          the PATH of later steps
 #   role-accounts          checks both role ARNs and writes publishAccountId and pullAccountId to $GITHUB_OUTPUT
 #   precheck-version-tags  reads all the version tags before anything is written; fails if any is on another digest
 #   copy-version-tags      copies DIGEST from the staging repo to the public repo under the version tags, reading
@@ -21,7 +23,8 @@
 #   STAGING_PULL_ROLE_ARN  the read-only role in the staging account that the publish role assumes
 #   GITHUB_REPOSITORY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT   name and tag the pull role session
 #   RUNNER_TEMP, GITHUB_OUTPUT
-#   crane on the PATH
+#   crane on the PATH, from install-crane
+# install-crane: RUNNER_TEMP, RUNNER_ARCH (X64 or ARM64), GITHUB_PATH
 # role-accounts: PUBLISH_ROLE_ARN, STAGING_PULL_ROLE_ARN, GITHUB_OUTPUT
 # Test-only setting: REGISTRY_RETRY_SCALE multiplies the read-back pause (0 in tests).
 #
@@ -60,6 +63,12 @@ readonly AWS_TIMEOUTS="--cli-read-timeout 30 --cli-connect-timeout 10"
 # the run logs show.
 readonly READ_BACK_ATTEMPTS=6
 readonly READ_BACK_PAUSE=5
+# crane, pinned by version and by the sha256 of each release tarball, from the release's checksums.txt:
+# https://github.com/google/go-containerregistry/releases/tag/v0.22.1
+# Dependabot cannot update this: bump the version and both checksums together, by hand.
+readonly CRANE_VERSION=v0.22.1
+readonly CRANE_SHA256_X86_64=0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+readonly CRANE_SHA256_ARM64=898c0cff975f898a33e8c4580bdafb0e7c02c7faa33374e946762f97c4ab7110
 
 ok() { echo "✔ $*"; }
 fail() {
@@ -93,6 +102,14 @@ require() {
 			fail "$name is not set"
 		fi
 	done
+}
+
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{ print $1 }'
+	else
+		shasum -a 256 "$1" | awk '{ print $1 }'
+	fi
 }
 
 # --- inputs ------------------------------------------------------------------------------------------------------
@@ -214,8 +231,8 @@ read_public_tag() {
 }
 
 # read_back <tag> <expected> <tolerated>... : after a write, reads the tag until it shows <expected>. A value in
-# <tolerated> ("null" means absent) is a read that hasn't caught up yet: retried, up to READ_BACK_ATTEMPTS reads
-# READ_BACK_PAUSE seconds apart, then a failure. Any other digest is a failure at once, never retried. Every read is printed, so a run's log shows how long the write took to become visible.
+# <tolerated> ("null" means absent) is retried, up to READ_BACK_ATTEMPTS reads READ_BACK_PAUSE seconds apart, then
+# a failure. Any other digest is a failure at once, never retried. Every read is printed.
 read_back() {
 	local tag=$1 expected=$2 attempt=1 value known tolerated
 	shift 2
@@ -237,7 +254,7 @@ read_back() {
 			fail "after the write, $tag points at $value, not $expected; stopping"
 		fi
 		if ((attempt >= READ_BACK_ATTEMPTS)); then
-			fail "write not visible after $attempt attempts: $tag still reads as ${tag_digest:-absent}, not $expected"
+			fail "after $attempt reads, $tag still reads as ${tag_digest:-absent}, not $expected"
 		fi
 		sleep $((READ_BACK_PAUSE * ${REGISTRY_RETRY_SCALE:-1}))
 		attempt=$((attempt + 1))
@@ -406,6 +423,50 @@ cmd_no_env_credentials() {
 	ok "no AWS credentials in the job environment"
 }
 
+cmd_install_crane() {
+	local asset expected actual url rc=0
+	require RUNNER_TEMP RUNNER_ARCH GITHUB_PATH
+	case "$RUNNER_ARCH" in
+	X64)
+		asset=Linux_x86_64
+		expected=$CRANE_SHA256_X86_64
+		;;
+	ARM64)
+		asset=Linux_arm64
+		expected=$CRANE_SHA256_ARM64
+		;;
+	*) fail "no pinned crane for RUNNER_ARCH $(printf '%q' "$RUNNER_ARCH") (only X64 and ARM64)" ;;
+	esac
+	make_work_dir
+	url="https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION/go-containerregistry_$asset.tar.gz"
+	# --retry covers timeouts and the transient HTTP errors (408, 429, 500, 502, 503, 504); a failed job needs a
+	# new approval.
+	curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 120 \
+		--output "$work_dir/crane.tar.gz" "$url" || rc=$?
+	if ((rc != 0)); then
+		fail "could not download $url (curl exit $rc)"
+	fi
+	if ! actual=$(sha256_of "$work_dir/crane.tar.gz") || [[ -z "$actual" ]]; then
+		fail "could not hash the crane $CRANE_VERSION download"
+	fi
+	if [[ "$actual" != "$expected" ]]; then
+		fail "the crane $CRANE_VERSION download hashes to $actual, not the pinned $expected"
+	fi
+	mkdir -p "$work_dir/extract" || fail "could not create a temp directory"
+	if ! tar -xzf "$work_dir/crane.tar.gz" -C "$work_dir/extract" crane; then
+		fail "could not extract crane from the $CRANE_VERSION download"
+	fi
+	if [[ ! -f "$work_dir/extract/crane" || -L "$work_dir/extract/crane" ]]; then
+		fail "the $CRANE_VERSION download has no regular file named crane"
+	fi
+	if ! mkdir -p "$RUNNER_TEMP/bin" || ! mv "$work_dir/extract/crane" "$RUNNER_TEMP/bin/crane" ||
+		! chmod 0755 "$RUNNER_TEMP/bin/crane"; then
+		fail "could not install crane into $RUNNER_TEMP/bin"
+	fi
+	printf '%s\n' "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+	ok "installed crane $CRANE_VERSION ($asset, sha256 $expected) into $RUNNER_TEMP/bin"
+}
+
 cmd_role_accounts() {
 	local publish_account
 	require GITHUB_OUTPUT
@@ -513,11 +574,12 @@ cmd_copy_version_tags() {
 
 case "${1:-}" in
 no-env-credentials) cmd_no_env_credentials ;;
+install-crane) cmd_install_crane ;;
 role-accounts) cmd_role_accounts ;;
 precheck-version-tags) cmd_precheck_version_tags ;;
 copy-version-tags) cmd_copy_version_tags ;;
 *)
-	echo "usage: $0 no-env-credentials | role-accounts | precheck-version-tags | copy-version-tags" >&2
+	echo "usage: $0 no-env-credentials | install-crane | role-accounts | precheck-version-tags | copy-version-tags" >&2
 	exit 2
 	;;
 esac
