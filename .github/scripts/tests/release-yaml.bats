@@ -235,3 +235,80 @@ YAML
 		return 1
 	fi
 }
+
+# --- anonymous verify jobs -------------------------------------------------------------------------------------------
+
+# check_no_credential_path <file> <job id> : the job has no way to get AWS credentials. Outside comments: no
+# id-token, no environment, no secrets reference, no uses: but harden-runner and checkout, and no AWS_* name in the
+# workflow, job or step env: except "AWS_EC2_METADATA_DISABLED: 'true'". Prints each problem; returns 1 if any.
+check_no_credential_path() {
+	local file=$1 job=$2 block uses name bad=0
+	block=$(job_block "$file" "$job" | grep -v '^ *#' || true)
+	if [[ -z "$block" ]]; then
+		echo "no job $job"
+		return 1
+	fi
+	if [[ "$block" == *id-token* ]]; then
+		echo "$job has id-token"
+		bad=1
+	fi
+	if [[ "$(count_matching "$block" '^ +environment:')" != 0 ]]; then
+		echo "$job has an environment"
+		bad=1
+	fi
+	# The word secrets in any form (secrets.X, secrets['X'], toJSON(secrets)), but not inside a name like the repo's.
+	if printf '%s\n' "$block" | grep -qE '(^|[^A-Za-z0-9_/-])secrets([^A-Za-z0-9_-]|$)'; then
+		echo "$job reads secrets"
+		bad=1
+	fi
+	for uses in $(printf '%s\n' "$block" | sed -nE 's/^ +(- )?uses: ([^ ]+).*/\2/p'); do
+		case "$uses" in
+		step-security/harden-runner@* | actions/checkout@*) ;;
+		*)
+			echo "$job uses $uses"
+			bad=1
+			;;
+		esac
+	done
+	for name in $(printf '%s\n' "$block" | grep -oE 'AWS_[A-Z0-9_]+' | sort -u); do
+		if [[ "$name" != AWS_EC2_METADATA_DISABLED ]]; then
+			echo "$job names $name"
+			bad=1
+		fi
+	done
+	if [[ "$block" == *AWS_EC2_METADATA_DISABLED* &&
+		"$(count_matching "$block" "^ +AWS_EC2_METADATA_DISABLED: 'true'$")" != "$(count_matching "$block" AWS_EC2_METADATA_DISABLED)" ]]; then
+		echo "$job sets AWS_EC2_METADATA_DISABLED to something other than 'true'"
+		bad=1
+	fi
+	if awk '/^jobs:$/ { exit } !/^ *#/' "$file" | grep -q 'AWS_'; then
+		echo "the workflow names an AWS_ variable outside its jobs"
+		bad=1
+	fi
+	return "$bad"
+}
+
+@test "verify-image: has no way to get AWS credentials" {
+	run check_no_credential_path "$RELEASE" verify-image
+	expect_status 0
+	expect_eq "$output" ""
+}
+
+@test "verify-image: needs build and publish-version-tags, reads only, and checks build's digest" {
+	local block permissions step
+	block=$(job_block "$RELEASE" verify-image)
+	expect_eq "$(printf '%s\n' "$block" | needs_of | tr '\n' ' ')" "build publish-version-tags "
+	expect_eq "$(count_matching "$block" "^    # Keep this guard in any future \`if:\`\\.$")" 1
+	expect_eq "$(count_matching "$block" "^    if: github\\.repository == 'aws/secrets-store-csi-driver-provider-aws'$")" 1
+	permissions=$(printf '%s\n' "$block" | awk '/^    permissions:$/ { inside = 1; next } inside && /^    [^ ]/ { exit } inside')
+	expect_eq "$permissions" "      contents: read"
+	expect_eq "$(count_matching "$block" '^    runs-on: ubuntu-24\.04$')" 1
+	expect_eq "$(count_matching "$block" '^    timeout-minutes: 15$')" 1
+	step_block "$block" "Checkout" | grep -qxF '          persist-credentials: false'
+	step=$(step_block "$block" "Check the version tags anonymously")
+	expect_eq "$(count_matching "$step" '^        run: bash \.github/scripts/verify-public-image\.sh version-tags$')" 1
+	expect_eq "$(count_matching "$step" '^          DIGEST: \$\{\{ needs\.build\.outputs\.digest \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          PUBLIC_REPO: \$\{\{ needs\.publish-version-tags\.outputs\.publicRepo \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          VERSION_TAGS: \$\{\{ steps\.tags\.outputs\.versionTags \}\}$')" 1
+	expect_eq "$(count_matching "$step" "^          AWS_EC2_METADATA_DISABLED: 'true'$")" 1
+}

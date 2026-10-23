@@ -2,7 +2,7 @@ name: Release
 
 # Builds the image once (linux/amd64 + linux/arm64), runs the integration tests on that exact digest, adds the
 # release tag to that digest in the private staging repo, then copies that same digest to ECR Public under the
-# three version tags.
+# three version tags, and checks anonymously, with no AWS credentials, that each of them serves it.
 #
 # "Practice run" (ticked by default) uses the version already on main and tags rehearsal-<run id>, which the
 # staging repo deletes after 14 days. It publishes to the sandbox public repo (the sandbox environment, no
@@ -29,6 +29,8 @@ name: Release
 #   workflow can't move a public version tag, so start a new run (practice) or release a new version (real).
 # - "Copy the tested image to the version tags" stopped on a tag that points at another digest: don't re-run;
 #   check that tag first.
+# - verify-image failed: it only reads and needs no approval, so re-run it alone (Re-run failed jobs). If it said a
+#   tag "is on another image", don't re-run; check that tag first.
 
 on:
   workflow_dispatch:
@@ -416,3 +418,44 @@ jobs:
       - name: Remove any registry logins left behind
         if: always()
         run: rm -rf "${RUNNER_TEMP:?}"/dc.*
+
+  # Reads the version tags back the way a customer does, with no way to get AWS credentials: no id-token
+  # permission, no environment, no secrets, and no actions besides harden-runner and checkout.
+  verify-image:
+    name: Verify the public image
+    needs: [build, publish-version-tags]
+    # Keep this guard in any future `if:`.
+    if: github.repository == 'aws/secrets-store-csi-driver-provider-aws'
+    # A fixed image, not ubuntu-latest: the check relies on the preinstalled curl and python3.
+    runs-on: ubuntu-24.04
+    # The script stops itself after 10 minutes; this is only a backstop.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Work out the public tags
+        id: tags
+        run: bash .github/scripts/public-tags.sh
+        env:
+          VERSION: ${{ inputs.version }}
+          PRACTICE: ${{ inputs.practice }}
+
+      - name: Check the version tags anonymously
+        run: bash .github/scripts/verify-public-image.sh version-tags
+        env:
+          # The script runs no AWS tools; this keeps any that might from asking the instance for credentials.
+          AWS_EC2_METADATA_DISABLED: 'true'
+          PUBLIC_REPO: ${{ needs.publish-version-tags.outputs.publicRepo }}
+          PRACTICE: ${{ inputs.practice }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          VERSION_TAGS: ${{ steps.tags.outputs.versionTags }}
