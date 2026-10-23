@@ -288,10 +288,13 @@ check_no_credential_path() {
 	return "$bad"
 }
 
-@test "verify-image: has no way to get AWS credentials" {
-	run check_no_credential_path "$RELEASE" verify-image
-	expect_status 0
-	expect_eq "$output" ""
+@test "verify-image and verify-alias-tags: have no way to get AWS credentials" {
+	local job
+	for job in verify-image verify-alias-tags; do
+		run check_no_credential_path "$RELEASE" "$job"
+		expect_status 0
+		expect_eq "$output" ""
+	done
 }
 
 @test "verify-image: needs build and publish-version-tags, reads only, and checks build's digest" {
@@ -379,4 +382,21 @@ check_no_credential_path() {
 	# Nothing runs between the freshness check and the alias writes.
 	expect_eq "$(printf '%s\n' "$block" | sed -n 's/^      - name: //p' | grep -A1 -xF "Check no newer release is published" | tail -n 1)" \
 		"Point the alias tags at the tested image"
+}
+
+# --- verify-alias-tags -----------------------------------------------------------------------------------------------
+
+@test "verify-alias-tags: needs the alias job, reads only, and checks build's digest against its digest list" {
+	local block permissions step
+	block=$(job_block "$RELEASE" verify-alias-tags)
+	expect_eq "$(printf '%s\n' "$block" | needs_of | tr '\n' ' ')" "build publish-version-tags publish-alias-tags "
+	expect_eq "$(count_matching "$block" "^    if: github\\.repository == 'aws/secrets-store-csi-driver-provider-aws'$")" 1
+	permissions=$(printf '%s\n' "$block" | awk '/^    permissions:$/ { inside = 1; next } inside && /^    [^ ]/ { exit } inside')
+	expect_eq "$permissions" "      contents: read"
+	expect_eq "$(count_matching "$block" '^    timeout-minutes: 15$')" 1
+	step=$(step_block "$block" "Check the alias tags anonymously")
+	expect_eq "$(count_matching "$step" '^        run: bash \.github/scripts/verify-public-image\.sh alias-tags$')" 1
+	expect_eq "$(count_matching "$step" '^          DIGEST: \$\{\{ needs\.build\.outputs\.digest \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          ALIAS_TAGS: \$\{\{ steps\.tags\.outputs\.aliasTags \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          PREVIOUS_DIGESTS: \$\{\{ needs\.publish-alias-tags\.outputs\.previousDigests \}\}$')" 1
 }
