@@ -7,13 +7,14 @@
 #   crane config --platform linux/<amd64|arm64> <staging repo>@<digest>
 #   crane copy <staging repo>@<digest> public.ecr.aws/<a>/<b>:<tag>
 #   crane manifest public.ecr.aws/<a>/<b>@<digest>
+#   crane tag public.ecr.aws/<a>/<b>@<digest> <tag>
 # with <registry> public.ecr.aws or <account>.dkr.ecr.<region>.amazonaws.com, and <staging repo> <registry>/ascp.
 # Every call must run with DOCKER_CONFIG set to a directory under $RUNNER_TEMP named dc.*: crane reads its logins
 # from there, and an unset one would mean ~/.docker.
 #
 # $FAKE_DIR/crane.routes has one line per request: "<key> <reply>[,<reply>...]". The Nth call with a key gets the
 # Nth reply (the last one repeats). Keys: login:<registry> (optional; no route means success),
-# config:linux/<arch>, copy:<tag>, manifest. A reply is $FAKE_DIR/crane/<reply>.out (stdout, byte for
+# config:linux/<arch>, copy:<tag>, manifest, tag:<tag>. A reply is $FAKE_DIR/crane/<reply>.out (stdout, byte for
 # byte), plus <reply>.err and <reply>.exit for a failure. The reply "signal:TERM" sends SIGTERM to the calling
 # script and exits 143, as if the job had been cancelled during that call. Messages are made up, not recorded.
 #
@@ -61,6 +62,11 @@ copy\ *)
 manifest\ *)
 	[[ $# -eq 2 && "$2" =~ $PUBLIC_DIGEST_RE ]] || violation "unexpected manifest arguments: $*"
 	key=manifest
+	;;
+tag\ *)
+	[[ $# -eq 3 && "$2" =~ $PUBLIC_DIGEST_RE && "$3" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] ||
+		violation "unexpected tag arguments: $*"
+	key="tag:$3"
 	;;
 *) violation "unexpected call: $*" ;;
 esac

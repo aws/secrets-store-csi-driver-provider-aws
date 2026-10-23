@@ -9,6 +9,10 @@
 #   precheck-version-tags  reads all the version tags before anything is written; fails if any is on another digest
 #   copy-version-tags      copies DIGEST from the staging repo to the public repo under the version tags, reading
 #                          each one back, then writes publicRepo to $GITHUB_OUTPUT
+#   check-fresh            fails if a release higher than VERSION is published; writes previousReleaseDigest, the
+#                          digest of the highest release below VERSION (real runs; empty in practice runs)
+#   copy-alias-tags        points the alias tags at DIGEST in order, latest last, reading each one back and all of
+#                          them again at the end; writes previousDigests, the digests they pointed at before this run
 #
 # Inputs (environment). precheck-version-tags and copy-version-tags:
 #   PUBLIC_REPO            public.ecr.aws/<namespace>/<name>; the production repo exactly when PRACTICE is false
@@ -26,7 +30,12 @@
 #   crane on the PATH, from install-crane
 # install-crane: RUNNER_TEMP, RUNNER_ARCH (X64 or ARM64), GITHUB_PATH
 # role-accounts: PUBLISH_ROLE_ARN, STAGING_PULL_ROLE_ARN, GITHUB_OUTPUT
-# Test-only setting: REGISTRY_RETRY_SCALE multiplies the read-back pause (0 in tests).
+# check-fresh: the first list but DIGEST and VERSION_TAGS (a practice run needs only PUBLIC_REPO and PRACTICE from
+#   it); VERSION, GITHUB_OUTPUT
+# copy-alias-tags: the first list but VERSION_TAGS; ALIAS_TAGS, PREVIOUS_RELEASE_DIGEST, RUNNER_TEMP, GITHUB_OUTPUT,
+#   crane on the PATH
+# Test-only setting: REGISTRY_RETRY_SCALE multiplies the read-back pause (0 in tests); see registry-lib.sh for the
+# others check-fresh's anonymous read uses.
 #
 # Credentials: the publish role's keys come in on the step's env:. copy-version-tags assumes the pull role itself
 # and keeps those keys in shell variables: each aws call that needs them gets them on that one command, nothing is
@@ -141,6 +150,29 @@ require_version_tags() {
 	fi
 	if [[ "$PRACTICE" == false && ! "$base" =~ $VERSION_RE ]]; then
 		fail "real run, but the version tags $VERSION_TAGS are not X.Y.Z tags"
+	fi
+}
+
+# Sets alias_list (an array) from ALIAS_TAGS: latest-amd64 latest-arm64 latest-linux-amd64 latest-linux-arm64
+# <major> latest, each prefixed "rehearsal-<run id>-" in a practice run. latest is last.
+require_alias_tags() {
+	local prefix="" major expected
+	require ALIAS_TAGS
+	read -r -a alias_list <<<"$ALIAS_TAGS"
+	if [[ "$PRACTICE" == true ]]; then
+		prefix=${ALIAS_TAGS%%latest-amd64 *}
+		if [[ ! "${prefix%-}" =~ $REHEARSAL_RE || "$prefix" != *- ]]; then
+			fail "practice run, but the alias tags $(printf '%q' "$ALIAS_TAGS") are not rehearsal-<run id>- tags"
+		fi
+	fi
+	major=""
+	if ((${#alias_list[@]} == 6)); then
+		major=${alias_list[4]#"$prefix"}
+	fi
+	expected="${prefix}latest-amd64 ${prefix}latest-arm64 ${prefix}latest-linux-amd64 ${prefix}latest-linux-arm64"
+	expected="$expected $prefix$major ${prefix}latest"
+	if [[ ! "$major" =~ $DIGITS_RE || "$ALIAS_TAGS" != "$expected" ]]; then
+		fail "ALIAS_TAGS $(printf '%q' "$ALIAS_TAGS") is not the six alias tags, latest last"
 	fi
 }
 
@@ -326,16 +358,26 @@ crane_login() {
 	ok "logged in to $registry ($role)"
 }
 
-# Points crane at a new, private DOCKER_CONFIG under RUNNER_TEMP and logs it in to both registries.
-crane_logins() {
+# Points crane at a new, private DOCKER_CONFIG under RUNNER_TEMP.
+private_docker_config() {
 	docker_config=$(mktemp -d "$RUNNER_TEMP/dc.XXXXXX") || fail "could not create a temp DOCKER_CONFIG"
-	# crane reads DOCKER_CONFIG from its own environment; without the export both logins would go to ~/.docker.
+	# crane reads DOCKER_CONFIG from its own environment; without the export its logins would go to ~/.docker.
 	export DOCKER_CONFIG=$docker_config
+}
+
+# Logs crane in to public.ecr.aws with the publish role.
+public_login() {
+	# shellcheck disable=SC2086 # AWS_TIMEOUTS is split into its flags on purpose
+	crane_login "$PUBLIC_REGISTRY" 'publish role' aws ecr-public get-login-password --region "$PUBLIC_REGION" $AWS_TIMEOUTS
+}
+
+# Points crane at a new, private DOCKER_CONFIG and logs it in to both registries.
+crane_logins() {
+	private_docker_config
 	# shellcheck disable=SC2086 # AWS_TIMEOUTS is split into its flags on purpose
 	crane_login "$staging_registry" 'pull role' \
 		with_pull_credentials aws ecr get-login-password --region "$staging_region" $AWS_TIMEOUTS
-	# shellcheck disable=SC2086 # AWS_TIMEOUTS is split into its flags on purpose
-	crane_login "$PUBLIC_REGISTRY" 'publish role' aws ecr-public get-login-password --region "$PUBLIC_REGION" $AWS_TIMEOUTS
+	public_login
 }
 
 # run_crane <what> <args>... : runs one crane command, output to $work_dir/crane-out. Fails with its output.
@@ -570,6 +612,157 @@ cmd_copy_version_tags() {
 	ok "published $PUBLIC_REPO@$DIGEST as ${tag_list[*]}"
 }
 
+# Moving the aliases is wrong only if a higher release is already published, so only that (or a failed read)
+# stops the run. Only releases above VERSION matter here.
+# A real run lists the production repo's images with the publish role; a practice run reads the production repo's
+# tag list anonymously (its own repo is the sandbox one).
+cmd_check_fresh() {
+	local rc=0 listing result higher previous previous_digest
+	check_target || exit 1
+	require VERSION GITHUB_OUTPUT
+	if [[ ! "$VERSION" =~ $VERSION_RE ]]; then
+		fail "VERSION $(printf '%q' "$VERSION") is not X.Y.Z"
+	fi
+	make_work_dir
+	if [[ "$PRACTICE" == false ]]; then
+		public_name=${PUBLIC_REPO##*/}
+		require_retries
+		require_publish_account
+		# The AWS CLI follows describe-images' pages itself and prints one merged list.
+		ecr_public describe-images || rc=$?
+		if ((rc != 0)); then
+			show_error
+			fail "could not list the images in $REGISTRY_PRODUCTION_REPO (exit $rc)"
+		fi
+		listing=describe-images
+	else
+		REGISTRY_WORK_DIR=$work_dir
+		REGISTRY_REPO_PATH=${REGISTRY_PRODUCTION_REPO#"$PUBLIC_REGISTRY/"}
+		REGISTRY_DEADLINE=${REGISTRY_DEADLINE:-300}
+		list_tags "$work_dir/out" || rc=$?
+		if ((rc != 0)); then
+			fail "could not read the tags of $REGISTRY_PRODUCTION_REPO (see the error above)"
+		fi
+		listing=tags
+	fi
+	# Prints "<highest release above VERSION> <highest release below VERSION> <its digest>", "-" for none (the
+	# digest is "-" too when reading the tag list).
+	if ! result=$(python3 -I -c '
+import json, re, sys
+listing, path, version = sys.argv[1:4]
+release = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+digest_re = re.compile(r"sha256:[0-9a-f]{64}")
+def key(tag):
+    return tuple(int(part) for part in tag.split("."))
+releases = {}
+try:
+    if listing == "describe-images":
+        for image in json.load(open(path))["imageDetails"]:
+            digest, tags = image["imageDigest"], image.get("imageTags", [])
+            if not isinstance(digest, str) or not digest_re.fullmatch(digest) or not isinstance(tags, list):
+                sys.exit(1)
+            for tag in tags:
+                if isinstance(tag, str) and release.fullmatch(tag):
+                    releases[tag] = digest
+    else:
+        for line in open(path):
+            if release.fullmatch(line.rstrip("\n")):
+                releases[line.rstrip("\n")] = "-"
+except Exception:
+    sys.exit(1)
+higher = [tag for tag in releases if key(tag) > key(version)]
+lower = [tag for tag in releases if key(tag) < key(version)]
+previous = max(lower, key=key) if lower else "-"
+print(max(higher, key=key) if higher else "-", previous, releases.get(previous, "-"))
+' "$listing" "$work_dir/out" "$VERSION"); then
+		fail "could not read the releases of $REGISTRY_PRODUCTION_REPO (unexpected reply)"
+	fi
+	read -r higher previous previous_digest <<<"$result"
+	if [[ "$higher" != - ]]; then
+		fail "a newer release ($higher) exists; refusing to move aliases backwards"
+	fi
+	if [[ "$previous_digest" == - ]]; then
+		previous_digest=""
+	fi
+	echo "previousReleaseDigest=$previous_digest" >>"$GITHUB_OUTPUT"
+	if [[ "$previous" == - ]]; then
+		ok "no release higher than $VERSION is published, and none lower"
+	else
+		ok "no release higher than $VERSION is published; the one before it is $previous${previous_digest:+ ($previous_digest)}"
+	fi
+}
+
+# add_tolerated <digest or null> : adds it to the tolerated array, unless it is DIGEST or already there.
+add_tolerated() {
+	local value
+	if [[ "$1" == "$DIGEST" ]]; then
+		return 0
+	fi
+	for value in "${tolerated[@]}"; do
+		if [[ "$value" == "$1" ]]; then
+			return 0
+		fi
+	done
+	tolerated+=("$1")
+}
+
+# Points each alias tag at DIGEST, in ALIAS_TAGS order (latest last), and reads every alias back again at the end.
+cmd_copy_alias_tags() {
+	local tag value i json
+	local -a before tolerated
+	check_target || exit 1
+	public_name=${PUBLIC_REPO##*/}
+	require_retries
+	require_digest
+	require_alias_tags
+	require_publish_account
+	require RUNNER_TEMP GITHUB_OUTPUT
+	if [[ -n "${PREVIOUS_RELEASE_DIGEST:-}" && ! "$PREVIOUS_RELEASE_DIGEST" =~ $DIGEST_RE ]]; then
+		fail "PREVIOUS_RELEASE_DIGEST $(printf '%q' "$PREVIOUS_RELEASE_DIGEST") is not sha256:<64 lowercase hex>"
+	fi
+	# read_back scales its pause by this, so it must be a whole number.
+	if [[ ! "${REGISTRY_RETRY_SCALE:-1}" =~ $WHOLE_NUMBER_RE ]]; then
+		fail "REGISTRY_RETRY_SCALE must be a whole number"
+	fi
+	make_work_dir
+
+	# Every alias is read before anything is written. The read-backs accept, besides DIGEST, absent ("null"), every
+	# digest an alias points at now, and the previous release.
+	tolerated=(null)
+	for tag in "${alias_list[@]}"; do
+		read_public_tag "$tag"
+		echo "  $tag points at ${tag_digest:-nothing (absent)}"
+		before+=("${tag_digest:-null}")
+		add_tolerated "${tag_digest:-null}"
+	done
+	add_tolerated "${PREVIOUS_RELEASE_DIGEST:-null}"
+	# Every entry is null or a checked digest, so this is valid JSON.
+	json=null
+	for value in "${tolerated[@]:1}"; do
+		json="$json,\"$value\""
+	done
+	echo "previousDigests=[$json]" >>"$GITHUB_OUTPUT"
+
+	private_docker_config
+	public_login
+	i=0
+	for tag in "${alias_list[@]}"; do
+		if [[ "${before[i]}" == "$DIGEST" ]]; then
+			ok "$tag already points at $DIGEST"
+		else
+			run_crane "point $tag at $PUBLIC_REPO@$DIGEST" tag "$PUBLIC_REPO@$DIGEST" "$tag"
+			read_back "$tag" "$DIGEST" "${tolerated[@]}"
+		fi
+		i=$((i + 1))
+	done
+
+	# A last read of every alias, after latest moved.
+	for tag in "${alias_list[@]}"; do
+		read_back "$tag" "$DIGEST" "${tolerated[@]}"
+	done
+	ok "every alias of $PUBLIC_REPO points at $DIGEST: ${alias_list[*]}"
+}
+
 # --- main --------------------------------------------------------------------------------------------------------
 
 case "${1:-}" in
@@ -578,8 +771,11 @@ install-crane) cmd_install_crane ;;
 role-accounts) cmd_role_accounts ;;
 precheck-version-tags) cmd_precheck_version_tags ;;
 copy-version-tags) cmd_copy_version_tags ;;
+check-fresh) cmd_check_fresh ;;
+copy-alias-tags) cmd_copy_alias_tags ;;
 *)
 	echo "usage: $0 no-env-credentials | install-crane | role-accounts | precheck-version-tags | copy-version-tags" >&2
+	echo "       $0 check-fresh | copy-alias-tags" >&2
 	exit 2
 	;;
 esac

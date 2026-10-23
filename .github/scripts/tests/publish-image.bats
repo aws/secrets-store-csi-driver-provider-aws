@@ -16,6 +16,8 @@ SANDBOX=public.ecr.aws/example-sandbox/secrets-store-csi-driver-provider-aws
 PULL_ARN=arn:aws:iam::$STAGING_ACCOUNT:role/ExamplePullRole
 PUBLISH_ARN=arn:aws:iam::$PUBLISH_ACCOUNT:role/ExamplePublishRole
 OTHER_DIGEST=sha256:1111111111111111111111111111111111111111111111111111111111111111
+OLDER_DIGEST=sha256:2222222222222222222222222222222222222222222222222222222222222222
+ALIASES="rehearsal-7-latest-amd64 rehearsal-7-latest-arm64 rehearsal-7-latest-linux-amd64 rehearsal-7-latest-linux-arm64 rehearsal-7-3 rehearsal-7-latest"
 TIMEOUTS="--output json --cli-read-timeout 30 --cli-connect-timeout 10"
 PUBLIC_ARGS="--registry-id $PUBLISH_ACCOUNT --repository-name secrets-store-csi-driver-provider-aws --region us-east-1"
 LABEL=com.amazonaws.secrets-store-csi-driver-provider-aws.release.mode
@@ -47,7 +49,8 @@ setup() {
 	export AWS_SESSION_TOKEN=TOKENPUBLISHMARKER
 	export GITHUB_REPOSITORY=aws/secrets-store-csi-driver-provider-aws GITHUB_RUN_ID=7 GITHUB_RUN_ATTEMPT=1
 	export GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output" GITHUB_PATH="$BATS_TEST_TMPDIR/github_path"
-	export RUNNER_ARCH=X64
+	export RUNNER_ARCH=X64 VERSION=3.1.4 ALIAS_TAGS=$ALIASES REGISTRY_URL=$ECR REGISTRY_PACE_SECONDS=0
+	unset PREVIOUS_RELEASE_DIGEST
 	: >"$GITHUB_OUTPUT"
 	: >"$GITHUB_PATH"
 }
@@ -112,12 +115,13 @@ public_found() {
 			imageManifestMediaType: "application/vnd.oci.image.index.v1+json"}]}')"
 }
 
-# The replies every test can name: absent, ours (DIGEST) and foreign (OTHER_DIGEST).
+# The replies every test can name: absent, ours (DIGEST), foreign (OTHER_DIGEST) and older (OLDER_DIGEST).
 public_replies() {
 	aws_error absent ImageNotFoundException DescribeImages \
 		"The image with imageId {imageDigest:'null', imageTag:'x'} does not exist within the repository"
 	public_found ours "$DIGEST"
 	public_found foreign "$OTHER_DIGEST"
+	public_found older "$OLDER_DIGEST"
 }
 
 # tag_route <tag> <reply>[,<reply>...] : the replies to describe-images for one public tag, in call order.
@@ -620,12 +624,133 @@ crane manifest $SANDBOX@$DIGEST"
 	expect_clean
 }
 
+# --- check-fresh -------------------------------------------------------------------------------------------------
+
+# releases <tag>=<digest>... : the production repo's describe-images listing, one image per tag.
+releases() {
+	aws_reply listing "$(jq -n '{imageDetails: [$ARGS.positional[] | split("=") |
+		{imageDigest: .[1], imageTags: [.[0]]}]}' --args "$@")"
+	aws_route public:describe-images listing
+}
+
+@test "check-fresh: a higher release stops the run" {
+	real_run
+	releases "3.1.4=$OLDER_DIGEST" "3.2.0=$OTHER_DIGEST" "latest=$OTHER_DIGEST"
+	VERSION=3.1.5 publish check-fresh
+	expect_status 1
+	has_line "✘ a newer release (3.2.0) exists; refusing to move aliases backwards"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "check-fresh: a listing of only older releases passes and names the previous release's digest" {
+	real_run
+	releases "3.1.4=$OLDER_DIGEST" "3.0.1=$OTHER_DIGEST" "3.1.4-linux-amd64=$OLDER_DIGEST"
+	VERSION=3.1.5 publish check-fresh
+	expect_status 0
+	has_line "✔ no release higher than 3.1.5 is published; the one before it is 3.1.4 ($OLDER_DIGEST)"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" "previousReleaseDigest=$OLDER_DIGEST"
+	expect_eq "$(cat "$FAKE_DIR/aws-public.calls")" "ecr-public describe-images $PUBLIC_ARGS $TIMEOUTS | retry=standard,5"
+}
+
+@test "check-fresh: a failed read stops the run" {
+	real_run
+	aws_error denied AccessDeniedException DescribeImages "User is not authorized to perform ecr-public:DescribeImages"
+	aws_route public:describe-images denied
+	publish check-fresh
+	expect_status 1
+	has_line "✘ could not list the images in $PROD (exit 254)"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+	expect_clean
+}
+
+# --- copy-alias-tags ---------------------------------------------------------------------------------------------
+
+# Routes for an alias run that passes: the public login, and every alias absent, then reading back as ours.
+alias_routes() {
+	local tag
+	public_replies
+	aws_reply public-password PUBLICPASSWORDMARKER
+	aws_route public:get-login-password public-password
+	: >"$FAKE_DIR/crane/ok.out"
+	for tag in $ALIASES; do
+		tag_route "$tag" absent,ours
+		crane_route "tag:$tag" ok
+	done
+}
+
+# The aliases crane wrote, in order.
+crane_tags() { awk '$1 == "tag" { print $3 }' "$FAKE_DIR/crane.calls"; }
+
+@test "copy-alias-tags: writes every alias in order, latest last, then reads all six back again" {
+	local tag expected="describe-images imageTag=rehearsal-7-latest"
+	alias_routes
+	publish copy-alias-tags
+	expect_status 0
+	expect_eq "$(crane_tags | tr '\n' ' ')" "$ALIASES "
+	# After the latest write: its read-back, one more read of each alias, and nothing else.
+	for tag in $ALIASES; do
+		expected="$expected"$'\n'"describe-images imageTag=$tag"
+	done
+	expect_eq "$(order_summary | awk 'f { print $3, $4 } /^crane tag rehearsal-7-latest$/ { f = 1 }')" "$expected"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" "previousDigests=[null]"
+	has_line "✔ every alias of $SANDBOX points at $DIGEST: $ALIASES"
+	expect_clean
+}
+
+@test "copy-alias-tags: a re-run skips the aliases already on the build digest" {
+	local tag
+	alias_routes
+	for tag in rehearsal-7-latest-amd64 rehearsal-7-latest-arm64 rehearsal-7-latest-linux-amd64; do
+		tag_route "$tag" ours
+	done
+	publish copy-alias-tags
+	expect_status 0
+	has_line "✔ rehearsal-7-latest-arm64 already points at $DIGEST"
+	expect_eq "$(crane_tags | tr '\n' ' ')" "rehearsal-7-latest-linux-arm64 rehearsal-7-3 rehearsal-7-latest "
+	expect_eq "$(cat "$GITHUB_OUTPUT")" "previousDigests=[null]"
+}
+
+@test "copy-alias-tags: a signal mid-loop stops further writes, leaves latest unmoved and removes DOCKER_CONFIG" {
+	alias_routes
+	crane_route tag:rehearsal-7-latest-linux-amd64 signal:TERM
+	publish copy-alias-tags
+	expect_status 143
+	expect_eq "$(crane_tags | tr '\n' ' ')" "rehearsal-7-latest-amd64 rehearsal-7-latest-arm64 rehearsal-7-latest-linux-amd64 "
+	expect_eq "$(describes_of rehearsal-7-latest)" 1
+	expect_clean
+}
+
+@test "copy-alias-tags: the final read-back stops on a digest no alias pointed at" {
+	alias_routes
+	tag_route rehearsal-7-latest-amd64 absent,ours,foreign
+	publish copy-alias-tags
+	expect_status 1
+	has_line "✘ after the write, rehearsal-7-latest-amd64 points at $OTHER_DIGEST, not $DIGEST; stopping"
+	expect_eq "$(crane_tags | wc -l | tr -d ' ')" 6
+	expect_clean
+}
+
+@test "copy-alias-tags: an alias on an earlier digest is read again until it shows the build digest" {
+	local tag
+	alias_routes
+	for tag in $ALIASES; do
+		tag_route "$tag" older,older,older,ours
+	done
+	publish copy-alias-tags
+	expect_status 0
+	expect_eq "$(cat "$GITHUB_OUTPUT")" "previousDigests=[null,\"$OLDER_DIGEST\"]"
+	expect_eq "$(describes_of rehearsal-7-latest-amd64)" 5
+	has_line "  read back rehearsal-7-latest-amd64 (attempt 2): $OLDER_DIGEST"
+	has_line "  read back rehearsal-7-latest-amd64 (attempt 3): $DIGEST"
+}
+
 # --- every command -----------------------------------------------------------------------------------------------
 
 @test "an unknown command is a usage error that lists only the publish commands" {
 	publish verify
 	expect_status 2
-	expect_eq "$output" "usage: $SCRIPT no-env-credentials | install-crane | role-accounts | precheck-version-tags | copy-version-tags"
+	expect_eq "$output" "usage: $SCRIPT no-env-credentials | install-crane | role-accounts | precheck-version-tags | copy-version-tags
+       $SCRIPT check-fresh | copy-alias-tags"
 	publish
 	expect_status 2
 }

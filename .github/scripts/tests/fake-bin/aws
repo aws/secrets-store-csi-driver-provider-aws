@@ -22,6 +22,7 @@
 #   aws ecr-public get-login-password --region us-east-1 --cli-read-timeout 30 --cli-connect-timeout 10
 #   aws ecr-public describe-images --registry-id <id> --repository-name secrets-store-csi-driver-provider-aws
 #       --region us-east-1 --image-ids imageTag=<tag> --output json --cli-read-timeout 30 --cli-connect-timeout 10
+#   the same describe-images without --image-ids (the whole repo's listing; key public:describe-images)
 #   aws sts assume-role --role-arn arn:aws:iam::<id>:role/<name> --role-session-name ascp-publish-<run>-<attempt>
 #       --duration-seconds 3600 --tags Key=Repository,Value=<owner/repo> Key=RunId,Value=<run> --region us-east-1
 #       --output json --cli-read-timeout 30 --cli-connect-timeout 10
@@ -87,6 +88,13 @@ if [[ "${1:-}" == ecr-public || "${1:-}" == sts ]]; then
 		replay public:get-login-password
 		;;
 	"ecr-public describe-images")
+		# The whole repo's listing (check-fresh): no --image-ids.
+		if [[ $n -eq 12 && "${args[0]}" == --registry-id && "${args[1]}" =~ ^[0-9]{12}$ &&
+			"${args[2]}" == --repository-name && "${args[3]}" == secrets-store-csi-driver-provider-aws &&
+			"${args[4]}" == --region && "${args[5]}" == us-east-1 && "${args[6]}" == --output &&
+			"${args[7]}" == json ]]; then
+			replay public:describe-images
+		fi
 		[[ $n -eq 14 && "${args[0]}" == --registry-id && "${args[1]}" =~ ^[0-9]{12}$ &&
 			"${args[2]}" == --repository-name &&
 			"${args[3]}" == secrets-store-csi-driver-provider-aws &&
