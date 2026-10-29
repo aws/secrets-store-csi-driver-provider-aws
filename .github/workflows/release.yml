@@ -1,12 +1,20 @@
 name: Release
 
+# "Practice run" (ticked by default) uses the version already on main. Untick it for a real release.
+
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, e.g. 3.1.5 (no "v")'
+        description: 'Version to release, e.g. 3.1.5 (no "v"). For a practice run, the version already on main.'
         required: true
         type: string
+      practice:
+        description: 'Practice run: uses the version already on main. Untick for a real release.'
+        type: boolean
+        default: true
+
+run-name: Release ${{ inputs.version }}${{ inputs.practice && ' (practice)' || '' }}
 
 permissions: {}
 
@@ -38,3 +46,4 @@ jobs:
         run: bash .github/scripts/validate-release-version.sh
         env:
           VERSION: ${{ inputs.version }}
+          PRACTICE: ${{ inputs.practice }}
