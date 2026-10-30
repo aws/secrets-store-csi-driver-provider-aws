@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 #
-# Tests for staging-image.sh (the Release workflow's steps against the private staging repo). Fake aws and docker
-# (fake-bin/) answer from per-test replies, so no test touches AWS or a registry.
+# Tests for staging-image.sh (the Release workflow's steps against the private staging repo). Fake aws, docker and
+# go (fake-bin/) answer from per-test replies, so no test touches AWS or a registry.
 
 load test_helper
 
@@ -9,6 +9,8 @@ SCRIPT="$SCRIPTS_DIR/staging-image.sh"
 ACCOUNT=123456789012
 REGISTRY=$ACCOUNT.dkr.ecr.us-west-2.amazonaws.com
 REPO=$REGISTRY/ascp
+OCI_INDEX=application/vnd.oci.image.index.v1+json
+OTHER_DIGEST=sha256:1111111111111111111111111111111111111111111111111111111111111111
 TIMEOUTS="--output json --cli-read-timeout 30 --cli-connect-timeout 10"
 ECR_ARGS="--registry-id $ACCOUNT --repository-name ascp --region us-west-2"
 
@@ -19,11 +21,20 @@ setup() {
 	: >"$FAKE_DIR/aws.calls"
 	: >"$FAKE_DIR/aws.keys"
 	: >"$FAKE_DIR/docker.calls"
+	: >"$FAKE_DIR/go.calls"
 	unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-	export DIGEST="sha256:$(printf 'd%.0s' {1..64})"
+
+	# The recorded public 3.1.4 index without its 2 attestation entries: the 2-platform index the build pushes
+	# (provenance and sbom are off). Made from recorded bytes; ECR's own reply for it is not recorded.
+	GOOD_INDEX="$BATS_TEST_TMPDIR/good-index.json"
+	jq -c '.manifests |= map(select(.platform.os != "unknown"))' "$FIXTURES/index-public-3.1.4.json" |
+		tr -d '\n' >"$GOOD_INDEX"
+	export DIGEST="sha256:$(digest_of "$GOOD_INDEX")"
 
 	export IMAGE_REPO=$REPO AWS_REGION=us-west-2 AWS_RETRY_MODE=standard AWS_MAX_ATTEMPTS=5
-	export PRACTICE=true STAGE_TAG=rehearsal-7
+	export PRACTICE=true STAGE_TAG=rehearsal-7 TESTING_TAG=rehearsal-7-testing VERSION=3.1.4
+	export ROOTFS="$BATS_TEST_TMPDIR/rootfs" GITHUB_OUTPUT="$BATS_TEST_TMPDIR/github_output"
+	: >"$GITHUB_OUTPUT"
 }
 
 teardown() {
@@ -32,6 +43,14 @@ teardown() {
 
 staging() {
 	run bash "$SCRIPT" "$@"
+}
+
+digest_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{ print $1 }'
+	else
+		shasum -a 256 "$1" | awk '{ print $1 }'
+	fi
 }
 
 # --- fake aws replies --------------------------------------------------------------------------------------------
@@ -63,10 +82,57 @@ describe_reply() {
 			imageManifestMediaType: "application/vnd.oci.image.index.v1+json"}]}' --args "$@")"
 }
 
+# manifest_reply <name> <manifest file> [media type] : batch-get-image returns these exact bytes.
+manifest_reply() {
+	local name=$1 file=$2 type=${3:-$OCI_INDEX}
+	aws_reply "$name" "$(jq -n --rawfile m "$file" --arg d "$DIGEST" --arg a "$ACCOUNT" --arg t "$type" '
+		{images: [{registryId: $a, repositoryName: "ascp", imageId: {imageDigest: $d}, imageManifest: $m,
+			imageManifestMediaType: $t}], failures: []}')"
+}
+
 not_found() {
 	aws_error "$1" ImageNotFoundException DescribeImages \
 		"The image with imageId {imageDigest:'null', imageTag:'$STAGE_TAG'} does not exist within the repository with name 'ascp' in the registry with id '$ACCOUNT'"
 }
+
+# Routes for a pushed build that passes every check-build check.
+good_build_routes() {
+	manifest_reply index "$GOOD_INDEX"
+	aws_route "batch-get-image:imageDigest=$DIGEST" index
+	describe_reply digest-tags "$DIGEST" "$TESTING_TAG"
+	aws_route "describe-images:imageDigest=$DIGEST" digest-tags
+	make_rootfs
+}
+
+# The build's local copy: linux_amd64/ and linux_arm64/, each with the binary and the certificate folders.
+make_rootfs() {
+	local arch
+	for arch in amd64 arm64; do
+		mkdir -p "$ROOTFS/linux_$arch/bin" "$ROOTFS/linux_$arch/etc/pki" "$ROOTFS/linux_$arch/etc/ssl/certs"
+		: >"$ROOTFS/linux_$arch/bin/secrets-store-csi-driver-provider-aws"
+		go_output "$arch" "s/3\\.1\\.4/$VERSION/g"
+	done
+}
+
+# go_output <arch> <sed expression> : the recorded `go version -m` output for <arch>, edited.
+go_output() {
+	sed -E "$2" "$FIXTURES/go-version-m-$1.txt" >"$FAKE_DIR/go-$1.out"
+}
+
+# Routes for a fresh stage: no other-mode tags, the tag is free, put-image works, and the tag then points at DIGEST.
+fresh_stage_routes() {
+	describe_reply digest-tags "$DIGEST" "$STAGE_TAG-testing"
+	aws_route "describe-images:imageDigest=$DIGEST" digest-tags
+	not_found tag-missing
+	describe_reply tag-staged "$DIGEST" "$STAGE_TAG-testing" "$STAGE_TAG"
+	aws_route "describe-images:imageTag=$STAGE_TAG" tag-missing,tag-staged
+	manifest_reply index "$GOOD_INDEX"
+	aws_route "batch-get-image:imageDigest=$DIGEST" index
+	aws_reply put-ok '{"image": {}}'
+	aws_route "put-image:$STAGE_TAG" put-ok
+}
+
+calls_for() { grep -c "^$1 " "$FAKE_DIR/aws.calls" || true; }
 
 # --- no-env-credentials ------------------------------------------------------------------------------------------
 
@@ -103,7 +169,7 @@ not_found() {
 }
 
 @test "check-free: a staged tag fails" {
-	export PRACTICE=false STAGE_TAG=3.1.5
+	export PRACTICE=false STAGE_TAG=3.1.5 TESTING_TAG=3.1.5-testing
 	describe_reply found "$DIGEST" 3.1.5 3.1.5-testing
 	aws_route "describe-images:imageTag=3.1.5" found
 	staging check-free
@@ -143,11 +209,154 @@ not_found() {
 	expect_eq "$(cat "$FAKE_DIR/docker.calls")" "logout $REGISTRY"
 }
 
+# --- check-build -------------------------------------------------------------------------------------------------
+
+@test "check-build: a good index passes and writes the digest" {
+	good_build_routes
+	staging check-build
+	expect_status 0
+	has_line "✔ $DIGEST is an image index ($OCI_INDEX)"
+	has_line "✔ platforms: linux/amd64 linux/arm64"
+	has_line "✔ amd64 binary: linux/amd64, no cgo, version 3.1.4"
+	has_line "✔ arm64 binary: linux/arm64, no cgo, version 3.1.4"
+	has_line "✔ $DIGEST carries rehearsal-7-testing"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" "digest=$DIGEST"
+	expect_eq "$(cat "$FAKE_DIR/aws.calls")" \
+		"batch-get-image $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=standard,5
+describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=standard,5"
+}
+
+@test "check-build: manifest bytes that don't hash to the digest fail" {
+	good_build_routes
+	printf '%s ' "$(cat "$GOOD_INDEX")" >"$BATS_TEST_TMPDIR/changed.json"
+	manifest_reply index "$BATS_TEST_TMPDIR/changed.json"
+	staging check-build
+	expect_status 1
+	has_line "✘ the manifest ECR returned hashes to sha256:$(digest_of "$BATS_TEST_TMPDIR/changed.json"), not $DIGEST"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "check-build: the recorded public index, with its 2 unknown/unknown attestations, fails" {
+	good_build_routes
+	DIGEST="sha256:$(digest_of "$FIXTURES/index-public-3.1.4.json")"
+	manifest_reply index "$FIXTURES/index-public-3.1.4.json"
+	aws_route "batch-get-image:imageDigest=$DIGEST" index
+	describe_reply digest-tags "$DIGEST" rehearsal-7-testing
+	aws_route "describe-images:imageDigest=$DIGEST" digest-tags
+	staging check-build
+	expect_status 1
+	has_line "✘ expected exactly linux/amd64 and linux/arm64, found: linux/amd64 linux/arm64 unknown/unknown unknown/unknown"
+}
+
+@test "check-build: a media type that isn't an index fails" {
+	good_build_routes
+	manifest_reply index "$GOOD_INDEX" application/vnd.oci.image.manifest.v1+json
+	staging check-build
+	expect_status 1
+	has_line "✘ $DIGEST is not an image index (media type application/vnd.oci.image.manifest.v1+json)"
+}
+
+@test "check-build: a version that only starts with VERSION fails (3.1.50 for 3.1.5)" {
+	export VERSION=3.1.5
+	good_build_routes
+	go_output arm64 's/3\.1\.4/3.1.50/g'
+	staging check-build
+	expect_status 1
+	has_line "✘ the arm64 binary's server.Version isn't 3.1.5 (ldflags: -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=3.1.50' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.ProviderVersion=3.1.50' -extldflags '-static')"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "check-build: the expected testing tag missing from the digest fails" {
+	good_build_routes
+	describe_reply digest-tags "$DIGEST"
+	staging check-build
+	expect_status 1
+	has_line "✘ $DIGEST doesn't carry the tag rehearsal-7-testing (tags: )"
+}
+
+# --- practice / real separation ----------------------------------------------------------------------------------
+
+@test "separation: a practice build whose digest has a release tag fails" {
+	good_build_routes
+	describe_reply digest-tags "$DIGEST" rehearsal-7-testing 3.1.4
+	staging check-build
+	expect_status 1
+	has_line "✘ practice run, but $DIGEST already has the release tag 3.1.4"
+	has_line "  aws ecr batch-delete-image --registry-id $ACCOUNT --repository-name ascp --region us-west-2 --image-ids imageTag=3.1.4"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "separation: stage with an other-mode tag fails before put-image" {
+	fresh_stage_routes
+	describe_reply digest-tags "$DIGEST" rehearsal-7-testing 3.1.4
+	staging stage
+	expect_status 1
+	has_line "✘ practice run, but $DIGEST already has the release tag 3.1.4"
+	expect_eq "$(calls_for put-image)" 0
+}
+
+# --- stage -------------------------------------------------------------------------------------------------------
+
+@test "stage: a fresh tag is added with put-image, with the exact arguments and bytes" {
+	fresh_stage_routes
+	staging stage
+	expect_status 0
+	has_line "✔ staged rehearsal-7"
+	has_line "$REPO:rehearsal-7@$DIGEST"
+	expect_eq "$(grep '^put-image ' "$FAKE_DIR/aws.calls")" \
+		"put-image $ECR_ARGS --image-tag rehearsal-7 --image-digest $DIGEST --image-manifest file://MANIFEST --image-manifest-media-type $OCI_INDEX $TIMEOUTS | retry=standard,5"
+	expect_eq "$(digest_of "$FAKE_DIR/put-image.manifest")" "${DIGEST#sha256:}"
+}
+
+@test "stage: already staged on the same digest passes without put-image" {
+	describe_reply digest-tags "$DIGEST" rehearsal-7-testing rehearsal-7
+	aws_route "describe-images:imageDigest=$DIGEST" digest-tags
+	aws_route "describe-images:imageTag=rehearsal-7" digest-tags
+	staging stage
+	expect_status 0
+	has_line "✔ rehearsal-7 is already staged at $DIGEST"
+	expect_eq "$(calls_for put-image)" 0
+}
+
+@test "stage: a digest that no longer carries this run's testing tag fails without put-image" {
+	# e.g. a later build of the same version moved 3.1.5-testing to its own digest
+	export PRACTICE=false STAGE_TAG=3.1.5 TESTING_TAG=3.1.5-testing
+	fresh_stage_routes
+	describe_reply digest-tags "$DIGEST"
+	staging stage
+	expect_status 1
+	has_line "✘ $DIGEST doesn't carry the tag 3.1.5-testing (tags: )"
+	expect_eq "$(calls_for put-image)" 0
+}
+
+@test "stage: 'already exists' errors pass only if the tag points at our digest" {
+	local error
+	for error in ImageTagAlreadyExistsException ImageAlreadyExistsException; do
+		setup
+		fresh_stage_routes
+		aws_error exists "$error" PutImage "made-up message"
+		aws_route "put-image:rehearsal-7" exists
+		staging stage
+		expect_status 0
+		has_line "✔ staged rehearsal-7"
+
+		setup
+		fresh_stage_routes
+		aws_error exists "$error" PutImage "made-up message"
+		aws_route "put-image:rehearsal-7" exists
+		describe_reply other "$OTHER_DIGEST" rehearsal-7
+		aws_route "describe-images:imageTag=rehearsal-7" tag-missing,other
+		staging stage
+		expect_status 1
+		has_line "✘ after staging, rehearsal-7 points at $OTHER_DIGEST, not $DIGEST"
+	done
+}
+
 # --- every AWS command -------------------------------------------------------------------------------------------
 
 @test "every AWS command refuses IMAGE_REPO look-alikes" {
 	local bad command
-	for command in check-free login; do
+	for command in check-free login check-build stage; do
 		for bad in "$REGISTRY/ascp2" "$REGISTRY/other" "$REGISTRY/ascp/x" "$REGISTRY" "x$REPO" \
 			"$ACCOUNT.dkr.ecr.us-west-2.amazonaws.com.evil.example/ascp" "public.ecr.aws/ascp/ascp" "$REPO"$'\n'; do
 			export IMAGE_REPO=$bad
@@ -160,9 +369,9 @@ not_found() {
 	expect_eq "$(count_lines "$FAKE_DIR/docker.calls")" 0
 }
 
-@test "check-free refuses bad tag shapes and a tag of the other mode" {
+@test "check-free and stage refuse bad tag shapes and a tag of the other mode" {
 	local command bad
-	for command in check-free; do
+	for command in check-free stage; do
 		for bad in 3.1.5 rehearsal- rehearsal-7a rehearsal-7-testing latest; do
 			export PRACTICE=true STAGE_TAG=$bad
 			staging "$command"
@@ -177,4 +386,18 @@ not_found() {
 		done
 	done
 	expect_eq "$(count_lines "$FAKE_DIR/aws.calls")" 0
+}
+
+@test "the temp directory is removed after every command" {
+	export TMPDIR="$BATS_TEST_TMPDIR/tmp"
+	mkdir -p "$TMPDIR"
+	fresh_stage_routes
+	staging stage
+	expect_status 0
+	setup
+	export TMPDIR="$BATS_TEST_TMPDIR/tmp"
+	good_build_routes
+	staging check-build
+	expect_status 0
+	expect_eq "$(find "$TMPDIR" -mindepth 1 | wc -l | tr -d ' ')" 0
 }
