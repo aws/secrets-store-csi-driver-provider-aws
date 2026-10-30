@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Test fake for timeout(1). Logs "<seconds> <command...>" to $FAKE_DIR/timeout.calls, then runs the command.
+# With FAKE_TIMEOUT_EXPIRE=1 it exits 124 without running it, as if the time ran out.
+
+set -euo pipefail
+
+echo "$*" >>"$FAKE_DIR/timeout.calls"
+
+if [[ $# -lt 2 || ! "$1" =~ ^[0-9]+$ ]]; then
+	echo "timeout: unexpected arguments: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+fi
+if [[ "${FAKE_TIMEOUT_EXPIRE:-0}" == 1 ]]; then
+	exit 124
+fi
+shift
+exec "$@"

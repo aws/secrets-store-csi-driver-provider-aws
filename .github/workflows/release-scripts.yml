@@ -1,0 +1,48 @@
+name: Release Scripts
+
+# Tests the release scripts (bats + ShellCheck). Runs the PR's own files, with a read-only token and no AWS access.
+
+on:
+  pull_request:
+    paths: &paths
+      - '.github/scripts/**'
+      - '.github/workflows/release-scripts.yml'
+      - '.github/workflows/release.yml'
+      - 'Makefile'
+      - 'charts/secrets-store-csi-driver-provider-aws/**'
+  push:
+    branches: [main]
+    paths: *paths
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test release scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Bats
+        uses: bats-core/bats-action@77d6fb60505b4d0d1d73e48bd035b55074bbfb43 # 4.0.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          bats-version: 1.13.0
+
+      - name: ShellCheck
+        run: shellcheck .github/scripts/*.sh .github/scripts/tests/fake-bin/*
+
+      - name: Run bats tests
+        run: bats .github/scripts/tests
