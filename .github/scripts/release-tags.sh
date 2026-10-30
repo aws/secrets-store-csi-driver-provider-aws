@@ -4,13 +4,13 @@
 #   imageRepo   <registry>/ascp
 #   region      the registry's region
 #   accountId   the registry's account
-#   testingTag  the tag the image is built under: <version>-testing, or rehearsal-<run id>-testing in a practice run
-#   stageTag    the tag added once tests pass: <version>, or rehearsal-<run id> in a practice run
+#   testingTag  the tag the build pushes: <version>-testing, or rehearsal-<run id>-testing in a practice run
+#   stageTag    the tag the stage job adds: <version>, or rehearsal-<run id> in a practice run
 #   buildArgs   the LDFLAGS build arg that stamps the version into the binary
 #   labels      image labels with the commit, the run id + attempt and the mode, so no two runs (and no practice
 #               run and real run) can build the same image digest
 #
-# The version is checked again here, so a bad value never gets past this script.
+# The version is checked again here, so a bad value can't reach the build even if this job is re-run on its own.
 #
 # Inputs (environment): VERSION, PRACTICE (true or false), STAGING_REGISTRY, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT,
 # GITHUB_SHA, GITHUB_OUTPUT. Bash 3.2 compatible.
