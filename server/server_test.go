@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +17,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	secretsmanagertypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -2856,6 +2861,85 @@ func TestDriverVersion(t *testing.T) {
 	if ver.RuntimeName != ProviderName {
 		t.Fatalf("TestDriverVersion: wrong RuntimeName: %s", ver.RuntimeName)
 	}
+}
+
+func TestParseAssumeRoleDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected time.Duration
+	}{
+		{name: "empty uses SDK default", value: "", expected: 0},
+		{name: "minimum valid", value: "1", expected: time.Second},
+		{name: "typical value", value: "3600", expected: time.Hour},
+		{name: "maximum valid (12 hours)", value: "43200", expected: 43200 * time.Second},
+		{name: "zero is invalid", value: "0", expected: 0},
+		{name: "negative is invalid", value: "-100", expected: 0},
+		{name: "above maximum is invalid", value: "43201", expected: 0},
+		{name: "very large value is invalid", value: "999999999", expected: 0},
+		{name: "non-numeric is invalid", value: "not-a-number", expected: 0},
+		{name: "float is invalid", value: "3600.5", expected: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseAssumeRoleDuration(tt.value); got != tt.expected {
+				t.Errorf("parseAssumeRoleDuration(%q) = %v, want %v", tt.value, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestApplyAssumeRole(t *testing.T) {
+	var form url.Values
+	stsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		form, _ = url.ParseQuery(string(body))
+		w.Header().Set("Content-Type", "text/xml")
+		_, _ = io.WriteString(w, `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASSUMED_AKID</AccessKeyId><SecretAccessKey>ASSUMED_SECRET</SecretAccessKey><SessionToken>ASSUMED_TOKEN</SessionToken><Expiration>2099-01-01T00:00:00Z</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`)
+	}))
+	defer stsServer.Close()
+
+	baseCfg := aws.Config{
+		Region:       "us-west-2",
+		Credentials:  credentials.NewStaticCredentialsProvider("BASE_AKID", "BASE_SECRET", ""),
+		BaseEndpoint: aws.String(stsServer.URL),
+	}
+
+	t.Run("empty role ARN keeps base credentials", func(t *testing.T) {
+		cfg := applyAssumeRole(baseCfg, "us-west-2", "", time.Hour, "ext-123")
+		creds, err := cfg.Credentials.Retrieve(context.Background())
+		if err != nil {
+			t.Fatalf("Retrieve returned error: %v", err)
+		}
+		if creds.AccessKeyID != "BASE_AKID" {
+			t.Errorf("expected base credentials, got %q", creds.AccessKeyID)
+		}
+		if form != nil {
+			t.Errorf("STS should not be called when role ARN is empty")
+		}
+	})
+
+	t.Run("role ARN assumes role with duration and external id", func(t *testing.T) {
+		roleArn := "arn:aws:iam::123456789012:role/TestRole"
+		cfg := applyAssumeRole(baseCfg, "us-west-2", roleArn, time.Hour, "ext-123")
+		creds, err := cfg.Credentials.Retrieve(context.Background())
+		if err != nil {
+			t.Fatalf("Retrieve returned error: %v", err)
+		}
+		if creds.AccessKeyID != "ASSUMED_AKID" {
+			t.Errorf("expected assumed credentials, got %q", creds.AccessKeyID)
+		}
+		if form.Get("RoleArn") != roleArn {
+			t.Errorf("expected RoleArn %q, got %q", roleArn, form.Get("RoleArn"))
+		}
+		if form.Get("DurationSeconds") != "3600" {
+			t.Errorf("expected DurationSeconds 3600, got %q", form.Get("DurationSeconds"))
+		}
+		if form.Get("ExternalId") != "ext-123" {
+			t.Errorf("expected ExternalId ext-123, got %q", form.Get("ExternalId"))
+		}
+	})
 }
 
 // buildMountReqWithTokens builds a MountRequest with a custom tokens JSON string
