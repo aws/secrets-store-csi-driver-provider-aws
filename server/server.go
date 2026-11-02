@@ -45,6 +45,9 @@ const (
 	secProvAttrib              = "objects"                       // The attribute used to pass the SecretProviderClass definition (with what to mount)
 	failoverRegionAttrib       = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
 	usePodIdentityAttrib       = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
+	assumeRoleArnAttrib        = "assumeRoleArn"                 // The attribute used to assume an IAM role for AWS calls after base auth
+	assumeRoleDurationAttrib   = "assumeRoleDurationSeconds"     // Optional session duration in seconds for the assumed role
+	assumeRoleExternalIDAttrib = "assumeRoleExternalId"          // Optional external ID passed to the AssumeRole call
 	preferredAddressTypeAttrib = "preferredAddressType"          // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
 	roleArnAnnotation          = "eks.amazonaws.com/role-arn"
 )
@@ -131,6 +134,8 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 	usePodIdentityStr := attrib[usePodIdentityAttrib]
 	preferredAddressType := attrib[preferredAddressTypeAttrib]
 	serviceAccountTokens := attrib[serviceAccountTokensAttrib]
+	assumeRoleArn := attrib[assumeRoleArnAttrib]
+	assumeRoleExternalID := attrib[assumeRoleExternalIDAttrib]
 
 	// Parse CSI tokens once upfront for clear error reporting.
 	parsedTokens, err := utils.ParseServiceAccountTokens(serviceAccountTokens)
@@ -172,12 +177,14 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		}
 	}
 
+	assumeRoleDuration := parseAssumeRoleDuration(attrib[assumeRoleDurationAttrib])
+
 	token, roleArn, err := s.resolveCredentials(ctx, usePodIdentity, parsedTokens, nameSpace, svcAcct)
 	if err != nil {
 		return nil, err
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, regions, usePodIdentity, preferredAddressType, roleArn, token)
+	awsConfigs, err := s.getAwsConfigs(ctx, regions, usePodIdentity, preferredAddressType, roleArn, token, assumeRoleArn, assumeRoleDuration, assumeRoleExternalID)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +311,7 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Gets the pod's AWS creds for each lookup region
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token string) ([]aws.Config, error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token, assumeRoleArn string, assumeRoleDuration time.Duration, assumeRoleExternalID string) ([]aws.Config, error) {
 	var awsConfigsList []aws.Config
 	appID := s.appID()
 
@@ -325,10 +332,41 @@ func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []s
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
 		}
-		awsConfigsList = append(awsConfigsList, awsConfig)
+
+		awsConfigsList = append(awsConfigsList, applyAssumeRole(awsConfig, region, assumeRoleArn, assumeRoleDuration, assumeRoleExternalID))
 	}
 
 	return awsConfigsList, nil
+}
+
+// applyAssumeRole returns awsConfig unchanged when roleArn is empty. Otherwise it
+// returns a config that assumes roleArn for all AWS calls made for this mount.
+func applyAssumeRole(awsConfig aws.Config, region, roleArn string, duration time.Duration, externalID string) aws.Config {
+	if roleArn == "" {
+		return awsConfig
+	}
+	klog.Infof("Using assumed role %s for AWS calls in region %s", roleArn, region)
+	return credential_provider.WithAssumeRole(awsConfig, roleArn, duration, externalID)
+}
+
+// parseAssumeRoleDuration converts assumeRoleDurationSeconds into a duration.
+// Empty, invalid, or out-of-range values return 0 so the SDK default is used.
+func parseAssumeRoleDuration(value string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	secs, err := strconv.ParseInt(value, 10, 32)
+	if err != nil {
+		klog.Warningf("Invalid assumeRoleDurationSeconds value: %s", value)
+		return 0
+	}
+	// 43200 seconds (12 hours) is the maximum STS session duration.
+	const maxSessionDurationSeconds = 43200
+	if secs <= 0 || secs > maxSessionDurationSeconds {
+		klog.Warningf("assumeRoleDurationSeconds out of range: %d", secs)
+		return 0
+	}
+	return time.Duration(secs) * time.Second
 }
 
 // Return the provider plugin version information to the driver.
