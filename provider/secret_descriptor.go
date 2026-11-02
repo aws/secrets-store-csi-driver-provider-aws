@@ -12,9 +12,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// An RE pattern to check for bad paths
-var badPathRE = regexp.MustCompile(`(\/\.\.\/)|(^\.\.\/)|(\/\.\.$)`)
-
 // An RE pattern to check for valid file permission
 var validFilePermissionRE = regexp.MustCompile("^[0-7]{4}$")
 
@@ -145,6 +142,26 @@ func (p *SecretDescriptor) GetMountPath() string {
 	return filepath.Join(p.GetMountDir(), p.GetFileName())
 }
 
+// Rejects file names that would escape or degenerate against the mount
+// directory: empty, ".", non-canonical, or non-local. Inspects
+// GetFileName() only.
+func (p *SecretDescriptor) ValidateMountPath() error {
+	name := p.GetFileName()
+	obj := p.ObjectName
+	if len(obj) == 0 {
+		obj = p.ObjectAlias
+	}
+	if name == "" {
+		return fmt.Errorf("file name is empty for object: %s", obj)
+	}
+	// Go 1.21+ considers "." local, but writing to mountDir/. would target
+	// the mount directory itself rather than a file inside it.
+	if name == "." || filepath.Clean(name) != name || !filepath.IsLocal(name) {
+		return fmt.Errorf("file name escapes mount directory: %q (object: %s)", name, obj)
+	}
+	return nil
+}
+
 // Return the object type (ssmparameter, secretsmanager, or ssm)
 func (p *SecretDescriptor) getObjectType() (otype string) {
 	oType := p.ObjectType
@@ -257,9 +274,9 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 		return fmt.Errorf("ssm parameters can not specify both objectVersion and objectVersionLabel: %s", p.ObjectName)
 	}
 
-	// Do not allow ../ in a path when translation is turned off
-	if badPathRE.MatchString(p.GetFileName()) {
-		return fmt.Errorf("path can not contain ../: %s", p.ObjectName)
+	// Reject file names that would escape the mount directory
+	if err := p.ValidateMountPath(); err != nil {
+		return err
 	}
 
 	// Ensure the string file permission is valid octal
@@ -284,6 +301,10 @@ func (p *SecretDescriptor) validateSecretDescriptor(regions []string) error {
 			return err
 		}
 
+		jmesDescriptor := p.getJmesEntrySecretDescriptor(&jmesPathEntry)
+		if err := jmesDescriptor.ValidateMountPath(); err != nil {
+			return err
+		}
 	}
 
 	if len(p.FailoverObject.ObjectName) > 0 {

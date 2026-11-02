@@ -10,7 +10,7 @@ endif
 
 MAJOR_REV=3
 MINOR_REV=1
-PATCH_REV=2
+PATCH_REV=4
 FULL_REV=$(MAJOR_REV).$(MINOR_REV).$(PATCH_REV)
 
 LDFLAGS?="-X github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=$(FULL_REV) \
@@ -42,6 +42,7 @@ docker-buildx:
 	docker buildx build \
 				--platform linux/arm64,linux/amd64 \
 				--build-arg LDFLAGS=$(LDFLAGS) \
+				$(if $(GOPROXY),--build-arg 'GOPROXY=$(GOPROXY)') \
 				--push \
 				-t $(REGISTRY_NAME):latest \
 				-t $(REGISTRY_NAME):$(FULL_REV) \

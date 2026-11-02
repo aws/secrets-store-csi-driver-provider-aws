@@ -23,7 +23,6 @@ import (
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 	"sigs.k8s.io/yaml"
 
-	"github.com/aws/secrets-store-csi-driver-provider-aws/auth"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 )
 
@@ -201,7 +200,7 @@ func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTim
 		node.ObjectMeta.Labels = map[string]string{"topology.kubernetes.io/region": nodeRegion}
 	}
 
-	clientset := fake.NewSimpleClientset(sa, pod, node)
+	clientset := fake.NewClientset(sa, pod, node)
 
 	return &CSIDriverProviderServer{
 		secretProviderFactory:  factory,
@@ -239,6 +238,9 @@ func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.
 	attrMap["csi.storage.k8s.io/pod.name"] = tst.attributes["podName"]
 	attrMap["csi.storage.k8s.io/pod.namespace"] = tst.attributes["namespace"]
 	attrMap["csi.storage.k8s.io/serviceAccount.name"] = tst.attributes["accName"]
+
+	// Add CSI tokens for authentication
+	attrMap["csi.storage.k8s.io/serviceAccount.tokens"] = `{"sts.amazonaws.com":{"token":"test-irsa-token","expirationTimestamp":"2099-01-15T10:30:00Z"},"pods.eks.amazonaws.com":{"token":"test-pod-identity-token","expirationTimestamp":"2099-01-15T10:30:00Z"}}`
 
 	region := tst.attributes["region"]
 	if len(region) > 0 && !strings.Contains(region, "Fail") {
@@ -1033,7 +1035,7 @@ var mountTests []testCase = []testCase{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "(contains path separator)|(path can not contain)",
+		expErr:     "escapes mount directory",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1059,7 +1061,7 @@ var mountTests []testCase = []testCase{
 			{SecretString: aws.String("secret1"), VersionId: aws.String("1")},
 		},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
-		expErr:     "(contains path separator)|(path can not contain)",
+		expErr:     "escapes mount directory",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -1373,7 +1375,7 @@ var mountTestsForMultiRegion []testCase = []testCase{
 			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
 			{"objectName": "TestParm1", "objectType": "ssmparameter"},
 		},
-		expErr:     "fakeRegion: An IAM role must be associated",
+		expErr:     "An IAM role must be associated",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -2851,210 +2853,259 @@ func TestDriverVersion(t *testing.T) {
 	if ver == nil {
 		t.Fatalf("TestDriverVersion: got empty response")
 	}
-	if ver.RuntimeName != auth.ProviderName {
+	if ver.RuntimeName != ProviderName {
 		t.Fatalf("TestDriverVersion: wrong RuntimeName: %s", ver.RuntimeName)
 	}
 }
 
-// TestAssumeRoleDurationParsing tests the parsing and validation of assumeRoleDurationSeconds
-func TestAssumeRoleDurationParsing(t *testing.T) {
-	tests := []struct {
-		name             string
-		durationStr      string
-		expectedDuration time.Duration
-		expectWarning    bool
-	}{
-		{
-			name:             "valid duration - 900 seconds",
-			durationStr:      "900",
-			expectedDuration: 900 * time.Second,
-			expectWarning:    false,
-		},
-		{
-			name:             "valid duration - 3600 seconds (1 hour)",
-			durationStr:      "3600",
-			expectedDuration: 3600 * time.Second,
-			expectWarning:    false,
-		},
-		{
-			name:             "valid duration - 43200 seconds (12 hours - max)",
-			durationStr:      "43200",
-			expectedDuration: 43200 * time.Second,
-			expectWarning:    false,
-		},
-		{
-			name:             "valid duration - 1 second (minimum)",
-			durationStr:      "1",
-			expectedDuration: 1 * time.Second,
-			expectWarning:    false,
-		},
-		{
-			name:             "invalid duration - negative",
-			durationStr:      "-100",
-			expectedDuration: 0,
-			expectWarning:    true,
-		},
-		{
-			name:             "invalid duration - zero",
-			durationStr:      "0",
-			expectedDuration: 0,
-			expectWarning:    true,
-		},
-		{
-			name:             "invalid duration - exceeds max (12 hours + 1)",
-			durationStr:      "43201",
-			expectedDuration: 0,
-			expectWarning:    true,
-		},
-		{
-			name:             "invalid duration - not a number",
-			durationStr:      "not-a-number",
-			expectedDuration: 0,
-			expectWarning:    true,
-		},
-		{
-			name:             "invalid duration - empty string",
-			durationStr:      "",
-			expectedDuration: 0,
-			expectWarning:    false,
-		},
-		{
-			name:             "invalid duration - float value",
-			durationStr:      "3600.5",
-			expectedDuration: 0,
-			expectWarning:    true,
-		},
-		{
-			name:             "invalid duration - very large number",
-			durationStr:      "999999999",
-			expectedDuration: 0,
-			expectWarning:    true,
-		},
+// buildMountReqWithTokens builds a MountRequest with a custom tokens JSON string
+// (or empty to omit the tokens attribute entirely).
+func buildMountReqWithTokens(t *testing.T, dir string, tokensJSON string) *v1alpha1.MountRequest {
+	t.Helper()
+	attrMap := map[string]string{
+		"csi.storage.k8s.io/pod.name":            "fakePod",
+		"csi.storage.k8s.io/pod.namespace":       "fakeNS",
+		"csi.storage.k8s.io/serviceAccount.name": "fakeAcct",
+		"region":                                 "us-east-1",
+		"objects": `- objectName: "TestSecret1"
+  objectType: "secretsmanager"`,
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// This logic mirrors what's in server.go
-			var parsedDuration time.Duration
-			if tt.durationStr != "" {
-				if secs64, err := strconv.ParseInt(tt.durationStr, 10, 32); err == nil {
-					secs := int(secs64)
-					const maxSessionDuration = 43200
-					if secs > 0 && secs <= maxSessionDuration {
-						parsedDuration = time.Duration(secs) * time.Second
-					}
-				}
-			}
-
-			if parsedDuration != tt.expectedDuration {
-				t.Errorf("Expected duration %v, got %v", tt.expectedDuration, parsedDuration)
-			}
-		})
+	if tokensJSON != "" {
+		attrMap["csi.storage.k8s.io/serviceAccount.tokens"] = tokensJSON
+	}
+	attr, _ := json.Marshal(attrMap)
+	return &v1alpha1.MountRequest{
+		Attributes: string(attr),
+		TargetPath: dir,
+		Permission: "420",
 	}
 }
 
-// TestGetAwsConfigs_AssumeRoleDuration tests getAwsConfigs with assume role duration
-func TestGetAwsConfigs_AssumeRoleDuration(t *testing.T) {
-	tests := []struct {
-		name        string
-		duration    time.Duration
-		expectError bool
-	}{
-		{
-			name:        "valid duration - 15 minutes",
-			duration:    15 * time.Minute,
-			expectError: false,
-		},
-		{
-			name:        "valid duration - 1 hour",
-			duration:    1 * time.Hour,
-			expectError: false,
-		},
-		{
-			name:        "zero duration (default AWS behavior)",
-			duration:    0,
-			expectError: false,
-		},
+func TestMountMissingTokensAttribute(t *testing.T) {
+	svr := newServerWithMocks(nil, false, nil)
+	dir := t.TempDir()
+	req := buildMountReqWithTokens(t, dir, "")
+	_, err := svr.Mount(context.Background(), req)
+	if err == nil {
+		t.Fatal("Expected error when serviceAccount.tokens is missing")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			k8sClient := fake.NewSimpleClientset().CoreV1()
-			timeout := 100 * time.Millisecond
-
-			svr := &CSIDriverProviderServer{
-				k8sClient:              k8sClient,
-				podIdentityHttpTimeout: &timeout,
-				eksAddonVersion:        "test-version",
-			}
-
-			configs, err := svr.getAwsConfigs(
-				context.Background(),
-				"test-namespace",
-				"test-sa",
-				"test-version",
-				[]string{"us-west-2"},
-				true, // use pod identity
-				"test-pod",
-				"ipv4",
-				&timeout,
-				"arn:aws:iam::123456789012:role/TestRole",
-				tt.duration,
-				"",
-			)
-
-			if tt.expectError && err == nil {
-				t.Errorf("Expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				// Note: This will likely error due to missing credentials, which is expected in unit tests
-				// The important part is that the duration is properly passed through
-				t.Logf("Got expected error in test environment: %v", err)
-			}
-			if configs != nil {
-				t.Logf("Successfully created %d configs", len(configs))
-			}
-		})
+	if !strings.Contains(err.Error(), "serviceAccount.tokens not provided") {
+		t.Fatalf("Expected token-not-provided error, got: %s", err.Error())
 	}
 }
 
-// TestGetAwsConfigs_MultipleRegions tests getAwsConfigs with multiple regions and assume role
-func TestGetAwsConfigs_MultipleRegions(t *testing.T) {
-	k8sClient := fake.NewSimpleClientset().CoreV1()
-	timeout := 100 * time.Millisecond
+func TestMountTokenAudienceMismatch(t *testing.T) {
+	svr := newServerWithMocks(&testCase{
+		attributes: map[string]string{
+			"podName": "fakePod", "namespace": "fakeNS", "accName": "fakeAcct",
+			"nodeName": "fakeNode", "region": "us-east-1", "roleARN": "fakeRole",
+			"usePodIdentity": "true",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp:  []*ssm.GetParametersOutput{},
+		gsvRsp:  []*secretsmanager.GetSecretValueOutput{},
+		descRsp: []*secretsmanager.DescribeSecretOutput{},
+	}, false, nil)
+
+	dir := t.TempDir()
+	// Provide only the IRSA token, but request Pod Identity
+	tokensJSON := `{"sts.amazonaws.com":{"token":"irsa-token","expirationTimestamp":"2099-01-15T10:30:00Z"}}`
+	attrMap := map[string]string{
+		"csi.storage.k8s.io/pod.name":              "fakePod",
+		"csi.storage.k8s.io/pod.namespace":         "fakeNS",
+		"csi.storage.k8s.io/serviceAccount.name":   "fakeAcct",
+		"csi.storage.k8s.io/serviceAccount.tokens": tokensJSON,
+		"region":         "us-east-1",
+		"usePodIdentity": "true",
+		"objects": `- objectName: "TestSecret1"
+  objectType: "secretsmanager"`,
+	}
+	attr, _ := json.Marshal(attrMap)
+	req := &v1alpha1.MountRequest{
+		Attributes: string(attr),
+		TargetPath: dir,
+		Permission: "420",
+	}
+
+	_, err := svr.Mount(context.Background(), req)
+	if err == nil {
+		t.Fatal("Expected error when Pod Identity token audience is missing")
+	}
+	if !strings.Contains(err.Error(), "Pod Identity token extraction failed") {
+		t.Fatalf("Expected Pod Identity token extraction error, got: %s", err.Error())
+	}
+}
+
+func TestMountMaxRegionsExceeded(t *testing.T) {
+	// The len(awsConfigs) > 2 guard is a defensive check. getAwsRegions caps at 2
+	// regions, so this guard can't fire in normal flow. We verify the guard doesn't
+	// false-positive on a normal 1-region request, and that the fix (returning a
+	// real error instead of nil) compiles correctly.
+	sa := &corev1.ServiceAccount{}
+	sa.Name = "fakeAcct"
+	sa.Namespace = "fakeNS"
+	sa.Annotations = map[string]string{"eks.amazonaws.com/role-arn": "fakeRole"}
+	pod := &corev1.Pod{}
+	pod.Name = "fakePod"
+	pod.Namespace = "fakeNS"
+	pod.Spec.NodeName = "fakeNode"
+	node := &corev1.Node{}
+	node.Name = "fakeNode"
+	node.ObjectMeta.Labels = map[string]string{"topology.kubernetes.io/region": "us-east-1"}
+	clientset := fake.NewClientset(sa, pod, node)
+
+	factory := func(configs []aws.Config, regions []string) *provider.SecretProviderFactory {
+		return &provider.SecretProviderFactory{
+			Providers: map[provider.SecretType]provider.SecretProvider{
+				provider.SSMParameter:   provider.NewParameterStoreProviderWithClients(),
+				provider.SecretsManager: provider.NewSecretsManagerProviderWithClients(),
+			},
+		}
+	}
 
 	svr := &CSIDriverProviderServer{
-		k8sClient:              k8sClient,
-		podIdentityHttpTimeout: &timeout,
-		eksAddonVersion:        "test-version",
+		secretProviderFactory: factory,
+		k8sClient:             clientset.CoreV1(),
 	}
 
-	regions := []string{"us-west-2", "us-east-1"}
-	duration := 3600 * time.Second
+	dir := t.TempDir()
+	attrMap := map[string]string{
+		"csi.storage.k8s.io/pod.name":              "fakePod",
+		"csi.storage.k8s.io/pod.namespace":         "fakeNS",
+		"csi.storage.k8s.io/serviceAccount.name":   "fakeAcct",
+		"csi.storage.k8s.io/serviceAccount.tokens": `{"sts.amazonaws.com":{"token":"test-token","expirationTimestamp":"2099-01-15T10:30:00Z"}}`,
+		"region": "us-east-1",
+		"objects": `- objectName: "TestSecret1"
+  objectType: "secretsmanager"`,
+	}
+	attr, _ := json.Marshal(attrMap)
+	req := &v1alpha1.MountRequest{Attributes: string(attr), TargetPath: dir, Permission: "420"}
 
-	configs, err := svr.getAwsConfigs(
-		context.Background(),
-		"test-namespace",
-		"test-sa",
-		"test-version",
-		regions,
-		true,
-		"test-pod",
-		"ipv4",
-		&timeout,
-		"arn:aws:iam::123456789012:role/TestRole",
-		duration,
-		"external-id-123",
+	_, err := svr.Mount(context.Background(), req)
+	if err != nil && strings.Contains(err.Error(), "Max number of region(s) exceeded") {
+		t.Fatal("Guard should not fire with 1 region")
+	}
+}
+
+// newSecretsManagerDescriptor returns the single SecretsManager descriptor
+// produced from a one-object mount spec under the given mountDir/translate.
+func newSecretsManagerDescriptor(t *testing.T, mountDir, translate string) *provider.SecretDescriptor {
+	t.Helper()
+	descriptors, err := provider.NewSecretDescriptorList(
+		mountDir, translate,
+		`- objectName: "arn:aws:secretsmanager:us-east-1:123456789012:secret:okAlias"
+  objectAlias: "okAlias"`,
+		[]string{"us-east-1"},
 	)
-
-	// Note: This will likely error in unit test environment due to missing actual credentials
-	// The important part is testing the parameter passing
 	if err != nil {
-		t.Logf("Got expected error in test environment: %v", err)
+		t.Fatalf("failed to build descriptor: %v", err)
 	}
-	if configs != nil {
-		if len(configs) != len(regions) {
-			t.Errorf("Expected %d configs, got %d", len(regions), len(configs))
-		}
+	list := descriptors[provider.SecretsManager]
+	if len(list) != 1 {
+		t.Fatalf("expected exactly 1 SecretsManager descriptor, got %d", len(list))
+	}
+	return list[0]
+}
+
+// Uses ".." (no separator) so os.CreateTemp's own "pattern contains path
+// separator" rejection cannot mask whether writeFile's guard fired.
+func TestWriteFileRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	d := newSecretsManagerDescriptor(t, dir, "False")
+	d.ObjectAlias = ".."
+
+	secret := &provider.SecretValue{
+		Value:      []byte("attacker-controlled"),
+		Descriptor: *d,
+	}
+
+	svr := &CSIDriverProviderServer{}
+	_, err := svr.writeFile(secret, 0644)
+	if err == nil {
+		t.Fatalf("expected writeFile to reject a traversing descriptor, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes mount directory") {
+		t.Fatalf("expected \"escapes mount directory\" error, got: %v", err)
+	}
+}
+
+// The driverWriteSecrets branch (which returns file contents instead of
+// writing to disk) must ALSO honor the traversal guard, since the file name
+// it emits will be used verbatim by the driver.
+func TestWriteFileRejectsTraversalInDriverWriteMode(t *testing.T) {
+	dir := t.TempDir()
+	d := newSecretsManagerDescriptor(t, dir, "False")
+	d.ObjectAlias = "../escape"
+
+	secret := &provider.SecretValue{
+		Value:      []byte("attacker-controlled"),
+		Descriptor: *d,
+	}
+
+	svr := &CSIDriverProviderServer{driverWriteSecrets: true}
+	_, err := svr.writeFile(secret, 0644)
+	if err == nil {
+		t.Fatalf("expected writeFile to reject a traversing descriptor in driverWriteSecrets mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "escapes mount directory") {
+		t.Fatalf("expected \"escapes mount directory\" error, got: %v", err)
+	}
+}
+
+// writeFile must accept a normal in-directory descriptor so the guard is not
+// over-restrictive.
+func TestWriteFileAcceptsInsideDir(t *testing.T) {
+	dir := t.TempDir()
+	d := newSecretsManagerDescriptor(t, dir, "False")
+
+	secret := &provider.SecretValue{
+		Value:      []byte("payload"),
+		Descriptor: *d,
+	}
+
+	svr := &CSIDriverProviderServer{}
+	if _, err := svr.writeFile(secret, 0644); err != nil {
+		t.Fatalf("unexpected error writing a normal file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "okAlias")); err != nil {
+		t.Fatalf("expected okAlias to be written under %s: %v", dir, err)
+	}
+}
+
+func TestAppID(t *testing.T) {
+	tests := []struct {
+		name            string
+		eksAddonVersion string
+		providerVersion string
+		expected        string
+	}{
+		{
+			name:            "default provider version",
+			eksAddonVersion: "",
+			providerVersion: "1.0.0",
+			expected:        ProviderName + "-1.0.0",
+		},
+		{
+			name:            "eks addon version overrides",
+			eksAddonVersion: "v1.2.3-eksbuild.1",
+			providerVersion: "1.0.0",
+			expected:        ProviderName + "-v1.2.3-eksbuild.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origVersion := ProviderVersion
+			ProviderVersion = tt.providerVersion
+			defer func() { ProviderVersion = origVersion }()
+
+			svr := &CSIDriverProviderServer{eksAddonVersion: tt.eksAddonVersion}
+			result := svr.appID()
+			if result != tt.expected {
+				t.Errorf("appID() = %q, want %q", result, tt.expected)
+			}
+		})
 	}
 }
