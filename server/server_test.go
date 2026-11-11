@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	secretsmanagertypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
@@ -23,6 +24,7 @@ import (
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 	"sigs.k8s.io/yaml"
 
+	"github.com/aws/secrets-store-csi-driver-provider-aws/credential_provider"
 	"github.com/aws/secrets-store-csi-driver-provider-aws/provider"
 )
 
@@ -136,6 +138,15 @@ func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTim
 	}
 
 	factory := func(configs []aws.Config, regions []string) (factory *provider.SecretProviderFactory) {
+		// Mount must hand the factory assumed-role credentials exactly when
+		// assumeRoleArn is set; passing nil through getAwsConfigs would still
+		// compile and still parse, so check the configs themselves.
+		wantAssumeRole := tstData.attributes["assumeRoleArn"] != ""
+		for i, cfg := range configs {
+			if got := aws.IsCredentialsProvider(cfg.Credentials, &stscreds.AssumeRoleProvider{}); got != wantAssumeRole {
+				panic(fmt.Sprintf("%s: config %d (%s) has AssumeRoleProvider=%v, want %v", tstData.testName, i, regions[i], got, wantAssumeRole))
+			}
+		}
 		if len(region) == 0 {
 			region = nodeRegion
 		}
@@ -260,6 +271,11 @@ func buildMountReq(t *testing.T, dir string, tst testCase, curState []*v1alpha1.
 	usePodIdentity := tst.attributes["usePodIdentity"]
 	if len(usePodIdentity) > 0 {
 		attrMap["usePodIdentity"] = usePodIdentity
+	}
+
+	assumeRoleArn := tst.attributes["assumeRoleArn"]
+	if len(assumeRoleArn) > 0 {
+		attrMap["assumeRoleArn"] = assumeRoleArn
 	}
 
 	objs, err := yaml.Marshal(tst.mountObjs)
@@ -929,6 +945,61 @@ var mountTests []testCase = []testCase{
 		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
 		descRsp:    []*secretsmanager.DescribeSecretOutput{},
 		expErr:     "failed to parse usePodIdentity value",
+		expSecrets: map[string]string{},
+		perms:      "420",
+	},
+	{ // Verify a valid assumeRoleArn still mounts.
+		testName: "Mount With Assume Role",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole",
+			"assumeRoleArn": "arn:aws:iam::123456789012:role/TargetRole",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("TestSecret1Value"), VersionId: aws.String("1")},
+		},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "",
+		expSecrets: map[string]string{"TestSecret1": "TestSecret1Value"},
+		perms:      "420",
+	},
+	{ // Verify a valid assumeRoleArn also works with Pod Identity.
+		testName: "Mount With Assume Role Pod Identity",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "usePodIdentity": "true",
+			"assumeRoleArn": "arn:aws:iam::123456789012:role/TargetRole",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("TestSecret1Value"), VersionId: aws.String("1")},
+		},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "",
+		expSecrets: map[string]string{"TestSecret1": "TestSecret1Value"},
+		perms:      "420",
+	},
+	{ // Verify failure when assumeRoleArn is not an IAM role ARN.
+		testName: "Fail Assume Role Invalid Arn",
+		attributes: map[string]string{
+			"namespace": "fakeNS", "accName": "fakeSvcAcc", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "", "roleARN": "fakeRole",
+			"assumeRoleArn": "arn:aws:iam::123456789012:user/NotARole",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp:     []*ssm.GetParametersOutput{},
+		gsvRsp:     []*secretsmanager.GetSecretValueOutput{},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "invalid assumeRoleArn",
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
@@ -3071,6 +3142,47 @@ func TestWriteFileAcceptsInsideDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "okAlias")); err != nil {
 		t.Fatalf("expected okAlias to be written under %s: %v", dir, err)
+	}
+}
+
+// TestGetAwsConfigsAssumeRole verifies getAwsConfigs swaps in an STS AssumeRole
+// credential provider for every region only when assume role is configured.
+func TestGetAwsConfigsAssumeRole(t *testing.T) {
+	svr := &CSIDriverProviderServer{k8sClient: fake.NewClientset().CoreV1()}
+	regions := []string{"us-west-2", "us-east-1"}
+	assumeRole := &credential_provider.AssumeRoleConfig{
+		RoleArn:         "arn:aws:iam::123456789012:role/TargetRole",
+		RoleSessionName: "fakeNS@fakeSvcAcc",
+	}
+
+	for _, usePodIdentity := range []bool{false, true} {
+		t.Run(fmt.Sprintf("usePodIdentity=%t", usePodIdentity), func(t *testing.T) {
+			withAssume, err := svr.getAwsConfigs(context.Background(), regions, usePodIdentity, "", "arn:aws:iam::123456789012:role/BaseRole", "token", assumeRole)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(withAssume) != len(regions) {
+				t.Fatalf("expected %d configs, got %d", len(regions), len(withAssume))
+			}
+			for i, cfg := range withAssume {
+				if cfg.Region != regions[i] {
+					t.Errorf("config %d region = %q, want %q", i, cfg.Region, regions[i])
+				}
+				if !aws.IsCredentialsProvider(cfg.Credentials, &stscreds.AssumeRoleProvider{}) {
+					t.Errorf("config %d: expected AssumeRoleProvider credentials, got %T", i, cfg.Credentials)
+				}
+			}
+
+			without, err := svr.getAwsConfigs(context.Background(), regions, usePodIdentity, "", "arn:aws:iam::123456789012:role/BaseRole", "token", nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			for i, cfg := range without {
+				if aws.IsCredentialsProvider(cfg.Credentials, &stscreds.AssumeRoleProvider{}) {
+					t.Errorf("config %d: AssumeRoleProvider must not be used when assume role is not configured", i)
+				}
+			}
+		})
 	}
 }
 

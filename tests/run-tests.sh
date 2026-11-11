@@ -29,8 +29,10 @@ generate_test_files() {
 cleanup_generated_files() {
 	echo "Cleaning up generated test files..."
 	rm -f x64-irsa.bats x64-pod-identity.bats arm-irsa.bats arm-pod-identity.bats
-	rm -f BasicTestMountSPC-x64-irsa.yaml BasicTestMountSPC-x64-pod-identity.yaml BasicTestMountSPC-arm-irsa.yaml BasicTestMountSPC-arm-pod-identity.yaml
-	rm -f BasicTestMount-x64-irsa.yaml BasicTestMount-x64-pod-identity.yaml BasicTestMount-arm-irsa.yaml BasicTestMount-arm-pod-identity.yaml
+	for cell in x64-irsa x64-pod-identity arm-irsa arm-pod-identity; do
+		rm -f BasicTestMountSPC-$cell.yaml BasicTestMount-$cell.yaml
+		rm -f AssumeRoleTestMountSPC-$cell.yaml AssumeRoleTestMount-$cell.yaml
+	done
 	echo "Generated test files cleaned up"
 }
 
@@ -42,6 +44,7 @@ if [[ "$1" == "clean" ]]; then
 	cleanup
 	echo "Cleaning up secrets and parameters for all configs..."
 	python3 generate-test-files.py cleanup-secrets
+
 
 	if [[ "$2" == "all" || "$2" == "x64" || "$2" == "pod-identity" || "$2" == "x64-pod-identity" ]]; then
 		delete_cluster integ-cluster-x64-pod-identity
