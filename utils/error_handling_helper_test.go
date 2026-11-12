@@ -38,6 +38,13 @@ func TestIsFatalError(t *testing.T) {
 			},
 			isFatal: true,
 		},
+		{
+			name: "json processing error",
+			err: &JSONProcessingError{
+				Message: `JMESPath "WORLD" for object alias "world-value" was not found in secret "my-secret-key"`,
+			},
+			isFatal: true,
+		},
 	}
 
 	for _, c := range cases {

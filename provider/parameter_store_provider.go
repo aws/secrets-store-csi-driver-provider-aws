@@ -171,7 +171,7 @@ func (p *ParameterStoreProvider) fetchParameterStoreBatch(
 		//Fetch individual json key value pairs if jmesPath is specified
 		jsonSecrets, jsonErr := secretValue.getJsonSecrets()
 		if jsonErr != nil {
-			return nil, fmt.Errorf("%s: %s", client.Region, jsonErr)
+			return nil, jsonErr
 		}
 
 		values = append(values, jsonSecrets...)
