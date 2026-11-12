@@ -1003,6 +1003,27 @@ var mountTests []testCase = []testCase{
 		expSecrets: map[string]string{},
 		perms:      "420",
 	},
+	{ // A mount request without pod info (no namespace or service account) still mounts; the
+		// session name falls back to a default instead of a value STS would reject. Pod Identity
+		// with an explicit region is the one path where nothing else reads those attributes.
+		testName: "Mount With Assume Role Without Pod Info",
+		attributes: map[string]string{
+			"namespace": "", "accName": "", "podName": "fakePod",
+			"nodeName": "fakeNode", "region": "us-west-2", "usePodIdentity": "true",
+			"assumeRoleArn": "arn:aws:iam::123456789012:role/TargetRole",
+		},
+		mountObjs: []map[string]interface{}{
+			{"objectName": "TestSecret1", "objectType": "secretsmanager"},
+		},
+		ssmRsp: []*ssm.GetParametersOutput{},
+		gsvRsp: []*secretsmanager.GetSecretValueOutput{
+			{SecretString: aws.String("TestSecret1Value"), VersionId: aws.String("1")},
+		},
+		descRsp:    []*secretsmanager.DescribeSecretOutput{},
+		expErr:     "",
+		expSecrets: map[string]string{"TestSecret1": "TestSecret1Value"},
+		perms:      "420",
+	},
 	{ // Verify failure when there is an error in the descriptors
 		testName:   "Fail Descriptors",
 		attributes: stdAttributes,

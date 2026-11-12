@@ -13,8 +13,16 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-// maxRoleSessionNameLen is the STS limit on a RoleSessionName.
-const maxRoleSessionNameLen = 64
+// STS limits a RoleSessionName to 2 to 64 characters.
+const (
+	minRoleSessionNameLen = 2
+	maxRoleSessionNameLen = 64
+)
+
+// defaultRoleSessionName is used when the mount request carries neither a
+// namespace nor a service account name, so the derived name would be too
+// short for STS.
+const defaultRoleSessionName = "secrets-store-csi-driver-provider-aws"
 
 // roleArnPattern matches arn:<partition>:iam::<12 digit account>:role/<path/><name>.
 // Role names allow [\w+=,.@-]; paths add '/'. Anything that passes here but is
@@ -55,12 +63,16 @@ func ParseAssumeRoleConfig(roleArn, nameSpace, svcAcct string) (*AssumeRoleConfi
 // it. "@" cannot appear in Kubernetes names, so the two parts are unambiguous.
 // Names over the STS limit of 64 characters are cut at 64.
 //
-// Both values come from the kubelet via the driver (podInfoOnMount), and
-// Kubernetes names only contain characters STS accepts, so nothing is
-// sanitized here. Anything else is rejected by STS with a ValidationError,
-// which fails the mount.
+// Both values come from the kubelet via the driver (podInfoOnMount), which the
+// chart sets, so with a working driver neither is empty. If both are missing
+// the name would be the single character "@", which STS rejects, so a fixed
+// default is used instead. Kubernetes names only contain characters STS
+// accepts, so nothing is sanitized here.
 func RoleSessionName(nameSpace, svcAcct string) string {
 	name := nameSpace + "@" + svcAcct
+	if len(name) < minRoleSessionNameLen {
+		return defaultRoleSessionName
+	}
 	if len(name) > maxRoleSessionNameLen {
 		name = name[:maxRoleSessionNameLen]
 	}

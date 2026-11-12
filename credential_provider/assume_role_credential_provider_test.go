@@ -102,6 +102,12 @@ func TestRoleSessionName(t *testing.T) {
 		{name: "exactly 64 is not truncated", nameSpace: strings.Repeat("n", 40), svcAcct: strings.Repeat("s", 23), want: strings.Repeat("n", 40) + "@" + strings.Repeat("s", 23)},
 		{name: "longer than 64 is cut at 64", nameSpace: strings.Repeat("n", 40), svcAcct: strings.Repeat("s", 30), want: strings.Repeat("n", 40) + "@" + strings.Repeat("s", 23)},
 		{name: "longest namespace leaves only the separator", nameSpace: longNS, svcAcct: "payments-api", want: longNS + "@"},
+
+		// Pod info is always present with a working driver; a mount without it
+		// must still produce a name STS accepts.
+		{name: "missing namespace keeps the service account", nameSpace: "", svcAcct: "sa", want: "@sa"},
+		{name: "missing service account keeps the namespace", nameSpace: "ns", svcAcct: "", want: "ns@"},
+		{name: "missing both falls back to the default", nameSpace: "", svcAcct: "", want: defaultRoleSessionName},
 	}
 
 	for _, tt := range tests {
