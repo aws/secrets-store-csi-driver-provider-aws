@@ -232,7 +232,12 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
         --approve \\
         --region $REGION"""
 
-    return f"""	log "Creating EKS Pod Identity addon"
+    return f"""	if [[ -z "${{POD_IDENTITY_ROLE_ARN}}" ]]; then
+		echo "Error: POD_IDENTITY_ROLE_ARN is not set" >&2
+		return 1
+	fi
+
+	log "Creating EKS Pod Identity addon"
     eksctl create addon --name eks-pod-identity-agent --cluster $CLUSTER_NAME --region $REGION
 
     log "Creating Pod Identity association"
