@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -12,6 +13,8 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	logsapi "k8s.io/component-base/logs/api/v1"
+	logsjson "k8s.io/component-base/logs/json"
 	"k8s.io/klog/v2"
 	csidriver "sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
@@ -26,6 +29,7 @@ var (
 	burst                  = flag.Int("burst", 10, "Maximum burst for throttle. To mount the requested secret on the pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the K8s APIs. Increase the value if the provider is throttled by client-side limit to the API server.")
 	eksAddonVersion        = flag.String("eks-addon-version", "", "The EKS addon version of the provider")
 	podIdentityHttpTimeout = flag.String("pod-identity-http-timeout", "", "The HTTP timeout threshold for Pod Identity authentication.")
+	logFormatJSON          = flag.Bool("log-format-json", false, "Set log formatter to JSON")
 )
 
 // parsePodIdentityHttpTimeout parses and validates the HTTP timeout for Pod Identity authentication
@@ -68,15 +72,50 @@ func createSocket(endpoint string) (net.Listener, error) {
 	return listener, nil
 }
 
+// configureLogging replaces the default klog text output with a logger that
+// emits log entries in JSON format to the given stream when jsonFormat is set.
+//
+// jsonFormat is passed in rather than read from the flag directly so that this
+// stays a pure function of its arguments; reading *logFormatJSON here would
+// silently do nothing if it ever ran before flag.Parse().
+func configureLogging(jsonFormat bool, out io.Writer) {
+	if !jsonFormat {
+		return
+	}
+	// Only ErrorStream is consulted while SplitStream is false (the default),
+	// but InfoStream is set to the same writer so that enabling SplitStream
+	// later cannot leave the factory with a nil writer.
+	logger, control := logsjson.Factory{}.Create(
+		*logsapi.NewLoggingConfiguration(),
+		logsapi.LoggingOptions{ErrorStream: out, InfoStream: out},
+	)
+	// ContextualLogger(true) makes klog.Background()/FromContext() return this
+	// logger directly, matching how component-base installs the factory itself.
+	// Without it, client-go's contextual log calls are serialized to text by
+	// klog first and arrive here as one flattened msg string.
+	klog.SetLoggerWithOptions(logger, klog.ContextualLogger(true), klog.FlushLogger(control.Flush))
+}
+
+// logFatal logs err at error severity and terminates the process. It replaces
+// klog.Fatalf, whose logr bridge demotes fatal messages to info severity when
+// a structured logger is installed via configureLogging.
+func logFatal(err error, msg string) {
+	klog.ErrorS(err, msg)
+	klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+}
+
 // Main entry point for the Secret Store CSI driver AWS provider. This main
 // rountine starts up the gRPC server that will listen for incoming mount
 // requests.
 func main() {
 
+	flag.Parse() // Parse command line flags
+
+	configureLogging(*logFormatJSON, os.Stderr)
+	defer klog.Flush()
+
 	klog.Infof("Starting %s version %s", server.ProviderName, server.Version)
 	klog.Infof("This provider requires tokenRequests to be configured in the CSIDriver spec (audiences: sts.amazonaws.com, pods.eks.amazonaws.com)")
-
-	flag.Parse() // Parse command line flags
 
 	//socket on which to listen to for driver calls
 	endpoint := fmt.Sprintf("%s/aws.sock", *endpointDir)
@@ -95,12 +134,12 @@ func main() {
 
 	listener, err := createSocket(endpoint)
 	if err != nil {
-		klog.Fatalf("Failed to listen on unix socket. error: %v", err)
+		logFatal(err, "Failed to listen on unix socket")
 	}
 
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
-		klog.Fatalf("Can not get cluster config. error: %v", err)
+		logFatal(err, "Can not get cluster config")
 	}
 
 	cfg.QPS = float32(*qps)
@@ -108,7 +147,7 @@ func main() {
 
 	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		klog.Fatalf("Can not initialize kubernetes client. error: %v", err)
+		logFatal(err, "Can not initialize kubernetes client")
 	}
 
 	defer func() { // Cleanup on shutdown
@@ -121,7 +160,7 @@ func main() {
 
 	providerSrv, err := server.NewServer(provider.NewSecretProviderFactory, clientset.CoreV1(), *driverWriteSecrets, podIdentityHttpTimeoutDuration, *eksAddonVersion)
 	if err != nil {
-		klog.Fatalf("Could not create server. error: %v", err)
+		logFatal(err, "Could not create server")
 	}
 	csidriver.RegisterCSIDriverProviderServer(grpcSrv, providerSrv)
 
@@ -129,7 +168,7 @@ func main() {
 
 	err = grpcSrv.Serve(listener)
 	if err != nil {
-		klog.Fatalf("Failure serving incoming mount requests. error: %v", err)
+		logFatal(err, "Failure serving incoming mount requests")
 	}
 
 }

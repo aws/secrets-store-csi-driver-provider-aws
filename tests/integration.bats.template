@@ -371,6 +371,37 @@ validate_jmes_mount() {
 	log "driverWritesSecrets mount verified successfully with atomic writer behavior"
 }
 
+@test "Provider emits JSON logs when logFormatJSON is enabled" {
+	log "Upgrading provider with logFormatJSON=true"
+	KUBECONFIG=${{KUBECONFIG_VAR}} helm upgrade -n $NAMESPACE csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws \
+		--set image.repository=$PRIVREPO \
+		--set image.tag=$PRIVTAG \
+		--set secrets-store-csi-driver.install=false \
+		--set logFormatJSON=true \
+		--set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]' \
+		--wait --wait-for-jobs --timeout=60s
+
+	# Wait for the restarted provider pods to be ready
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=secrets-store-csi-driver-provider-aws"
+	wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+	# Confirm the chart actually rendered the flag into the container args. A
+	# flag name the binary does not recognise would otherwise only surface as a
+	# node-wide provider CrashLoopBackOff.
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get daemonset -l app=secrets-store-csi-driver-provider-aws -o json | jq -e '.items[0].spec.template.spec.containers[0].args | index(\"--log-format-json=true\") != null'"
+	assert_success
+
+	log "Verifying provider startup log line is valid JSON"
+
+	# The startup banner is the provider's first log line and is emitted after
+	# flag.Parse(), so it must already be JSON formatted.
+	provider_pod=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod -l app=secrets-store-csi-driver-provider-aws -o jsonpath='{.items[0].metadata.name}')
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE logs $provider_pod | head -1 | jq -e '.msg | startswith(\"Starting secrets-store-csi-driver-provider-aws\")'"
+	assert_success
+
+	log "JSON logging verified successfully"
+}
+
 teardown() {
 	# Only run teardown for the driverWritesSecrets test
 	if [[ "$BATS_TEST_NAME" == "CSI inline volume test with driverWritesSecrets enabled" ]]; then
@@ -392,6 +423,24 @@ teardown() {
 		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE delete pod/$POD_NAME --ignore-not-found --wait=true
 		kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f BasicTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml
 		cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod/$POD_NAME"
+		wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+	fi
+
+	# NOTE: bats sets BATS_TEST_DESCRIPTION to the human readable test name;
+	# BATS_TEST_NAME holds the generated function name (test_<sanitized name>).
+	if [[ "$BATS_TEST_DESCRIPTION" == "Provider emits JSON logs when logFormatJSON is enabled" ]]; then
+		log "Tearing down logFormatJSON test - restoring logFormatJSON=false"
+
+		KUBECONFIG=${{KUBECONFIG_VAR}} helm upgrade -n $NAMESPACE csi-secrets-store-provider-aws ../charts/secrets-store-csi-driver-provider-aws \
+			--set image.repository=$PRIVREPO \
+			--set image.tag=$PRIVTAG \
+			--set secrets-store-csi-driver.install=false \
+			--set logFormatJSON=false \
+			--set-json 'imagePullSecrets=[{"name":"ghcr-secret"}]' \
+			--wait --wait-for-jobs --timeout=60s
+
+		# Wait for provider pods to be ready
+		cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=60s pod -l app=secrets-store-csi-driver-provider-aws"
 		wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
 	fi
 }

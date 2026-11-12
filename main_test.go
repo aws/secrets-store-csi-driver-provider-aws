@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 func TestParsePodIdentityHttpTimeout(t *testing.T) {
@@ -167,4 +172,115 @@ func TestCreateSocket_InvalidPath(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for invalid path, got nil")
 	}
+}
+
+func TestConfigureLogging(t *testing.T) {
+	// klog's logger is process-wide state, so these subtests must not run in
+	// parallel with anything else that asserts on klog output.
+	defer klog.ClearLogger()
+
+	t.Run("disabled leaves klog untouched", func(t *testing.T) {
+		var out bytes.Buffer
+		configureLogging(false, &out)
+		klog.Infof("plain message")
+		if out.Len() != 0 {
+			t.Errorf("Expected no output on the given stream when disabled, got %q", out.String())
+		}
+	})
+
+	t.Run("enabled emits JSON", func(t *testing.T) {
+		var out bytes.Buffer
+		configureLogging(true, &out)
+		defer klog.ClearLogger()
+
+		// InfoS reaches the logger directly, while the printf-style calls used
+		// by every production call site in this repo take a different klog code
+		// path (printfDepth -> output) that strips klog's own header and trims
+		// the trailing newline. Both are asserted so a klog change that breaks
+		// only the printf path cannot pass unnoticed.
+		for _, tc := range []struct {
+			name string
+			log  func()
+			want string
+		}{
+			{"structured", func() { klog.InfoS("json message") }, "json message"},
+			{"printf", func() { klog.Infof("formatted %s", "message") }, "formatted message"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				out.Reset()
+				tc.log()
+
+				var entry map[string]interface{}
+				if err := json.NewDecoder(&out).Decode(&entry); err != nil {
+					t.Fatalf("Log output is not valid JSON: %v (raw: %q)", err, out.String())
+				}
+				if entry["msg"] != tc.want {
+					t.Errorf("Expected msg %q, got %v", tc.want, entry["msg"])
+				}
+				if entry["caller"] == nil {
+					t.Error("Expected a caller field in the JSON entry")
+				}
+			})
+		}
+	})
+}
+
+func TestLogFatal(t *testing.T) {
+	var out bytes.Buffer
+	configureLogging(true, &out)
+	defer klog.ClearLogger()
+
+	exitCode := -1
+	klog.OsExit = func(code int) { exitCode = code }
+	defer func() { klog.OsExit = os.Exit }()
+
+	logFatal(errors.New("boom"), "fatal message")
+
+	if exitCode != 1 {
+		t.Fatalf("Expected exit code 1, got %d", exitCode)
+	}
+	var entry map[string]interface{}
+	if err := json.NewDecoder(&out).Decode(&entry); err != nil {
+		t.Fatalf("Log output is not valid JSON: %v (raw: %q)", err, out.String())
+	}
+	if entry["msg"] != "fatal message" {
+		t.Errorf("Expected msg %q, got %v", "fatal message", entry["msg"])
+	}
+	if entry["err"] != "boom" {
+		t.Errorf("Expected err %q, got %v", "boom", entry["err"])
+	}
+}
+
+// The test environment is not a cluster, so main is expected to reach one of
+// its logFatal call sites and exit with code 1. klog.OsExit exists exactly for
+// intercepting that exit; panicking inside it stops main from running past the
+// failed call site.
+func TestMainExitsFatallyOutsideCluster(t *testing.T) {
+	oldArgs := os.Args
+	oldEndpointDir := *endpointDir
+	defer func() {
+		os.Args = oldArgs
+		*endpointDir = oldEndpointDir
+		klog.OsExit = os.Exit
+	}()
+	os.Args = []string{"secrets-store-csi-driver-provider-aws"}
+	*endpointDir = t.TempDir()
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+
+	type exitPanic struct{ code int }
+	klog.OsExit = func(code int) { panic(exitPanic{code}) }
+
+	defer func() {
+		switch r := recover().(type) {
+		case nil:
+			t.Fatal("Expected main to exit fatally outside a cluster")
+		case exitPanic:
+			if r.code != 1 {
+				t.Errorf("Expected exit code 1, got %d", r.code)
+			}
+		default:
+			t.Fatalf("Expected main to exit via klog.FlushAndExit, got panic: %v", r)
+		}
+	}()
+	main()
 }
