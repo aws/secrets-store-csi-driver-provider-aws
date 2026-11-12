@@ -119,10 +119,13 @@ func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTim
 		ssmBrReqErr = tstData.ssmBrReqErr
 	}
 
-	// Get the test attributes.
+	// Get the test attributes. tstData is nil for the tests that fail before
+	// Mount reads any attribute, so everything below goes through these locals.
 	attributes := map[string]string{}
+	testName := "<nil test case>"
 	if tstData != nil {
 		attributes = tstData.attributes
+		testName = tstData.testName
 	}
 	region := attributes["region"]
 	nodeName := attributes["nodeName"]
@@ -141,10 +144,10 @@ func newServerWithMocks(tstData *testCase, driverWrites bool, podIdentityHttpTim
 		// Mount must hand the factory assumed-role credentials exactly when
 		// assumeRoleArn is set; passing nil through getAwsConfigs would still
 		// compile and still parse, so check the configs themselves.
-		wantAssumeRole := tstData.attributes["assumeRoleArn"] != ""
+		wantAssumeRole := attributes["assumeRoleArn"] != ""
 		for i, cfg := range configs {
 			if got := aws.IsCredentialsProvider(cfg.Credentials, &stscreds.AssumeRoleProvider{}); got != wantAssumeRole {
-				panic(fmt.Sprintf("%s: config %d (%s) has AssumeRoleProvider=%v, want %v", tstData.testName, i, regions[i], got, wantAssumeRole))
+				panic(fmt.Sprintf("%s: config %d (%s) has AssumeRoleProvider=%v, want %v", testName, i, regions[i], got, wantAssumeRole))
 			}
 		}
 		if len(region) == 0 {
