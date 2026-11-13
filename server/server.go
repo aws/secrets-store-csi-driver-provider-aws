@@ -46,6 +46,7 @@ const (
 	failoverRegionAttrib       = "failoverRegion"                // The attribute name for the failover region in the SecretProviderClass
 	usePodIdentityAttrib       = "usePodIdentity"                // The attribute used to indicate use Pod Identity for auth
 	preferredAddressTypeAttrib = "preferredAddressType"          // The attribute used to indicate IP address preference (IPv4 or IPv6) for network connections. It controls whether connecting to the Pod Identity Agent IPv4 or IPv6 endpoint.
+	assumeRoleArnAttrib        = "assumeRoleArn"                 // Optional IAM role to assume (via STS AssumeRole) with the base IRSA/Pod Identity credentials before fetching secrets
 	roleArnAnnotation          = "eks.amazonaws.com/role-arn"
 )
 
@@ -177,7 +178,17 @@ func (s *CSIDriverProviderServer) Mount(ctx context.Context, req *v1alpha1.Mount
 		return nil, err
 	}
 
-	awsConfigs, err := s.getAwsConfigs(ctx, regions, usePodIdentity, preferredAddressType, roleArn, token)
+	// Optional STS AssumeRole on top of the base credentials. A malformed value
+	// fails the mount.
+	assumeRole, err := credential_provider.ParseAssumeRoleConfig(attrib[assumeRoleArnAttrib], nameSpace, svcAcct)
+	if err != nil {
+		return nil, err
+	}
+	if assumeRole != nil {
+		klog.Infof("Assuming role %s with session name %s for pod %s in namespace %s", assumeRole.RoleArn, assumeRole.RoleSessionName, podName, nameSpace)
+	}
+
+	awsConfigs, err := s.getAwsConfigs(ctx, regions, usePodIdentity, preferredAddressType, roleArn, token, assumeRole)
 	if err != nil {
 		return nil, err
 	}
@@ -302,9 +313,10 @@ func (s *CSIDriverProviderServer) getAwsRegions(ctx context.Context, region, bac
 // Private helper to get the aws configs for all the lookup regions for a given pod.
 //
 // Gets the pod's AWS creds for each lookup region
+// Optionally wraps them in an STS AssumeRole provider when assumeRole is set
 // Establishes the connection using Aws cred for each lookup region
 // If at least one config is not created, error will be thrown
-func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token string) ([]aws.Config, error) {
+func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []string, usePodIdentity bool, preferredAddressType, roleArn, token string, assumeRole *credential_provider.AssumeRoleConfig) ([]aws.Config, error) {
 	var awsConfigsList []aws.Config
 	appID := s.appID()
 
@@ -319,6 +331,10 @@ func (s *CSIDriverProviderServer) getAwsConfigs(ctx context.Context, regions []s
 		}
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", region, err)
+		}
+
+		if assumeRole != nil {
+			credProvider = credential_provider.NewAssumeRoleCredentialProvider(credProvider, *assumeRole)
 		}
 
 		awsConfig, err := credProvider.GetAWSConfig(ctx)

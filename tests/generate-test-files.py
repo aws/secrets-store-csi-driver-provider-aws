@@ -60,6 +60,9 @@ ssm = {
     FAILOVERREGION: boto3.client("ssm", region_name=FAILOVERREGION),
 }
 
+# Role chaining (assumeRoleArn): the roles are pre-created, see
+# setup-role-chaining-iam.sh. The tests only create the AssumeRole* objects.
+
 
 def create_secret_if_not_exists(name: str, value: str, region: str):
     """Create secret if it doesn't exist"""
@@ -90,7 +93,13 @@ def create_parameter_if_not_exists(name: str, value: str, region: str):
 def delete_secret_if_exists(name: str, region: str):
     """Delete secret if it exists"""
     print(f"  Deleting secret: {name} in {region}")
-    secretsmanager[region].delete_secret(SecretId=name, ForceDeleteWithoutRecovery=True)
+    try:
+        secretsmanager[region].delete_secret(SecretId=name, ForceDeleteWithoutRecovery=True)
+    except botocore.exceptions.ClientError as error:
+        if error.response["Error"]["Code"] == "ResourceNotFoundException":
+            print(f"  Secret does not exist: {name} in {region}")
+        else:
+            raise error
 
 
 def delete_parameter_if_exists(name: str, region: str):
@@ -180,6 +189,18 @@ def create_secrets_for_config(arch: str, auth_type: str):
         FAILOVERREGION,
     )
 
+    # Objects read through assumeRoleArn; only the target role may read them.
+    for region in (REGION, FAILOVERREGION):
+        create_secret_if_not_exists(
+            f"AssumeRoleSecretTest-{suffix}", "AssumeRoleSecretValue", region
+        )
+        create_secret_if_not_exists(
+            f"AssumeRoleRotationTest-{suffix}", "BeforeRotation", region
+        )
+        create_parameter_if_not_exists(
+            f"AssumeRoleParameterTest-{suffix}", "AssumeRoleParameterValue", region
+        )
+
 
 def cleanup_secrets_for_config(arch: str, auth_type: str):
     """Cleanup secrets for a specific test configuration"""
@@ -214,6 +235,12 @@ def cleanup_secrets_for_config(arch: str, auth_type: str):
     delete_parameter_if_exists(f"ParameterStoreRotationTest-{suffix}", FAILOVERREGION)
     delete_parameter_if_exists(f"jsonSsm-{suffix}", FAILOVERREGION)
 
+    # Role chaining test objects
+    for region in (REGION, FAILOVERREGION):
+        delete_secret_if_exists(f"AssumeRoleSecretTest-{suffix}", region)
+        delete_secret_if_exists(f"AssumeRoleRotationTest-{suffix}", region)
+        delete_parameter_if_exists(f"AssumeRoleParameterTest-{suffix}", region)
+
 
 def get_auth_setup(arch: str, auth_type: str) -> str:
     """Generate authentication setup code"""
@@ -230,6 +257,17 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
         --attach-policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite \\
         --override-existing-serviceaccounts \\
         --approve \\
+        --region $REGION
+
+    log "Creating IAM service account for IRSA role chaining"
+    eksctl create iamserviceaccount \\
+        --name assume-role-test-sa-{arch}-{auth_type} \\
+        --namespace $NAMESPACE \\
+        --cluster $CLUSTER_NAME \\
+        --role-name eksctl-ascp-role-chaining-base-{arch}-{auth_type} \\
+        --attach-policy-arn arn:aws:iam::$ACCOUNT_NUMBER:policy/ascp-role-chaining-base-policy \\
+        --override-existing-serviceaccounts \\
+        --approve \\
         --region $REGION"""
 
     return f"""	log "Creating EKS Pod Identity addon"
@@ -241,6 +279,16 @@ def get_auth_setup(arch: str, auth_type: str) -> str:
         --namespace $NAMESPACE \\
         --region $REGION \\
         --service-account-name basic-test-mount-sa-{arch}-{auth_type} \\
+        --role-arn $POD_IDENTITY_ROLE_ARN \\
+        --create-service-account true
+
+    # Role chaining service account, bound to the same Pod Identity role.
+    log "Creating Pod Identity association for role chaining"
+    eksctl create podidentityassociation \\
+        --cluster $CLUSTER_NAME \\
+        --namespace $NAMESPACE \\
+        --region $REGION \\
+        --service-account-name assume-role-test-sa-{arch}-{auth_type} \\
         --role-arn $POD_IDENTITY_ROLE_ARN \\
         --create-service-account true"""
 
@@ -295,45 +343,40 @@ def main():
             fn(config["ARCH"], config["AUTH_TYPE"])
         return
 
+    # Per-cell files rendered from each template
+    generated_files = {
+        "BasicTestMountSPC.yaml.template": "BasicTestMountSPC-{suffix}.yaml",
+        "BasicTestMount.yaml.template": "BasicTestMount-{suffix}.yaml",
+        "AssumeRoleTestMountSPC.yaml.template": "AssumeRoleTestMountSPC-{suffix}.yaml",
+        "AssumeRoleTestMount.yaml.template": "AssumeRoleTestMount-{suffix}.yaml",
+    }
+
     # Generate files for each configuration
     for config_name, config in CONFIGS.items():
         print(f"Generating files for {config_name}...")
 
-        arch = config["ARCH"]
-        auth_type = config["AUTH_TYPE"]
+        suffix = f"{config['ARCH']}-{config['AUTH_TYPE']}"
 
         # Generate BATS file
         replace_template_vars(
             "integration.bats.template", f"{config_name}.bats", config
         )
-
-        # Generate SecretProviderClass file
-        replace_template_vars(
-            "BasicTestMountSPC.yaml.template",
-            f"BasicTestMountSPC-{arch}-{auth_type}.yaml",
-            config,
-        )
-
-        # Generate Pod deployment file
-        replace_template_vars(
-            "BasicTestMount.yaml.template",
-            f"BasicTestMount-{arch}-{auth_type}.yaml",
-            config,
-        )
-
         print(f"  Generated: {config_name}.bats")
-        print(f"  Generated: BasicTestMountSPC-{arch}-{auth_type}.yaml")
-        print(f"  Generated: BasicTestMount-{arch}-{auth_type}.yaml")
+
+        # Generate SecretProviderClass and pod files
+        for template, output in generated_files.items():
+            output_file = output.format(suffix=suffix)
+            replace_template_vars(template, output_file, config)
+            print(f"  Generated: {output_file}")
 
     print("\nAll test files generated successfully")
     print("\nGenerated files:")
     for config_name, _ in CONFIGS.items():
         print(f"  - {config_name}.bats")
     for config_name, config in CONFIGS.items():
-        arch = config["ARCH"]
-        auth_type = config["AUTH_TYPE"]
-        print(f"  - BasicTestMountSPC-{arch}-{auth_type}.yaml")
-        print(f"  - BasicTestMount-{arch}-{auth_type}.yaml")
+        suffix = f"{config['ARCH']}-{config['AUTH_TYPE']}"
+        for output in generated_files.values():
+            print(f"  - {output.format(suffix=suffix)}")
 
     print("\nUsage:")
     print("  ./generate-test-files.py                                # Generate files only")

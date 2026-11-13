@@ -211,6 +211,7 @@ The parameters section contains the details of the mount request and contain one
   - "ipv4", "IPv4", or "IPV4" - Force the use of Pod Identity Agent IPv4 endpoint
   - "ipv6", "IPv6", or "IPV6" - Force the use of Pod Identity Agent IPv6 endpoint
   - not specified - Use auto endpoint selection, trying IPv4 endpoint first and falling back to IPv6 endpoint if IPv4 fails
+* assumeRoleArn: An optional field specifying the ARN of an IAM role to assume with the base credentials (IRSA or Pod Identity) before retrieving secrets. Must be an IAM role ARN of the form `arn:<partition>:iam::<account-id>:role/<role-name>`, including the role's path if it has one. The session duration is fixed at 15 minutes and no external ID is sent. See the Role-chaining section below for more information.
 
 The primary objects field of the SecretProviderClass can contain the following sub-fields:
 * objectName: This field is required. It specifies the name of the secret or parameter to be fetched. For Secrets Manager this is the [SecretId](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html#API_GetSecretValue_RequestParameters) parameter and can be either the friendly name or full ARN of the secret. For SSM Parameter Store, this is the [Name](https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParameter.html#API_GetParameter_RequestParameters) of the parameter and can be either the name or full ARN of the parameter.
@@ -299,6 +300,99 @@ EKS Pod Identity [CreatePodIdentityAssociation](https://docs.aws.amazon.com/eks/
 
 To mount AWS Secrets Manager secrets from a different AWS account than your EKS cluster, follow [cross-account access](https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_examples_cross.html) to set up resource policy for the secret, key policy for the KMS key, and IAM role used in Pod Identity association.
 Fetching cross-account parameters from SSM Parameter Store is only supported for parameters in the advanced parameter tier. See [Working with Shared Parameters](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-store-shared-parameters.html) for details. 
+
+Instead of resource policies, the provider can read the secrets through an IAM role in the account that owns them, either with a Pod Identity target IAM role or with `assumeRoleArn`. This also works for standard-tier SSM parameters; see [Role-chaining](#role-chaining).
+
+### Role-chaining
+
+As an alternative to resource policies, the provider can call STS [AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html) with the pod's base credentials (IRSA or Pod Identity) and fetch secrets as the assumed role. This is useful for cross-account access where the target account owns the role that is allowed to read the secrets:
+
+```yaml
+spec:
+  provider: aws
+  parameters:
+    region: us-east-1
+    assumeRoleArn: "arn:aws:iam::222222222222:role/SecretsReader"
+    objects: |
+      - objectName: "arn:aws:secretsmanager:us-east-1:222222222222:secret:MySecret-AbCdEf"
+```
+
+A complete SecretProviderClass is in [examples/ExampleSecretProviderClass-AssumeRole.yaml](examples/ExampleSecretProviderClass-AssumeRole.yaml). Objects are fetched with the assumed role's credentials, so a friendly name resolves in the target role's account.
+
+With Pod Identity, EKS can do this chaining itself: a Pod Identity association can name a [target IAM role](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-assign-target-role.html), and the pod then receives the target role's credentials with no SecretProviderClass change. Use `assumeRoleArn` instead when you use IRSA, when SecretProviderClasses used by the same service account need different roles, or when the pod's containers should keep the base role's own credentials.
+
+Three things need to be set up: a target role in the account that owns the secrets, permission for the pod's base role to assume it, and the `assumeRoleArn` parameter in the SecretProviderClass. Nothing on the cluster changes: the driver and provider keep their settings, and the IRSA annotation or Pod Identity association that provides the base credentials stays as it is. With a Pod Identity base role whose association keeps session tags on (the default), `sts:TagSession` must be allowed both in the target role's trust policy and in the base role's identity policy; the mount fails if either is missing.
+
+#### 1. The target role
+
+Create the role in the account that owns the secrets. The provider reads the secrets as this role, so give it the permissions of the access policy from [Usage](#usage), created in the target account, plus `ssm:GetParameters` for SSM parameters and `kms:Decrypt` on the key when a secret or parameter uses a customer managed key.
+
+Its trust policy names the pod's base role (the IRSA role or the Pod Identity role) as the principal. For an IRSA base role in account 111111111111, `sts:AssumeRole` is all it needs:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::111111111111:role/MyPodBaseRole" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+
+By default, a Pod Identity base role carries [session tags](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-abac.html) that STS passes on to the AssumeRole call, so the trust policy must also allow `sts:TagSession`. The same tags can restrict which cluster, namespace and service account may assume the role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::111111111111:role/MyPodBaseRole" },
+      "Action": ["sts:AssumeRole", "sts:TagSession"],
+      "Condition": {
+        "StringEquals": {
+          "aws:PrincipalTag/eks-cluster-arn": "arn:aws:eks:us-east-1:111111111111:cluster/my-cluster",
+          "aws:PrincipalTag/kubernetes-namespace": "my-namespace",
+          "aws:PrincipalTag/kubernetes-service-account": "my-serviceaccount"
+        }
+      }
+    }
+  ]
+}
+```
+
+These conditions rely on the association's session tags, which are on by default. If the association disables session tags (the documented workaround for `PackedPolicyTooLarge`), the base session carries no Pod Identity session tags: `sts:TagSession` is not needed in either policy.
+
+#### 2. The base role
+
+The pod's base role needs an identity policy that allows `sts:AssumeRole` on the target role. It does not need Secrets Manager or Parameter Store permissions of its own. For an IRSA base role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::222222222222:role/SecretsReader"
+    }
+  ]
+}
+```
+
+For a Pod Identity base role with session tags, use `"Action": ["sts:AssumeRole", "sts:TagSession"]`.
+
+#### 3. The SecretProviderClass
+
+Add `assumeRoleArn` with the target role's ARN, as in the example above.
+
+Behavior:
+* A permanent STS rejection such as `AccessDenied` (for example a missing trust policy statement) fails the mount immediately, the same way a Secrets Manager `ResourceNotFoundException` does, and the pod's `FailedMount` event shows the STS error message, which identifies the pod's role and the target role. The provider does not try the `failoverRegion` in that case, because IAM is global and the same trust or permission problem would repeat there. STS throttling, request timeouts, 5xx responses and connection errors are retried by the SDK, and if a `failoverRegion` is set, that region's STS endpoint gets its own attempt before the mount fails.
+* The STS session name is `<namespace>@<serviceAccountName>` so CloudTrail events for the assumed role can be attributed to the requesting workload. Names longer than STS's 64-character limit are cut at 64 characters, so if you rely on the session name to tell workloads apart, keep the combined length of namespace and service account name under 64. If a mount request has no namespace or service account name, the session name is `secrets-store-csi-driver-provider-aws`.
+* Every mount, including every rotation poll, makes one AssumeRole call per region when STS answers. Transient STS errors are retried at two levels: the STS client makes up to 3 attempts, and the Secrets Manager or SSM request that needed the credentials retries up to 3 times as well, so a mount can make about 9 AssumeRole calls per region before it gives up. A failed credential fetch is not cached, so with an intermittently failing STS the same budget applies again for each secret and each batch of up to 10 SSM parameters in the SecretProviderClass. STS quota is consumed in the base role's account. Choose the driver's rotation poll interval with that call volume in mind: with Helm it is the `rotationPollInterval` value shown in [Rotation](#rotation) (`secrets-store-csi-driver.rotationPollInterval` when this provider's chart installs the driver), which sets the driver's `--rotation-poll-interval` flag.
 
 ### Private Builds
 You can pull down this git repository and build and install this plugin into your account's [AWS ECR](https://aws.amazon.com/ecr/) registry using the following steps. First clone the repository:

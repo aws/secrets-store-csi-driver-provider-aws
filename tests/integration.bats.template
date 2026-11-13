@@ -11,6 +11,12 @@ export REGION=us-west-2
 export FAILOVERREGION=us-east-2
 export ACCOUNT_NUMBER=$(aws --region $REGION sts get-caller-identity --query Account --output text)
 
+# Role chaining (assumeRoleArn). The roles are pre-created with fixed names, see
+# setup-role-chaining-iam.sh. The service account is created in setup_file.
+ASSUME_ROLE_NAME=assume-role-test-mount-{{ARCH}}-{{AUTH_TYPE}}
+ASSUME_ROLE_TARGET_ARN=arn:aws:iam::$ACCOUNT_NUMBER:role/ascp-role-chaining-target
+ASSUME_ROLE_UNTRUSTED_ARN=arn:aws:iam::$ACCOUNT_NUMBER:role/ascp-role-chaining-untrusted
+
 {{LOG_COLOR}}='\033[0;{{COLOR_CODE}}m'
 NC='\033[0m'
 
@@ -407,4 +413,85 @@ teardown() {
 	assert_success
 
 	log "Deployment deletion and secret cleanup test completed"
+}
+
+# ---------------------------------------------------------------------------
+# Role chaining (assumeRoleArn). The service account's own role cannot read the
+# AssumeRole* objects, so a mount succeeds only through the target role.
+# ---------------------------------------------------------------------------
+
+# Applies a SecretProviderClass that assumes role_arn and a pod that mounts it, both named name.
+deploy_assume_role_mount() {
+	local name=$1 role_arn=$2
+	ASSUME_ROLE_NAME=$name ASSUME_ROLE_ARN=$role_arn envsubst < AssumeRoleTestMountSPC-{{ARCH}}-{{AUTH_TYPE}}.yaml | kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f -
+	ASSUME_ROLE_NAME=$name envsubst < AssumeRoleTestMount-{{ARCH}}-{{AUTH_TYPE}}.yaml | kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE apply -f -
+}
+
+@test "CSI inline volume test with assume role" {
+	log "Starting CSI inline volume test with assume role, target $ASSUME_ROLE_TARGET_ARN"
+
+	deploy_assume_role_mount $ASSUME_ROLE_NAME "$ASSUME_ROLE_TARGET_ARN"
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE wait --for=condition=Ready --timeout=120s pod/$ASSUME_ROLE_NAME
+
+	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $ASSUME_ROLE_NAME -- cat /mnt/secrets-store/AssumeRoleSecretTest-{{ARCH}}-{{AUTH_TYPE}})
+	[[ "${result//$'\r'}" == "AssumeRoleSecretValue" ]]
+
+	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $ASSUME_ROLE_NAME -- cat /mnt/secrets-store/AssumeRoleParameterTest-{{ARCH}}-{{AUTH_TYPE}})
+	[[ "${result//$'\r'}" == "AssumeRoleParameterValue" ]]
+
+	log "CSI inline volume test with assume role completed"
+}
+
+@test "assume role session name identifies the workload in provider logs" {
+	log "Verifying the provider logged the assumed role and session name"
+
+	# The target account sees this session name in CloudTrail.
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE logs -l app=secrets-store-csi-driver-provider-aws --tail=-1 | grep -F 'Assuming role $ASSUME_ROLE_TARGET_ARN with session name $NAMESPACE@assume-role-test-sa-{{ARCH}}-{{AUTH_TYPE}}'"
+	assert_success
+
+	log "Session name verification completed"
+}
+
+@test "CSI inline volume test with rotation - assume role" {
+	log "Starting rotation test with assume role"
+
+	result=$(kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $ASSUME_ROLE_NAME -- cat /mnt/secrets-store/AssumeRoleRotationTest-{{ARCH}}-{{AUTH_TYPE}})
+	[[ "${result//$'\r'}" == "BeforeRotation" ]]
+
+	log "Updating Secrets Manager value for assume role rotation test"
+	aws secretsmanager put-secret-value --secret-id AssumeRoleRotationTest-{{ARCH}}-{{AUTH_TYPE}} --secret-string AfterRotation --region $REGION
+
+	# Every rotation poll is a fresh Mount that assumes the role again.
+	log "Verifying assume role rotation"
+	cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE exec $ASSUME_ROLE_NAME -- cat /mnt/secrets-store/AssumeRoleRotationTest-{{ARCH}}-{{AUTH_TYPE}} | tr -d '\\r' | grep -qx AfterRotation"
+	wait_for_process 240 5 "$cmd"
+
+	log "Rotation test with assume role completed"
+}
+
+@test "assume role fails closed when the target role does not trust the base role" {
+	log "Starting fail-closed test against untrusted role $ASSUME_ROLE_UNTRUSTED_ARN"
+
+	local name=assume-role-untrusted-{{ARCH}}-{{AUTH_TYPE}}
+	deploy_assume_role_mount $name "$ASSUME_ROLE_UNTRUSTED_ARN"
+
+	# An STS rejection is fatal, so the FailedMount event carries the STS error.
+	# The generic "Failed to fetch secret from all regions" (Secrets Manager) or
+	# "Failed to fetch parameters from all regions." (Parameter Store) would mean
+	# the provider treated it as retryable. Object types are fetched in map order,
+	# so either can appear.
+	events_cmd="kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get events --field-selector involvedObject.name=$name -o jsonpath='{.items[*].message}'"
+	wait_for_process $WAIT_TIME 5 "$events_cmd | grep -q AccessDenied"
+
+	events=$(eval "$events_cmd")
+	assert_match "$ASSUME_ROLE_UNTRUSTED_ARN" "$events"
+	assert_not_match "from all regions" "$events"
+
+	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$name -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+	assert_not_equal "True" "$output"
+
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE delete pod/$name --ignore-not-found --wait=false
+	kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE delete secretproviderclass/$name --ignore-not-found
+
+	log "Fail-closed test against untrusted role completed"
 }
