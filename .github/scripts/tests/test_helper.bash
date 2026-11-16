@@ -34,6 +34,7 @@ common_setup() {
 	unset RELEASE_CHECK_DEADLINE_SECONDS FAKE_TIMEOUT_EXPIRE
 	export GITHUB_REF=refs/heads/main
 	export GITHUB_REPOSITORY=aws/secrets-store-csi-driver-provider-aws
+	export PRACTICE=false
 
 	export REPO_ROOT="$BATS_TEST_TMPDIR/repo"
 	mkdir -p "$REPO_ROOT/$CHART_DIR"
@@ -197,9 +198,10 @@ result_lines() {
 }
 
 # expect_results <line>... : the output's result lines are exactly these, one per check (6), in order, then the
-# matching "→" summary. "ok" stands for that check's usual ✔ line for $VERSION (current release 3.1.4).
+# matching "→" summary. "ok" stands for that check's usual ✔ line for $VERSION (current release 3.1.4). With
+# PRACTICE=true, "ok" for checks 3-5 is the practice skip line and the summary ends in " (practice)".
 expect_results() {
-	local version=${VERSION:-} expected="" line i=0 failed=0
+	local version=${VERSION:-} expected="" line i=0 failed=0 suffix=""
 	local -a ok_lines=(
 		"✔ on main"
 		"✔ $version is a valid version"
@@ -208,6 +210,12 @@ expect_results() {
 		"✔ $version is not on ECR Public yet"
 		"✔ $version is higher than the current release (3.1.4)"
 	)
+	if [[ "${PRACTICE:-}" == true ]]; then
+		ok_lines[3]="– skipped: practice run"
+		ok_lines[4]="– skipped: practice run"
+		ok_lines[5]="– skipped: practice run"
+		suffix=" (practice)"
+	fi
 	if (($# != ${#ok_lines[@]})); then
 		echo "expect_results needs ${#ok_lines[@]} lines, got $#"
 		return 1
@@ -223,9 +231,9 @@ expect_results() {
 	done
 	# ${expected} needs the braces: bash 3.2 can read the bytes of "→" as part of the variable name.
 	case "$failed" in
-	0) expected="${expected}→ all checks passed" ;;
-	1) expected="${expected}→ 1 problem" ;;
-	*) expected="${expected}→ $failed problems" ;;
+	0) expected="${expected}→ all checks passed${suffix}" ;;
+	1) expected="${expected}→ 1 problem${suffix}" ;;
+	*) expected="${expected}→ $failed problems${suffix}" ;;
 	esac
 	expect_eq "$(result_lines)" "$expected"
 }

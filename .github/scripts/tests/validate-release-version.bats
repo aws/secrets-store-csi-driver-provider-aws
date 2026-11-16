@@ -324,3 +324,40 @@ bad_link() {
 	expect_status 0
 	expect_eq "$(find "$TMPDIR" -mindepth 1 | wc -l | tr -d ' ')" 0
 }
+
+# --- practice runs -----------------------------------------------------------------------------------------------
+
+@test "practice: main's own version passes, checks 3-5 are skipped, and nothing is called" {
+	export PRACTICE=true VERSION=3.1.4
+	set_version 3.1.4
+	echo taken >"$FAKE_DIR/git.response" # would fail the git tag check if it ran
+	run_check
+	expect_status 0
+	expect_eq "$(result_lines)" "✔ on main
+✔ 3.1.4 is a valid version
+✔ Makefile, Chart.yaml and values.yaml all say 3.1.4
+– skipped: practice run
+– skipped: practice run
+– skipped: practice run
+→ all checks passed (practice)"
+	expect_eq "$(count_lines "$FAKE_DIR/curl.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/git.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/timeout.calls")" 0
+}
+
+@test "a missing or bad PRACTICE stops before any check, with no result lines" {
+	local bad
+	good_release 3.1.5
+	for bad in "" True FALSE yes 1 "true " $'true\nfalse'; do
+		export PRACTICE=$bad
+		run_check
+		expect_status 2
+		expect_eq "$output" "PRACTICE must be true or false"
+	done
+	unset PRACTICE
+	run_check
+	expect_status 2
+	expect_eq "$output" "PRACTICE must be true or false"
+	expect_eq "$(count_lines "$FAKE_DIR/curl.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/git.calls")" 0
+}

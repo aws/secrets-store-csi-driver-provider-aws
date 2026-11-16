@@ -11,7 +11,10 @@
 # Every check runs and prints one line (✔, ✘ or – skipped). If any check failed, it prints the number of
 # problems and exits 1. It uses no AWS credentials: the registry calls are anonymous.
 #
-# Inputs (environment): VERSION, GITHUB_REF, GITHUB_REPOSITORY.
+# A practice run (PRACTICE=true) uses the version already on main, so it runs checks 0-2 and skips 3-5, with no
+# network calls. A missing or bad PRACTICE is a wiring error: the script prints why and exits 2 before any check.
+#
+# Inputs (environment): VERSION, PRACTICE (true or false), GITHUB_REF, GITHUB_REPOSITORY.
 # Test-only settings: REPO_ROOT, RELEASE_CHECK_ECR_URL, RELEASE_CHECK_RETRY_SCALE, RELEASE_CHECK_DEADLINE_SECONDS.
 #
 # Bash 3.2 compatible (macOS /bin/bash). Bash turns off `set -e` inside functions called from `if`, `||` or `&&`,
@@ -31,6 +34,7 @@ readonly TIME_FLOOR=5      # never start a network call with less than this many
 readonly OUT_OF_TIME=75    # helper exit status for "deadline reached"
 
 VERSION="${VERSION:-}"
+PRACTICE="${PRACTICE:-}"
 GITHUB_REF="${GITHUB_REF:-}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}"
 ECR_URL="${RELEASE_CHECK_ECR_URL:-https://public.ecr.aws}"
@@ -43,6 +47,11 @@ for setting in "RETRY_SCALE=$RETRY_SCALE" "DEADLINE=$DEADLINE"; do
 		exit 1
 	fi
 done
+# No ✘ here: this is a setting, not a check, and must not look like one of the result lines.
+if [[ "$PRACTICE" != true && "$PRACTICE" != false ]]; then
+	echo "PRACTICE must be true or false" >&2
+	exit 2
+fi
 
 problems=0
 version_ok=0
@@ -347,6 +356,10 @@ check_git_tag() {
 		skip "git tag check needs a valid version"
 		return
 	fi
+	if [[ "$PRACTICE" == true ]]; then
+		skip "practice run"
+		return
+	fi
 	if ((out_of_time == 1)); then
 		skip "ran out of time"
 		return
@@ -405,6 +418,10 @@ check_not_published() {
 		skip "ECR Public check needs a valid version"
 		return
 	fi
+	if [[ "$PRACTICE" == true ]]; then
+		skip "practice run"
+		return
+	fi
 	if ((out_of_time == 1)); then
 		skip "ran out of time"
 		return
@@ -438,6 +455,10 @@ check_higher() {
 
 	if ((version_ok == 0)); then
 		skip "version order check needs a valid version"
+		return
+	fi
+	if [[ "$PRACTICE" == true ]]; then
+		skip "practice run"
 		return
 	fi
 	if ((out_of_time == 1)); then
@@ -521,12 +542,16 @@ check_git_tag
 check_not_published
 check_higher
 
+suffix=""
+if [[ "$PRACTICE" == true ]]; then
+	suffix=" (practice)"
+fi
 if ((problems > 0)); then
 	if ((problems == 1)); then
-		echo "→ 1 problem"
+		echo "→ 1 problem${suffix}"
 	else
-		echo "→ $problems problems"
+		echo "→ $problems problems${suffix}"
 	fi
 	exit 1
 fi
-echo "→ all checks passed"
+echo "→ all checks passed${suffix}"
