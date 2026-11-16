@@ -89,7 +89,7 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    needs: build-docker
+    needs: [authorize, build-docker]
     if: ${{ !cancelled() && needs.build-docker.result == 'success' }}
     uses: ./.github/workflows/integ.yml
     with:
