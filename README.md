@@ -20,7 +20,7 @@ AWS offers two services to manage secrets and parameters conveniently in your co
 
 [^1]: The CSI Secret Store driver runs as a DaemonSet, and as described in the [AWS documentation](https://docs.aws.amazon.com/eks/latest/userguide/fargate.html#fargate-considerations), DaemonSet is not supported on Fargate.
 
-### Installing the AWS Provider and Config Provider (ASCP)
+### Installing the AWS Secrets Manager and Config Provider (ASCP)
 
 #### Option 1: Using helm
 
