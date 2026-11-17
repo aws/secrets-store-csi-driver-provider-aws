@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# Test fake for cosign. Accepts only the exact calls sign-image.sh makes:
+#   cosign login public.ecr.aws -u AWS --password-stdin    reads the password from stdin into $FAKE_DIR/cosign-login;
+#                                                         adds an entry to $DOCKER_CONFIG/config.json
+#   cosign verify --certificate-identity <identity> --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#       public.ecr.aws/<a>/<b>@<digest>
+#   cosign sign --yes --oidc-provider github-actions public.ecr.aws/<a>/<b>@<digest>
+# Every call must run with DOCKER_CONFIG set to a directory under $RUNNER_TEMP named dc.* that holds a config.json:
+# cosign reads its login from there, an unset one would mean ~/.docker, and a missing config.json would let it fall
+# back to podman's logins. sign must also get the id-token request variables (ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN).
+#
+# $FAKE_DIR/cosign.routes has one line per request: "<key> <exit>[,<exit>...]", key login, verify or sign. The Nth
+# call with a key exits with the Nth status (the last one repeats); no route means exit 0. A non-zero exit prints
+# "made-up cosign <key> error" to stderr. Messages are made up, not recorded. The status "hang" writes this process's
+# id to $FAKE_DIR/cosign.hanging and waits to be killed.
+#
+# Every call is logged to $FAKE_DIR/cosign.calls as its arguments, and to $FAKE_DIR/order.log as
+# "cosign <key> key=<AWS_ACCESS_KEY_ID> login=<yes|no>", login saying whether $DOCKER_CONFIG/config.json holds a
+# public.ecr.aws login.
+# Anything unexpected is appended to $FAKE_VIOLATIONS and the fake exits 99.
+
+set -euo pipefail
+
+violation() {
+	echo "cosign: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+readonly IMAGE_RE='^public\.ecr\.aws/[a-z0-9._-]+/[a-z0-9._-]+@sha256:[0-9a-f]{64}$'
+readonly IDENTITY_RE='^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_.-]+@refs/[A-Za-z0-9._/-]+$'
+
+runner_temp=${RUNNER_TEMP:-}
+[[ -n "$runner_temp" ]] || violation "RUNNER_TEMP is not set"
+[[ -n "${DOCKER_CONFIG:-}" ]] || violation "DOCKER_CONFIG is not set: $*"
+[[ "$DOCKER_CONFIG" == "$runner_temp"/dc.* && "$DOCKER_CONFIG" != */../* && -d "$DOCKER_CONFIG" ]] ||
+	violation "DOCKER_CONFIG $DOCKER_CONFIG is not a dc.* directory under RUNNER_TEMP: $*"
+[[ -f "$DOCKER_CONFIG/config.json" ]] || violation "no config.json in DOCKER_CONFIG: $*"
+
+case "${1:-}" in
+login)
+	[[ $# -eq 5 && "$2" == public.ecr.aws && "$3" == -u && "$4" == AWS && "$5" == --password-stdin ]] ||
+		violation "unexpected login arguments: $*"
+	cat >"$FAKE_DIR/cosign-login"
+	key=login
+	;;
+verify)
+	[[ $# -eq 6 && "$2" == --certificate-identity && "$3" =~ $IDENTITY_RE && "$4" == --certificate-oidc-issuer &&
+		"$5" == https://token.actions.githubusercontent.com && "$6" =~ $IMAGE_RE ]] ||
+		violation "unexpected verify arguments: $*"
+	key=verify
+	;;
+sign)
+	[[ $# -eq 5 && "$2" == --yes && "$3" == --oidc-provider && "$4" == github-actions && "$5" =~ $IMAGE_RE ]] ||
+		violation "unexpected sign arguments: $*"
+	[[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" && -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]] ||
+		violation "sign without the id-token request variables: $*"
+	key=sign
+	;;
+*) violation "unexpected call: $*" ;;
+esac
+
+login=no
+if grep -q '"public\.ecr\.aws"' "$DOCKER_CONFIG/config.json"; then
+	login=yes
+fi
+echo "$*" >>"$FAKE_DIR/cosign.calls"
+echo "cosign $key key=${AWS_ACCESS_KEY_ID:-} login=$login" >>"$FAKE_DIR/order.log"
+if [[ "$key" == login ]]; then
+	printf '{"auths":{"public.ecr.aws":{"auth":"made-up"}}}\n' >"$DOCKER_CONFIG/config.json"
+fi
+
+route=$(awk -v key="$key" '$1 == key { print $2 }' "$FAKE_DIR/cosign.routes" 2>/dev/null || true)
+if [[ -z "$route" ]]; then
+	exit 0
+fi
+calls=$(grep -c "^cosign $key " "$FAKE_DIR/order.log")
+IFS=, read -r -a exits <<<"$route"
+index=$((calls - 1))
+if ((index >= ${#exits[@]})); then
+	index=$((${#exits[@]} - 1))
+fi
+if [[ "${exits[$index]}" == hang ]]; then
+	# For the signal tests: say this process's id, then wait to be killed.
+	echo $$ >"$FAKE_DIR/cosign.hanging"
+	exec sleep 60
+fi
+if [[ "${exits[$index]}" != 0 ]]; then
+	echo "made-up cosign $key error" >&2
+fi
+exit "${exits[$index]}"
