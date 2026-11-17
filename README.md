@@ -365,6 +365,19 @@ The AWS Secrets Manager and Config Provider provides compatibility for legacy ap
 
 For cluster hardening guidance, refer to the [Kubernetes Pod Security Standards documentation](https://kubernetes.io/docs/concepts/security/pod-security-standards/).
 
+### Verifying the Image Signature
+
+Images published by the repository's release workflow are signed with [cosign](https://github.com/sigstore/cosign), keyless: the signature shows that the image was published by `.github/workflows/release.yml` on the `main` branch of this repository, and it is recorded in Sigstore's public transparency log. Images released before that workflow are not signed.
+
+To verify an image (cosign v3 or later):
+
+```shell
+cosign verify \
+  --certificate-identity "https://github.com/aws/secrets-store-csi-driver-provider-aws/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws:<version>
+```
+
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.

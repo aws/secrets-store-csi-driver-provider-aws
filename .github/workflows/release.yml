@@ -2,10 +2,10 @@ name: Release
 
 # Builds the image once (linux/amd64 + linux/arm64), runs the integration tests on that exact digest, adds the
 # release tag to that digest in the private staging repo, then copies that same digest to ECR Public under the
-# three version tags, checks anonymously, with no AWS credentials, that each of them serves it, runs the
-# integration tests again on the public image, points the six alias tags at it, latest last, checks anonymously
-# that each alias serves it, and finally, in a real run, opens a pull request that points
-# deployment/aws-provider-installer.yaml at the new version.
+# three version tags and signs it with cosign, checks anonymously, with no AWS credentials, that each of them
+# serves it, runs the integration tests again on the public image, points the six alias tags at it, latest last,
+# checks anonymously that each alias serves it and that the signature verifies, and finally, in a real run, opens
+# a pull request that points deployment/aws-provider-installer.yaml at the new version.
 #
 # "Practice run" (ticked by default) uses the version already on main and tags rehearsal-<run id>, which the
 # staging repo deletes after 14 days. It publishes to the sandbox public repo (the sandbox environment, no
@@ -28,7 +28,10 @@ name: Release
 # - Practice runs older than 14 days: their images are deleted, so re-running integ, stage or
 #   publish-version-tags alone fails. Start a new practice run.
 # - Re-running publish-version-tags (after it failed or succeeded): skips the version tags already on build's
-#   digest and writes only the rest. A real run waits for approval again.
+#   digest and writes only the rest, and skips the signing if build's digest is already signed by this workflow.
+#   A real run waits for approval again.
+# - "Sign the tested image" failed: the version tags are already public, unsigned. Re-run publish-version-tags
+#   (a real run waits for approval again): it finds the tags already written and only signs.
 # - "Check the version tags are free" failed because a tag is on another digest: nothing was written. This
 #   workflow can't move a public version tag, so start a new run (practice) or release a new version (real).
 # - "Copy the tested image to the version tags" stopped on a tag that points at another digest: don't re-run;
@@ -41,7 +44,9 @@ name: Release
 #   previous release. If it said "a newer release exists" or that an alias points at another digest, don't
 #   re-run; check that first. If it could not read the releases, re-run it.
 # - verify-alias-tags failed: it only reads and needs no approval, so re-run it alone (Re-run failed jobs). If it
-#   said an alias "is on another image", check that alias first; re-run once it points at build's digest.
+#   said an alias "is on another image", check that alias first; re-run once it points at build's digest. If it
+#   said the image "has no signature", re-run it once (a read can fail); if it fails again, check the
+#   signature first: publish-version-tags checked it right after signing.
 # - bump-manifest-pr failed: it needs no approval, so re-run it alone. It reuses a branch or open pull request an
 #   earlier attempt made if that holds the same change, and never force-pushes. If it said main "has moved on to
 #   another version", the image release is fine: bump deployment/aws-provider-installer.yaml by hand only if that
@@ -384,6 +389,10 @@ jobs:
       - name: Install crane
         run: bash .github/scripts/publish-image.sh install-crane
 
+      # The same way: a pinned cosign release, checked against a pinned sha256.
+      - name: Install cosign
+        run: bash .github/scripts/sign-image.sh install-cosign
+
       # Credentials go to step outputs only, never to the job environment; each AWS step gets them through its own
       # env:. allowed-account-ids comes from the same ARN the role-accounts step checked.
       - name: Get AWS credentials
@@ -446,7 +455,22 @@ jobs:
           STAGING_PULL_SECRET_ACCESS_KEY: ${{ steps.pull.outputs.aws-secret-access-key }}
           STAGING_PULL_SESSION_TOKEN: ${{ steps.pull.outputs.aws-session-token }}
 
-      # The copy step removes its registry logins itself, on every exit. This is a backstop for a killed process.
+      # Signed right after the version tags make it public, in the same job, so it is unsigned only for that short
+      # gap (or until a re-run, if signing fails). Keyless: cosign signs with this job's GitHub OIDC token (the
+      # job's id-token: write), and the publish role's keys only log it in to push the signature next to the image.
+      # Same job, so no extra approval.
+      - name: Sign the tested image
+        run: bash .github/scripts/sign-image.sh sign
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          PUBLIC_REPO: ${{ vars.PUBLIC_REPO }}
+          PRACTICE: ${{ inputs.practice }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+
+      # The copy and sign steps remove their registry logins themselves, on every exit. This is a backstop for a
+      # killed process.
       - name: Remove any registry logins left behind
         if: always()
         run: rm -rf "${RUNNER_TEMP:?}"/dc.*
@@ -622,9 +646,11 @@ jobs:
     needs: [build, publish-version-tags, publish-alias-tags]
     # Keep this guard in any future `if:`.
     if: github.repository == 'aws/secrets-store-csi-driver-provider-aws'
-    # A fixed image, not ubuntu-latest: the check relies on the preinstalled curl and python3.
+    # A fixed image, not ubuntu-latest: the alias check relies on the preinstalled curl and python3. The signature
+    # check downloads cosign from github.com and reads from Sigstore.
     runs-on: ubuntu-24.04
-    # The script stops itself after 10 minutes; this is only a backstop.
+    # The alias check stops itself after 10 minutes, and the signature check reads at most 4 times; this is only
+    # a backstop.
     timeout-minutes: 15
     permissions:
       contents: read
@@ -656,6 +682,19 @@ jobs:
           DIGEST: ${{ needs.build.outputs.digest }}
           ALIAS_TAGS: ${{ steps.tags.outputs.aliasTags }}
           PREVIOUS_DIGESTS: ${{ needs.publish-alias-tags.outputs.previousDigests }}
+
+      - name: Install cosign
+        run: bash .github/scripts/sign-image.sh install-cosign
+
+      # The check a customer runs: the signature on build's digest is from release.yml in this repo, on this run's
+      # branch (main in a real run).
+      - name: Check the signature anonymously
+        run: bash .github/scripts/sign-image.sh verify
+        env:
+          AWS_EC2_METADATA_DISABLED: 'true'
+          PUBLIC_REPO: ${{ needs.publish-version-tags.outputs.publicRepo }}
+          PRACTICE: ${{ inputs.practice }}
+          DIGEST: ${{ needs.build.outputs.digest }}
 
   # Real runs only, once every alias serves the new image: a pull request that points the raw install manifest
   # (served straight from main) at the new version. Nothing here merges it: main's rules need human approvals.
