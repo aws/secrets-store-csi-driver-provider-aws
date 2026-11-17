@@ -60,6 +60,11 @@ spec:
           args:
               - --provider-volume=/var/run/secrets-store-csi-providers
               - --driver-writes-secrets=false
+          env:
+            - name: AWS_REGION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['topology.kubernetes.io/region']
           resources:
             requests:
               cpu: 50m
