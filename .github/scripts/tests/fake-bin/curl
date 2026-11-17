@@ -3,9 +3,16 @@
 # Test fake for curl. Accepts only the exact flag sets the release scripts use, checks the URL and the headers each
 # request type needs, and replays recorded responses from fixtures/.
 #
-# Registry requests (validate-release-version.sh):
+# Registry requests (validate-release-version.sh, registry-lib.sh):
 #   curl --silent --show-error --max-time <5..15> --dump-header <f> --output <f> --write-out '%{http_code}'
 #        [--head] [--header <h>]... <url>
+# on these URLs, with <path> = $FAKE_ECR_REPO_PATH (default the production repo path):
+#   <ecr>/token/?scope=repository:<path>:pull   no --head, no headers (no Authorization at all)
+#   <ecr>/v2/<path>/manifests/<ref>             exactly the anonymous bearer token and the 4-type Accept header;
+#                                               HEAD only, unless FAKE_CURL_MANIFEST_GET=1 also allows a GET, which
+#                                               returns the fixture's body and no docker-content-digest header
+#   <ecr>/v2/<path>/blobs/sha256:<hex>          GET, exactly the anonymous bearer token, no Accept header
+#   <ecr>/v2/<path>/tags/list?...               GET, exactly the anonymous bearer token, no Accept header
 # The crane download (publish-image.sh install-crane):
 #   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 120
 #        --output <f> https://github.com/google/go-containerregistry/releases/download/v<X.Y.Z>/go-containerregistry_Linux_<arch>.tar.gz
@@ -22,7 +29,7 @@ set -euo pipefail
 
 fixtures="${FAKE_FIXTURES:-$(cd "$(dirname "$0")/../fixtures" && pwd)}"
 ecr="${RELEASE_CHECK_ECR_URL:?}"
-repo_path="aws-secrets-manager/secrets-store-csi-driver-provider-aws"
+repo_path="${FAKE_ECR_REPO_PATH:-aws-secrets-manager/secrets-store-csi-driver-provider-aws}"
 accept="application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 
 violation() {
@@ -91,8 +98,14 @@ while [[ $# -gt 1 ]]; do
 	--head) head=1 ;;
 	--header)
 		case "$2" in
-		"Authorization: "*) auth=$2 ;;
-		"Accept: "*) accept_seen=$2 ;;
+		"Authorization: "*)
+			[[ -z "$auth" ]] || violation "two Authorization headers"
+			auth=$2
+			;;
+		"Accept: "*)
+			[[ -z "$accept_seen" ]] || violation "two Accept headers"
+			accept_seen=$2
+			;;
 		*) violation "unexpected header: $2" ;;
 		esac
 		shift
@@ -109,9 +122,14 @@ case "$url" in
 	[[ $head == 0 && -z "$auth" && -z "$accept_seen" ]] || violation "token request with wrong flags"
 	;;
 "$ecr/v2/$repo_path/manifests/"*)
-	[[ $head == 1 ]] || violation "manifest request without --head"
+	[[ $head == 1 || "${FAKE_CURL_MANIFEST_GET:-}" == 1 ]] || violation "manifest request without --head"
 	[[ "$auth" == "Authorization: Bearer fake-token" ]] || violation "manifest request with auth '$auth'"
 	[[ "$accept_seen" == "Accept: $accept" ]] || violation "manifest request with '$accept_seen'"
+	;;
+"$ecr/v2/$repo_path/blobs/sha256:"*)
+	[[ "$url" =~ /blobs/sha256:[0-9a-f]{64}$ ]] || violation "unexpected blob URL: $url"
+	[[ $head == 0 && -z "$accept_seen" ]] || violation "blob request with wrong flags"
+	[[ "$auth" == "Authorization: Bearer fake-token" ]] || violation "blob request with auth '$auth'"
 	;;
 "$ecr/v2/$repo_path/tags/list?"*)
 	[[ $head == 0 && -z "$accept_seen" ]] || violation "tag list request with wrong flags"
@@ -137,7 +155,12 @@ if [[ -f "$FAKE_DIR/fixtures/$fixture.headers" ]]; then
 	fixtures="$FAKE_DIR/fixtures"
 fi
 [[ -f "$fixtures/$fixture.headers" ]] || violation "missing fixture $fixture.headers"
-cp "$fixtures/$fixture.headers" "$headers_out"
+if [[ $head == 0 && "$url" == "$ecr/v2/$repo_path/manifests/"* ]]; then
+	# ECR Public sends docker-content-digest on a manifest HEAD only, not on a GET.
+	grep -iv '^docker-content-digest:' "$fixtures/$fixture.headers" >"$headers_out" || true
+else
+	cp "$fixtures/$fixture.headers" "$headers_out"
+fi
 if ((head == 1)); then
 	cp "$fixtures/$fixture.headers" "$body_out" # with --head, curl writes the headers to --output too
 elif [[ -f "$fixtures/$fixture.body" ]]; then
