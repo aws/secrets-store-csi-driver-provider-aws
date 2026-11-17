@@ -37,9 +37,10 @@ common_setup() {
 	export PRACTICE=false
 
 	export REPO_ROOT="$BATS_TEST_TMPDIR/repo"
-	mkdir -p "$REPO_ROOT/$CHART_DIR"
+	mkdir -p "$REPO_ROOT/$CHART_DIR" "$REPO_ROOT/deployment"
 	cp "$REAL_REPO/Makefile" "$REPO_ROOT/Makefile"
 	cp "$REAL_REPO/$CHART_DIR/Chart.yaml" "$REAL_REPO/$CHART_DIR/values.yaml" "$REPO_ROOT/$CHART_DIR/"
+	cp "$REAL_REPO/deployment/aws-provider-installer.yaml" "$REPO_ROOT/deployment/"
 
 	make_made_up_replies
 }
