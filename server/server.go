@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -67,6 +68,10 @@ type CSIDriverProviderServer struct {
 	driverWriteSecrets     bool
 	podIdentityHttpTimeout *time.Duration
 	eksAddonVersion        string
+
+	// The region of the node, from the first mount that looked it up (see getRegionFromNode)
+	nodeRegionMu sync.Mutex
+	nodeRegion   string
 }
 
 // Factory function to create the server to handle incoming mount requests.
@@ -364,12 +369,24 @@ func (s *CSIDriverProviderServer) Version(ctx context.Context, req *v1alpha1.Ver
 // region of the requesting pod by first descriing the pod to find the node and
 // then describing the node to get the region label.
 //
+// The driver reaches the provider through a socket on the node, so every pod
+// it mounts for runs on the node of the provider: the region is looked up once
+// and kept. Errors are not kept, the next mount looks the region up again.
+//
 // See also: https://pkg.go.dev/k8s.io/client-go/kubernetes/typed/core/v1
 func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespace string, podName string) (reg string, err error) {
 
 	// Check if AWS_REGION environment variable is set
 	if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
 		return envRegion, nil
+	}
+
+	// Mounts that arrive together on a new node wait for one lookup instead of
+	// each making their own under the Kubernetes client rate limit (see --qps).
+	s.nodeRegionMu.Lock()
+	defer s.nodeRegionMu.Unlock()
+	if s.nodeRegion != "" {
+		return s.nodeRegion, nil
 	}
 
 	// Describe the pod to find the node: kubectl -o yaml -n <namespace> get pod <podid>
@@ -392,6 +409,8 @@ func (s *CSIDriverProviderServer) getRegionFromNode(ctx context.Context, namespa
 		return "", fmt.Errorf("Region not found")
 	}
 
+	klog.Infof("Region of node %s is %s", nodeName, region)
+	s.nodeRegion = region
 	return region, nil
 }
 
