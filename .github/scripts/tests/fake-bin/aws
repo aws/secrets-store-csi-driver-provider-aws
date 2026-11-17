@@ -19,12 +19,13 @@
 # Anything unexpected is appended to $FAKE_VIOLATIONS and the fake exits 99.
 #
 # publish-image.sh's calls, handled before the ecr calls below:
+#   aws ecr-public get-login-password --region us-east-1 --cli-read-timeout 30 --cli-connect-timeout 10
 #   aws ecr-public describe-images --registry-id <id> --repository-name secrets-store-csi-driver-provider-aws
 #       --region us-east-1 --image-ids imageTag=<tag> --output json --cli-read-timeout 30 --cli-connect-timeout 10
-# Route keys are prefixed "public:" (public:describe-images:imageTag=<tag>), in the same routes file; these calls
-# are logged to $FAKE_DIR/aws-public.calls in the same format as aws.calls.
+# Route keys are prefixed "public:" (public:get-login-password, public:describe-images:imageTag=<tag>), in the same
+# routes file; these calls are logged to $FAKE_DIR/aws-public.calls in the same format as aws.calls.
 # Every call, ecr ones included, is also appended to $FAKE_DIR/order.log as "aws <args> | key=<AWS_ACCESS_KEY_ID>",
-# so a test can check which credentials each aws call ran with.
+# so a test can check the order of aws and crane calls and which credentials each aws call ran with.
 
 set -euo pipefail
 
@@ -76,6 +77,11 @@ if [[ "${1:-}" == ecr-public ]]; then
 	fi
 	echo "$service $operation ${args[*]:-} | retry=${AWS_RETRY_MODE:-},${AWS_MAX_ATTEMPTS:-}" >>"$FAKE_DIR/aws-public.calls"
 	case "$service $operation" in
+	"ecr-public get-login-password")
+		[[ $n -eq 6 && "${args[0]}" == --region && "${args[1]}" == us-east-1 ]] ||
+			violation "unexpected get-login-password arguments: ${args[*]}"
+		replay public:get-login-password
+		;;
 	"ecr-public describe-images")
 		[[ $n -eq 14 && "${args[0]}" == --registry-id && "${args[1]}" =~ ^[0-9]{12}$ &&
 			"${args[2]}" == --repository-name &&
