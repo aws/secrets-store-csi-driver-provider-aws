@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -76,7 +77,15 @@ func (p *SecretsManagerProvider) fetchSecretManagerValue(
 ) (value []*SecretValue, err error) {
 
 	for _, client := range p.clients {
-		secretVal, err := p.fetchSecretManagerValueWithClient(ctx, client, descriptor, curMap)
+		// Only the client that supplies the mounted value reports versions. A
+		// later client still needs the current versions to decide whether to
+		// fetch, so it gets a copy whose writes are discarded.
+		verMap := curMap
+		if len(value) > 0 {
+			verMap = maps.Clone(curMap)
+		}
+
+		secretVal, err := p.fetchSecretManagerValueWithClient(ctx, client, descriptor, verMap)
 
 		//check if fatal(4XX status error) exist to error out the mount
 		if utils.IsFatalError(err) {
