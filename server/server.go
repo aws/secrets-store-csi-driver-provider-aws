@@ -1,5 +1,5 @@
 /*
- * Package responsible for reciving incomming mount requests from the driver.
+ * Package responsible for receiving incoming mount requests from the driver.
  *
  * This package acts as the high level orchestrator; unpacking the message and
  * calling the provider implementation to fetch the secrets.
