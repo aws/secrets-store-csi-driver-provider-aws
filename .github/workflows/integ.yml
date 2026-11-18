@@ -53,6 +53,9 @@ jobs:
             arch-short: arm
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    # Every green job measures 37-43m. Caps a hung job instead of letting it
+    # hold the non-cancelling integration-tests queue for GitHub's 360m default.
+    timeout-minutes: 55
 
     env:
       imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
