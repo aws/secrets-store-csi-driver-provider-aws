@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 	"sigs.k8s.io/yaml"
@@ -2928,6 +2930,64 @@ func TestGetRegionFromNodeError(t *testing.T) {
 	_, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
 	if err == nil {
 		t.Fatal("Expected error when no region available")
+	}
+}
+
+// newRegionTestServer returns a server for a pod on a node with the given labels, and the fake clientset behind it.
+func newRegionTestServer(nodeLabels map[string]string) (*CSIDriverProviderServer, *fake.Clientset, *corev1.Node) {
+	pod := &corev1.Pod{}
+	pod.Name, pod.Namespace, pod.Spec.NodeName = "fakePod", "fakeNS", "fakeNode"
+	node := &corev1.Node{}
+	node.Name, node.Labels = "fakeNode", nodeLabels
+
+	clientset := fake.NewClientset(pod, node)
+	return &CSIDriverProviderServer{k8sClient: clientset.CoreV1()}, clientset, node
+}
+
+// The region of the node is looked up by one of the mounts that arrive together and kept for the later mounts.
+func TestGetRegionFromNodeLooksUpOnce(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	svr, clientset, _ := newRegionTestServer(map[string]string{regionLabel: "us-west-2"})
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
+			if err != nil || region != "us-west-2" {
+				t.Errorf("got region %q and error %v, want us-west-2", region, err)
+			}
+		})
+	}
+	wg.Wait()
+
+	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
+	if err != nil || region != "us-west-2" {
+		t.Errorf("later mount: got region %q and error %v, want us-west-2", region, err)
+	}
+
+	// The pod and its node, once
+	if got := len(clientset.Actions()); got != 2 {
+		t.Errorf("%d Kubernetes API calls, want 2: %v", got, clientset.Actions())
+	}
+}
+
+// A failed lookup is not kept: the next mount looks the region up again.
+func TestGetRegionFromNodeErrorNotKept(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	svr, clientset, node := newRegionTestServer(nil)
+
+	if _, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod"); err == nil {
+		t.Fatal("expected an error for a node without a region label")
+	}
+
+	node.Labels = map[string]string{regionLabel: "us-west-2"}
+	if _, err := clientset.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("updating the node: %v", err)
+	}
+
+	region, err := svr.getRegionFromNode(context.TODO(), "fakeNS", "fakePod")
+	if err != nil || region != "us-west-2" {
+		t.Errorf("got region %q and error %v, want us-west-2", region, err)
 	}
 }
 
