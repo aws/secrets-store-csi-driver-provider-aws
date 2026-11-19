@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#
+# Test fake for git. Accepts only the exact `git ls-remote` call validate-release-version.sh makes and answers
+# from $FAKE_DIR/git.response:
+#   free           no tag (exit 2, like --exit-code)
+#   taken          refs/tags/<version> exists (recorded output)
+#   taken-old      refs/tags/secrets-store-csi-driver-provider-aws-<version> exists
+#   exit:<n>       exit with status n
+# Every call is logged to $FAKE_DIR/git.calls. Anything unexpected goes to $FAKE_VIOLATIONS, exit 99.
+
+set -euo pipefail
+
+fixtures="${FAKE_FIXTURES:-$(cd "$(dirname "$0")/../fixtures" && pwd)}"
+
+violation() {
+	echo "git: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+echo "$*" >>"$FAKE_DIR/git.calls"
+
+[[ "${GIT_TERMINAL_PROMPT:-}" == 0 ]] || violation "GIT_TERMINAL_PROMPT is '${GIT_TERMINAL_PROMPT:-}', not 0"
+if [[ $# -ne 10 || "$1" != -c || "$2" != http.lowSpeedLimit=1000 || "$3" != -c || "$4" != http.lowSpeedTime=20 ||
+	"$5" != ls-remote || "$6" != --exit-code || "$7" != --tags ]]; then
+	violation "unexpected arguments: $*"
+fi
+[[ "$8" == "https://github.com/${GITHUB_REPOSITORY:?}" ]] || violation "unexpected repo URL: $8"
+version=${9#refs/tags/}
+[[ "$9" == "refs/tags/$version" && -n "$version" ]] || violation "unexpected first ref: $9"
+[[ "${10}" == "refs/tags/secrets-store-csi-driver-provider-aws-$version" ]] || violation "unexpected second ref: ${10}"
+
+response=$(cat "$FAKE_DIR/git.response")
+case "$response" in
+free) exit 2 ;;
+taken) sed "s#refs/tags/3\.1\.4#refs/tags/$version#" "$fixtures/git-ls-remote-taken.txt" ;;
+taken-old) printf '552b8a9f36688722765d5e9bb6a3580d8f203781\trefs/tags/secrets-store-csi-driver-provider-aws-%s\n' "$version" ;;
+exit:*) exit "${response#exit:}" ;;
+*) violation "unknown git.response '$response'" ;;
+esac
