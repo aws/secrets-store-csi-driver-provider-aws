@@ -59,6 +59,11 @@ spec:
           imagePullPolicy: Always
           args:
             - --provider-volume=/var/run/secrets-store-csi-providers
+          env:
+            - name: AWS_REGION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['topology.kubernetes.io/region']
           resources:
             requests:
               cpu: 50m

@@ -201,7 +201,7 @@ The parameters section contains the details of the mount request and contain one
             - objectName: "MySecret"
               objectType: "secretsmanager"
     ```
-* region: An optional field to specify the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider will lookup the region from the `topology.kubernetes.io/region` label on the node. This lookup adds overhead to mount requests so clusters using large numbers of pods will benefit from providing the region here.
+* region: An optional field to specify the AWS region to use when retrieving secrets from Secrets Manager or Parameter Store. If this field is missing, the provider uses the region of its node, see [Region of the Provider](#region-of-the-provider).
 * failoverRegion: An optional field to specify a secondary AWS region to use when retrieving secrets. See the Automated Failover Regions section in this readme for more information.
 * pathTranslation: An optional field to specify a substitution character to use when the path separator character (slash on Linux) is used in the file name. If a Secret or parameter name contains the path separator failures will occur when the provider tries to create a mounted file using the name. When not specified the underscore character is used, thus My/Path/Secret will be mounted as My_Path_Secret. This pathTranslation value can either be the string "False" or a single character string. When set to "False", no character substitution is performed.
 * usePodIdentity: An optional field that determines the authentication approach. When not specified, it defaults to using IAM Roles for Service Accounts (IRSA). 
@@ -427,9 +427,17 @@ helm repo add aws-secrets-manager https://aws.github.io/secrets-store-csi-driver
 helm install -n kube-system secrets-provider-aws aws-secrets-manager/secrets-store-csi-driver-provider-aws --set useFipsEndpoint=true
 ```
 
+### Region of the Provider
+
+When a SecretProviderClass has no `region`, the provider uses its `AWS_REGION` environment variable. The Helm chart and the kubectl manifests set it from the `topology.kubernetes.io/region` label of the provider pod, which Kubernetes 1.35 and later copies from the node when the pod is scheduled ([KEP-4742](https://github.com/kubernetes/enhancements/issues/4742)). Each provider pod serves the pods of its own node, so this also works when the nodes of a cluster are in several regions. When the provider pod has no such label, for example before Kubernetes 1.35 or on a node labeled after the provider pod was scheduled, the provider reads the pod and its node from the Kubernetes API on each mount to find the region.
+
+To set the region of all provider pods yourself, append `--set awsRegion=<region>` on the install step. Set it when the `topology.kubernetes.io/region` label of the nodes is not an AWS region, for example on nodes outside AWS, and do not set it when the nodes are in several regions. With `awsRegion` set, the chart also removes `get` on pods and nodes from the ClusterRole of the provider.
+
+**Note:** Setting `awsRegion` on a running release breaks mounts for a while. The ClusterRole loses `get` on pods and nodes at once, while the DaemonSet replaces the provider pods one node at a time and the old provider pods still read the pod and its node on each mount: until the provider pod of a node is replaced, mounts on that node fail with `pods "..." is forbidden`. The kubelet retries them, so the pods start late rather than fail, but the window lasts as long as the rollout of the DaemonSet. To avoid it, grant `get` on pods and nodes to the service account of the provider with a ClusterRole of your own before the upgrade, and remove it once the DaemonSet has rolled out.
+
 ### Client-Side Rate-Limitting to Kubernetes API server
 
-To mount each secret on each pod, the AWS CSI provider lookups the region of the pod and the role ARN associated with the service account by calling the Kubernetes APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server.
+To mount each secret on each pod, the AWS CSI provider lookups the role ARN associated with the service account, and the region of the pod when it does not know it (see [Region of the Provider](#region-of-the-provider)), by calling the Kubernetes APIs. You can increase the value of qps and burst if you notice the provider is throttled by client-side limit to the API server.
 
 If you use Helm chart to install the provider, append the `--set-json 'k8sThrottlingParams={"qps": "<custom qps>", "burst": "<custom qps>"}'` flag in the install step.
 
