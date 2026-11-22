@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main"]
   pull_request_target:
-    types: [labeled]
+    types: [opened, synchronize, reopened]
 
 permissions:
   id-token: write
@@ -12,11 +12,27 @@ permissions:
   packages: write
 
 jobs:
+  # A pull request's code is built and tested only after a required reviewer
+  # of the `integ` environment approves this run.
+  authorize:
+    name: Approve pull request run
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    environment: integ
+    permissions: {}
+    concurrency:
+      group: integ-approval-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - name: Record the approved commit
+        run: echo "Approved build and integration tests for $HEAD_SHA"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
   build-docker:
     name: Build Docker Image
-    if: |
-      github.event_name != 'pull_request_target' ||
-      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
+    needs: authorize
+    if: ${{ !cancelled() && (github.event_name != 'pull_request_target' || needs.authorize.result == 'success') }}
     permissions:
       contents: read
       packages: write
@@ -73,10 +89,8 @@ jobs:
 
   integration-tests:
     name: Integration Tests
-    if: |
-      github.event_name != 'pull_request_target' ||
-      contains(github.event.pull_request.labels.*.name, 'safe-to-test')
-    needs: build-docker
+    needs: [authorize, build-docker]
+    if: ${{ !cancelled() && needs.build-docker.result == 'success' }}
     uses: ./.github/workflows/integ.yml
     with:
       imageRepo: ${{ needs.build-docker.outputs.privRepo }}
