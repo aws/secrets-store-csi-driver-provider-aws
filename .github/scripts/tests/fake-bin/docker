@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# Test fake for docker. Accepts only:
+#   docker login --username AWS --password-stdin <registry>   reads the password from stdin into
+#                                                             $FAKE_DIR/docker.password; $FAKE_DIR/docker.login is
+#                                                             "ok" or "exit:<n>"
+#   docker logout <registry>                                  "Removing login credentials for <registry>" after a
+#                                                             login, else "Not logged in to <registry>" (both exit 0)
+# The messages are docker CLI's wording, not recorded. Every call is logged to $FAKE_DIR/docker.calls. Anything
+# unexpected is appended to $FAKE_VIOLATIONS and the fake exits 99.
+
+set -euo pipefail
+
+violation() {
+	echo "docker: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+echo "$*" >>"$FAKE_DIR/docker.calls"
+
+case "${1:-}" in
+login)
+	[[ $# -eq 5 && "$2" == --username && "$3" == AWS && "$4" == --password-stdin ]] ||
+		violation "unexpected login arguments: $*"
+	cat >"$FAKE_DIR/docker.password"
+	response=$(cat "$FAKE_DIR/docker.login" 2>/dev/null || echo ok)
+	case "$response" in
+	ok)
+		echo "$5" >"$FAKE_DIR/docker.logged-in"
+		echo "Login Succeeded"
+		;;
+	exit:*)
+		echo "Error response from daemon: login attempt to https://$5/v2/ failed with status: 400 Bad Request" >&2
+		exit "${response#exit:}"
+		;;
+	*) violation "unknown docker.login '$response'" ;;
+	esac
+	;;
+logout)
+	[[ $# -eq 2 ]] || violation "unexpected logout arguments: $*"
+	if [[ -f "$FAKE_DIR/docker.logged-in" && "$(cat "$FAKE_DIR/docker.logged-in")" == "$2" ]]; then
+		rm -f "$FAKE_DIR/docker.logged-in"
+		echo "Removing login credentials for $2"
+	else
+		echo "Not logged in to $2"
+	fi
+	;;
+*) violation "unexpected call: $*" ;;
+esac
