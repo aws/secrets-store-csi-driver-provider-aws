@@ -2,18 +2,20 @@
 #
 # Test fake for the AWS CLI. Accepts only the exact ECR calls staging-image.sh makes:
 #   aws ecr get-login-password --region <r> --cli-read-timeout 30 --cli-connect-timeout 10
-#   aws ecr describe-images --registry-id <id> --repository-name ascp --region <r>
+#   aws ecr <describe-images | batch-get-image | put-image> --registry-id <id> --repository-name ascp --region <r>
 #       <operation args> --output json --cli-read-timeout 30 --cli-connect-timeout 10
 #
 # $FAKE_DIR/aws.routes has one line per request: "<key> <reply>[,<reply>...]". The Nth call with a key gets the Nth
 # reply (the last one repeats). Keys:
-#   describe-images:imageTag=<tag>   get-login-password
+#   describe-images:imageTag=<tag>   describe-images:imageDigest=<digest>   batch-get-image:imageDigest=<digest>
+#   put-image:<tag>                  get-login-password
 # A reply is $FAKE_DIR/aws/<reply>.out (stdout), plus <reply>.err and <reply>.exit for a failure. Error text uses
 # the format of a real AWS CLI v2 service error (recorded: a leading blank line, "aws: [ERROR]: An error occurred
 # (<Name>) when calling the <Operation> operation: <message>", exit 254); the ECR names and messages are from the
 # ECR API docs, not recorded.
 #
-# Every call is logged to $FAKE_DIR/aws.calls as "<args> | retry=<AWS_RETRY_MODE>,<AWS_MAX_ATTEMPTS>".
+# Every call is logged to $FAKE_DIR/aws.calls as "<args> | retry=<AWS_RETRY_MODE>,<AWS_MAX_ATTEMPTS>", with a
+# put-image manifest path shown as file://MANIFEST (its bytes are copied to $FAKE_DIR/put-image.manifest).
 # Anything unexpected is appended to $FAKE_VIOLATIONS and the fake exits 99.
 
 set -euo pipefail
@@ -43,7 +45,7 @@ get-login-password)
 	key=get-login-password
 	logged="$operation ${args[*]}"
 	;;
-describe-images)
+describe-images | batch-get-image | put-image)
 	n=${#args[@]}
 	if ((n < 12)) || [[ "${args[0]}" != --registry-id || ! "${args[1]}" =~ ^[0-9]{12}$ ||
 		"${args[2]}" != --repository-name || "${args[3]}" != ascp || "${args[4]}" != --region ||
@@ -52,10 +54,34 @@ describe-images)
 	fi
 	middle=("${args[@]:6:n-12}")
 	logged="$operation ${args[*]}"
-	[[ ${#middle[@]} -eq 2 && "${middle[0]}" == --image-ids &&
-		"${middle[1]}" =~ ^imageTag=[^,[:space:]]+$ ]] ||
-		violation "unexpected $operation image ids: ${middle[*]}"
-	key="$operation:${middle[1]}"
+	case "$operation" in
+	describe-images | batch-get-image)
+		[[ ${#middle[@]} -eq 2 && "${middle[0]}" == --image-ids &&
+			"${middle[1]}" =~ ^(imageTag|imageDigest)=[^,[:space:]]+$ ]] ||
+			violation "unexpected $operation image ids: ${middle[*]}"
+		if [[ "$operation" == batch-get-image && "${middle[1]}" != imageDigest=* ]]; then
+			violation "batch-get-image by tag: ${middle[*]}"
+		fi
+		key="$operation:${middle[1]}"
+		;;
+	put-image)
+		[[ ${#middle[@]} -eq 8 && "${middle[0]}" == --image-tag && "${middle[2]}" == --image-digest &&
+			"${middle[4]}" == --image-manifest && "${middle[5]}" == file://* &&
+			"${middle[6]}" == --image-manifest-media-type ]] ||
+			violation "unexpected put-image arguments: ${middle[*]}"
+		manifest=${middle[5]#file://}
+		[[ -f "$manifest" ]] || violation "put-image manifest file $manifest is missing"
+		cp "$manifest" "$FAKE_DIR/put-image.manifest"
+		logged=$operation
+		for arg in "${args[@]}"; do
+			if [[ "$arg" == "file://$manifest" ]]; then
+				arg=file://MANIFEST
+			fi
+			logged="$logged $arg"
+		done
+		key="put-image:${middle[1]}"
+		;;
+	esac
 	;;
 *) violation "unexpected ecr operation: $operation" ;;
 esac
