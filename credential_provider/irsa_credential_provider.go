@@ -24,6 +24,8 @@ type IRSACredentialProvider struct {
 	roleArn string
 	appID   string
 	fetcher stscreds.IdentityTokenRetriever
+
+	stsOptions []func(*sts.Options)
 }
 
 // NewIRSACredentialProvider creates a credential provider for IRSA authentication.
@@ -38,10 +40,18 @@ func NewIRSACredentialProvider(region, roleArn, appID, token string) (ConfigProv
 }
 
 func (p *IRSACredentialProvider) GetAWSConfig(ctx context.Context) (aws.Config, error) {
-	stsClient := sts.New(sts.Options{Region: p.region})
-	return config.LoadDefaultConfig(ctx,
+	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(p.region),
-		config.WithCredentialsProvider(stscreds.NewWebIdentityRoleProvider(stsClient, p.roleArn, p.fetcher)),
 		config.WithAppID(p.appID),
+		// The unsigned STS token exchange can skip the default credential chain.
+		config.WithCredentialsProvider(aws.AnonymousCredentials{}),
 	)
+	if err != nil {
+		return aws.Config{}, err
+	}
+
+	stsClient := sts.NewFromConfig(cfg, p.stsOptions...)
+	provider := stscreds.NewWebIdentityRoleProvider(stsClient, p.roleArn, p.fetcher)
+	cfg.Credentials = aws.NewCredentialsCache(provider)
+	return cfg, nil
 }
