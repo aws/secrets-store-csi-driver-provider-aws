@@ -1,0 +1,7 @@
+HTTP/2 401 
+date: Wed, 14 Oct 2026 20:16:23 GMT
+content-type: application/json; charset=utf-8
+content-length: 58
+docker-distribution-api-version: registry/2.0
+www-authenticate: Bearer realm="https://public.ecr.aws/token/",service="public.ecr.aws",scope="aws"
+

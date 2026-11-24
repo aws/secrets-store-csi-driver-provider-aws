@@ -1,0 +1,3 @@
+# Recorded HTTP headers end in \r\n. Keep them byte-for-byte.
+*.headers -text
+*.body -text
