@@ -66,6 +66,7 @@ setup_file() {
 	eksctl create cluster \
 		--name $CLUSTER_NAME \
 		--node-type ${{NODE_TYPE_VAR}} \
+		--node-private-networking \
 		--nodes 3 \
 		--region $REGION \
 		--kubeconfig=${{KUBECONFIG_VAR}}
