@@ -44,6 +44,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           bats-version: 1.13.0
+          # The suite loads none of the helper libraries.
+          support-install: false
+          assert-install: false
+          detik-install: false
+          file-install: false
 
       - name: ShellCheck
         run: shellcheck .github/scripts/*.sh .github/scripts/tests/fake-bin/*

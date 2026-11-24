@@ -14,8 +14,14 @@
 # A practice run (PRACTICE=true) uses the version already on main, so it runs checks 0-2 and skips 3-5, with no
 # network calls. A missing or bad PRACTICE is a wiring error: the script prints why and exits 2 before any check.
 #
-# Inputs (environment): VERSION, PRACTICE (true or false), GITHUB_REF, GITHUB_REPOSITORY.
+# Release order: 1) a bump pull request sets the new version in these three files.
+# 2) The release publishes the image, then opens a pull request for deployment/aws-provider-installer.yaml.
+# 3) Run release-chart.yml by hand once the image is public.
+#
+# Inputs (environment): VERSION, PRACTICE (true or false), GITHUB_REF.
 # Test-only settings: REPO_ROOT, RELEASE_CHECK_ECR_URL, RELEASE_CHECK_RETRY_SCALE, RELEASE_CHECK_DEADLINE_SECONDS.
+# Needs yq to read Chart.yaml and values.yaml (preinstalled on GitHub's Ubuntu runners; for local runs on macOS,
+# brew install yq).
 #
 # Bash 3.2 compatible (macOS /bin/bash). Bash turns off `set -e` inside functions called from `if`, `||` or `&&`,
 # so every command's exit status is tested by hand. Helpers never count problems; only the checks do.
@@ -23,6 +29,8 @@
 set -euo pipefail
 
 readonly PUBLIC_REPO="public.ecr.aws/aws-secrets-manager/secrets-store-csi-driver-provider-aws"
+# Fixed, not $GITHUB_REPOSITORY, so a run on a fork checks the same tags as one on this repo.
+readonly GITHUB_URL="https://github.com/aws/secrets-store-csi-driver-provider-aws"
 readonly ECR_REPO_PATH="aws-secrets-manager/secrets-store-csi-driver-provider-aws"
 readonly ACCEPT_MANIFEST="application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 readonly VERSION_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -36,12 +44,11 @@ readonly OUT_OF_TIME=75    # helper exit status for "deadline reached"
 VERSION="${VERSION:-}"
 PRACTICE="${PRACTICE:-}"
 GITHUB_REF="${GITHUB_REF:-}"
-GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}"
 ECR_URL="${RELEASE_CHECK_ECR_URL:-https://public.ecr.aws}"
 RETRY_SCALE="${RELEASE_CHECK_RETRY_SCALE:-1}"
 DEADLINE="${RELEASE_CHECK_DEADLINE_SECONDS:-360}"
 
-for setting in "RETRY_SCALE=$RETRY_SCALE" "DEADLINE=$DEADLINE"; do
+for setting in "RELEASE_CHECK_RETRY_SCALE=$RETRY_SCALE" "RELEASE_CHECK_DEADLINE_SECONDS=$DEADLINE"; do
 	if [[ ! "${setting#*=}" =~ ^[0-9]+$ ]]; then
 		echo "✘ ${setting%%=*} must be a whole number of seconds" >&2
 		exit 1
@@ -238,16 +245,6 @@ check_format() {
 	fi
 }
 
-# Removes one pair of matching surrounding quotes, as YAML does.
-unquote() {
-	local value=$1
-	local double_re='^"(.*)"$' single_re="^'(.*)'$"
-	if [[ "$value" =~ $double_re ]] || [[ "$value" =~ $single_re ]]; then
-		value=${BASH_REMATCH[1]}
-	fi
-	printf '%s' "$value"
-}
-
 # Prints the value of the single line matching "^<prefix>" in a file. Fails if there are 0 or 2+ such lines.
 # Trailing spaces and \r are removed.
 single_value() {
@@ -261,14 +258,20 @@ single_value() {
 		echo "found $count times"
 		return 1
 	fi
-	lines=${lines#*:}
-	if [[ "$prefix" == *= ]]; then
-		lines=${lines#*=}
-	fi
+	lines=${lines#"$prefix"}
 	lines=${lines%$'\r'}
 	lines=${lines#"${lines%%[![:space:]]*}"}
 	lines=${lines%"${lines##*[![:space:]]}"}
 	printf '%s' "$lines"
+}
+
+readonly YAML_REFUSED="is missing, not a one-line string, or the file is not valid YAML"
+
+# yaml_value <file> <path> : prints the string at <path>. Fails (yq -e) if it is missing, not a string, or holds a
+# newline, or if the file isn't valid YAML. A block value (`tag: |`) ends in a newline that $(...) would strip, so
+# the check would pass while Helm gets "3.1.5\n"; refusing newlines closes that.
+yaml_value() {
+	yq -e "$2 | select(tag == \"!!str\" and (test(\"\\n\") | not))" "$1"
 }
 
 # deployment/aws-provider-installer.yaml is not checked on purpose: it is served straight from main, so it is bumped
@@ -277,11 +280,15 @@ check_repo_files() {
 	local makefile="$REPO_ROOT/Makefile"
 	local chart="$REPO_ROOT/charts/secrets-store-csi-driver-provider-aws/Chart.yaml"
 	local values="$REPO_ROOT/charts/secrets-store-csi-driver-provider-aws/values.yaml"
-	local reasons="" value key make_version="" part image_block image_count
+	local reasons="" value key make_version=""
 	local digits_re='^[0-9]+$' three_part_re='^[0-9]+\.[0-9]+\.[0-9]+$'
 
 	if ((version_ok == 0)); then
 		skip "repo files check needs a valid version"
+		return
+	fi
+	if ! command -v yq >/dev/null 2>&1; then
+		fail "yq is not installed (it reads Chart.yaml and values.yaml)"
 		return
 	fi
 	for file in "$makefile" "$chart" "$values"; do
@@ -307,38 +314,22 @@ check_repo_files() {
 		reasons="$reasons; Makefile says $make_version"
 	fi
 
-	if ! value=$(single_value "$chart" "version:"); then
-		reasons="$reasons; Chart.yaml version $value"
-	else
-		value=$(unquote "$value")
-		if [[ "$value" != "$VERSION" ]]; then
-			reasons="$reasons; Chart.yaml says $(printf '%q' "$value")"
-		fi
+	# Chart.yaml and values.yaml are read with yq, as release-chart.yml does, so both read the same values (a
+	# repeated key gives the last value in both).
+	if ! value=$(yaml_value "$chart" .version); then
+		reasons="$reasons; Chart.yaml version $YAML_REFUSED"
+	elif [[ "$value" != "$VERSION" ]]; then
+		reasons="$reasons; Chart.yaml says $(printf '%q' "$value")"
 	fi
-
-	# values.yaml: the top-level image: block, then its 2-space-indented repository: and tag:.
-	image_count=$(grep -cE '^image:[[:space:]]*$' "$values" || true)
-	if [[ "$image_count" != 1 ]]; then
-		reasons="$reasons; values.yaml image: block found $image_count times"
-	else
-		image_block="$work_dir/image-block"
-		if ! awk '/^image:[[:space:]]*$/ { inside = 1; next } inside && /^[^[:space:]#]/ { inside = 0 } inside' \
-			"$values" >"$image_block"; then
-			fail "could not read the image: block in values.yaml"
-			return
-		fi
-		for part in repository tag; do
-			if ! value=$(single_value "$image_block" "  $part:"); then
-				reasons="$reasons; values.yaml image.$part $value"
-				continue
-			fi
-			value=$(unquote "$value")
-			if [[ "$part" == repository && "$value" != "$PUBLIC_REPO" ]]; then
-				reasons="$reasons; values.yaml image.repository is $(printf '%q' "$value"), not $PUBLIC_REPO"
-			elif [[ "$part" == tag && "$value" != "$VERSION" ]]; then
-				reasons="$reasons; values.yaml image.tag says $(printf '%q' "$value")"
-			fi
-		done
+	if ! value=$(yaml_value "$values" .image.repository); then
+		reasons="$reasons; values.yaml image.repository $YAML_REFUSED"
+	elif [[ "$value" != "$PUBLIC_REPO" ]]; then
+		reasons="$reasons; values.yaml image.repository is $(printf '%q' "$value"), not $PUBLIC_REPO"
+	fi
+	if ! value=$(yaml_value "$values" .image.tag); then
+		reasons="$reasons; values.yaml image.tag $YAML_REFUSED"
+	elif [[ "$value" != "$VERSION" ]]; then
+		reasons="$reasons; values.yaml image.tag says $(printf '%q' "$value")"
 	fi
 
 	if [[ -n "$reasons" ]]; then
@@ -349,7 +340,7 @@ check_repo_files() {
 }
 
 check_git_tag() {
-	local repo_re='^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' left limit rc=0 out
+	local left limit rc=0 out
 	local -a git_args
 
 	if ((version_ok == 0)); then
@@ -364,14 +355,6 @@ check_git_tag() {
 		skip "ran out of time"
 		return
 	fi
-	if [[ -z "$GITHUB_REPOSITORY" ]]; then
-		fail "GITHUB_REPOSITORY is not set"
-		return
-	fi
-	if [[ ! "$GITHUB_REPOSITORY" =~ $repo_re ]]; then
-		fail "GITHUB_REPOSITORY $(printf '%q' "$GITHUB_REPOSITORY") is not owner/name"
-		return
-	fi
 	left=$(seconds_left)
 	if ((left < TIME_FLOOR)); then
 		out_of_time=1
@@ -382,7 +365,7 @@ check_git_tag() {
 	# The low-speed settings stop a stalled transfer; `timeout` (on the CI runner, not on macOS) also bounds
 	# connect, DNS and TLS. GIT_TERMINAL_PROMPT=0 makes git fail instead of asking for a password.
 	git_args=(-c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 ls-remote --exit-code --tags
-		"https://github.com/$GITHUB_REPOSITORY"
+		"$GITHUB_URL"
 		"refs/tags/$VERSION" "refs/tags/secrets-store-csi-driver-provider-aws-$VERSION")
 	if command -v timeout >/dev/null 2>&1; then
 		limit=$GIT_MAX_TIME

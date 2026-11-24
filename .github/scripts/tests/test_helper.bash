@@ -24,7 +24,6 @@ common_setup() {
 	: >"$FAKE_DIR/curl.calls"
 	: >"$FAKE_DIR/git.calls"
 	: >"$FAKE_DIR/timeout.calls"
-	echo free >"$FAKE_DIR/git.response"
 
 	if [[ ":$PATH:" != *":$BATS_TEST_DIRNAME/fake-bin:"* ]]; then
 		export PATH="$BATS_TEST_DIRNAME/fake-bin:$PATH"
@@ -33,7 +32,6 @@ common_setup() {
 	export RELEASE_CHECK_RETRY_SCALE=0
 	unset RELEASE_CHECK_DEADLINE_SECONDS FAKE_TIMEOUT_EXPIRE
 	export GITHUB_REF=refs/heads/main
-	export GITHUB_REPOSITORY=aws/secrets-store-csi-driver-provider-aws
 	export PRACTICE=false
 
 	export REPO_ROOT="$BATS_TEST_TMPDIR/repo"
