@@ -58,6 +58,8 @@ podIdentityHttpTimeout:
 
 dnsConfig: {}
 
+hostNetwork: false
+
 secrets-store-csi-driver:
   install: true
   fullnameOverride: secrets-store-csi-driver

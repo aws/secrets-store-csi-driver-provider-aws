@@ -31,7 +31,7 @@ spec:
 {{- toYaml .Values.dnsConfig | nindent 8 }}
 {{- end }}
       serviceAccountName: {{ template "provider.serviceAccountName" . }}
-      hostNetwork: false
+      hostNetwork: {{ .Values.hostNetwork }}
       containers:
         - name: provider-aws-installer
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
