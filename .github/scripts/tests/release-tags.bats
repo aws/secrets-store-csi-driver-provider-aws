@@ -74,6 +74,21 @@ RELEASE_TAGS_EOF"
 	expect_eq "\"${line#buildArgs=LDFLAGS=}\"" "${recorded#*-ldflags=}"
 }
 
+# The Makefile sets the same flags for `make docker-buildx`. make prints them with the shell quotes already removed,
+# and xargs removes the single quotes from ours, so both sides become one flag per line. LDFLAGS is unset for make, so
+# a value in the shell (common on macOS) can't replace the Makefile's own.
+@test "the build args match the Makefile's LDFLAGS" {
+	local version flags line
+	version=$(make -s -f "$REAL_REPO/Makefile" -f <(printf 'print-version:\n\t@echo $(FULL_REV)\n') print-version)
+	flags=$(env -u LDFLAGS make -s -f "$REAL_REPO/Makefile" -f <(printf 'print-ldflags:\n\t@echo $(LDFLAGS)\n') \
+		print-ldflags)
+	export VERSION=$version
+	run_tags
+	expect_status 0
+	line=$(grep '^buildArgs=' "$GITHUB_OUTPUT")
+	expect_eq "$(xargs printf '%s\n' <<<"${line#buildArgs=LDFLAGS=}")" "$(tr ' ' '\n' <<<"$flags")"
+}
+
 @test "another region and account are read from the registry" {
 	export STAGING_REGISTRY=111122223333.dkr.ecr.ap-southeast-1.amazonaws.com
 	run_tags
@@ -99,17 +114,6 @@ RELEASE_TAGS_EOF"
 		export STAGING_REGISTRY=$bad
 		refuses "✘ STAGING_REGISTRY $(printf '%q' "$bad") is not <account>.dkr.ecr.<region>.amazonaws.com"
 	done
-}
-
-@test "a bad run id, run attempt or commit sha is refused" {
-	export GITHUB_RUN_ID=12a
-	refuses "✘ GITHUB_RUN_ID 12a is not a number"
-	export GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=-1
-	refuses "✘ GITHUB_RUN_ATTEMPT -1 is not a number"
-	export GITHUB_RUN_ATTEMPT=1 GITHUB_SHA=${SHA:0:39}
-	refuses "✘ GITHUB_SHA ${SHA:0:39} is not a 40-character commit id"
-	GITHUB_SHA=$(printf '%s' "$SHA" | tr a-f A-F)
-	refuses "✘ GITHUB_SHA $GITHUB_SHA is not a 40-character commit id"
 }
 
 @test "every unset or empty input is refused by name" {

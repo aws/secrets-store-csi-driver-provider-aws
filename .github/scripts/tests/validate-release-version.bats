@@ -329,6 +329,18 @@ good_release() {
 	expect_eq "$(count_lines "$FAKE_DIR/timeout.calls")" 0
 }
 
+@test "practice: a run off main, or with a version main doesn't have, is refused" {
+	export PRACTICE=true VERSION=3.1.5 GITHUB_REF=refs/heads/feature
+	set_version 3.1.4
+	run_check
+	expect_status 1
+	expect_results "✘ not on main (running on refs/heads/feature); releases run from main only" ok \
+		"✘ repo files don't match 3.1.5: Makefile says 3.1.4; Chart.yaml says 3.1.4; values.yaml image.tag says 3.1.4" \
+		ok ok
+	expect_eq "$(count_lines "$FAKE_DIR/crane.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/git.calls")" 0
+}
+
 @test "a missing or bad PRACTICE stops before any check, with no result lines" {
 	local bad
 	good_release 3.2.1

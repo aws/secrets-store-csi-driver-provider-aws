@@ -190,10 +190,6 @@ check_git_tag() {
 		skip "git tag check needs a valid version"
 		return
 	fi
-	if [[ "$PRACTICE" == true ]]; then
-		skip "practice run"
-		return
-	fi
 
 	# The low-speed settings stop a stalled transfer; `timeout` (on the CI runner, not on macOS) also bounds
 	# connect, DNS and TLS. GIT_TERMINAL_PROMPT=0 makes git fail instead of asking for a password.
@@ -233,10 +229,6 @@ check_registry() {
 		skip "ECR Public check needs a valid version"
 		return
 	fi
-	if [[ "$PRACTICE" == true ]]; then
-		skip "practice run"
-		return
-	fi
 	if ! command -v crane >/dev/null 2>&1; then
 		fail "crane is not installed (it lists the ECR Public tags)"
 		return
@@ -272,8 +264,13 @@ echo "Checking release version $(printf '%q' "$VERSION") (crane: $(command -v cr
 check_on_main
 check_format
 check_repo_files
-check_git_tag
-check_registry
+if [[ "$PRACTICE" == true ]]; then
+	skip "practice run"
+	skip "practice run"
+else
+	check_git_tag
+	check_registry
+fi
 
 suffix=""
 if [[ "$PRACTICE" == true ]]; then

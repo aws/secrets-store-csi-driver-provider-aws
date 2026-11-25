@@ -20,8 +20,6 @@ set -euo pipefail
 readonly VERSION_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly MAX_VERSION_LENGTH=32
 readonly REGISTRY_RE='^([0-9]{12})\.dkr\.ecr\.([a-z]{2}(-[a-z]+)+-[0-9])\.amazonaws\.com$'
-readonly DIGITS_RE='^[0-9]+$'
-readonly SHA_RE='^[0-9a-f]{40}$'
 readonly MODULE=github.com/aws/secrets-store-csi-driver-provider-aws
 readonly LABEL_PREFIX=com.amazonaws.secrets-store-csi-driver-provider-aws.release
 
@@ -49,14 +47,6 @@ if [[ ! "$STAGING_REGISTRY" =~ $REGISTRY_RE ]]; then
 fi
 account_id=${BASH_REMATCH[1]}
 region=${BASH_REMATCH[2]}
-for name in GITHUB_RUN_ID GITHUB_RUN_ATTEMPT; do
-	if [[ ! "${!name}" =~ $DIGITS_RE ]]; then
-		fail "$name $(printf '%q' "${!name}") is not a number"
-	fi
-done
-if [[ ! "$GITHUB_SHA" =~ $SHA_RE ]]; then
-	fail "GITHUB_SHA $(printf '%q' "$GITHUB_SHA") is not a 40-character commit id"
-fi
 
 if [[ "$mode" == practice ]]; then
 	stage_tag="rehearsal-$GITHUB_RUN_ID"
@@ -69,7 +59,7 @@ labels="org.opencontainers.image.revision=$GITHUB_SHA
 $LABEL_PREFIX.run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
 $LABEL_PREFIX.mode=$mode"
 
-# Every value was checked above, so none can contain a newline or the delimiter.
+# Every value was checked above or comes from the runner, so none can contain a newline or the delimiter.
 {
 	echo "imageRepo=$STAGING_REGISTRY/ascp"
 	echo "region=$region"
