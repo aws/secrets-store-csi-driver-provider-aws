@@ -206,6 +206,13 @@ has_text() {
 	expect_eq "$(kubectl_calls)" 2
 }
 
+@test "no digest, wrong tag: fails at the exact-image check" {
+	check_image "$R:3.1.3" EXPECT_DIGEST="" PRIVTAG="3.1.4"
+	failed
+	has_text "expected: $R:3.1.4"
+	has_text "actual: $R:3.1.3"
+}
+
 @test "a kubectl warning on stderr doesn't end up in the image: passes" {
 	check_image "$R:3.1.5-testing@$D" EXPECT_DIGEST="$D" PRIVTAG="3.1.5-testing@$D" STUB_WARN=1
 	passed

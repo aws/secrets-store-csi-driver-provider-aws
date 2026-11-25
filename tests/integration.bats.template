@@ -166,8 +166,13 @@ validate_jmes_mount() {
 		# Helm rendered exactly the image we asked for.
 		assert_equal "${PRIVREPO}:${PRIVTAG}" "$pod_image"
 	fi
-	run kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD -o jsonpath='{.status.containerStatuses[0].imageID}'
-	log "provider imageID (informational): $output"
+	# Log only, so a failure doesn't fail the test, but its error text must not be logged as the imageID.
+	run bash -c "kubectl --kubeconfig=${{KUBECONFIG_VAR}} --namespace $NAMESPACE get pod/$PROVIDER_POD -o jsonpath='{.status.containerStatuses[0].imageID}' 2>'$kubectl_err'"
+	if [[ "$status" == 0 ]]; then
+		log "provider imageID (informational): $output"
+	else
+		log "provider imageID query failed (informational): $(cat "$kubectl_err")"
+	fi
 	# END image-check
 
 	log "AWS provider installation completed"

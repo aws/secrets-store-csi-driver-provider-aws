@@ -100,6 +100,8 @@ accepts_repo() {
 @test "look-alike hosts and bad path parts are refused" {
 	refuses_repo public.ecr.aws.evil.com/x/y
 	refuses_repo xpublic.ecr.aws/x/y
+	refuses_repo xghcr.io/owner/repo
+	refuses_repo x123456789012.dkr.ecr.us-west-2.amazonaws.com/ascp
 	refuses_repo ghcr.io/owner/repo-
 	refuses_repo ghcr.io/_repo
 	refuses_repo ghcr.io/owner/-repo

@@ -23,6 +23,13 @@ on:
         required: false
         type: string
         default: ''
+    secrets:
+      ROLE_ARN:
+        description: 'IAM role the integration tests assume'
+        required: true
+      POD_IDENTITY_ROLE_ARN:
+        description: 'IAM role for the pod identity tests'
+        required: true
   workflow_dispatch:
     inputs: *inputs
 
@@ -62,9 +69,6 @@ jobs:
     env:
       imageTag: ${{ matrix.arch == 'amd64' && inputs.imageTagAmd64 || inputs.imageTagArm64 }}
     steps:
-      - name: Context
-        run: echo "Running integration tests for ${{ inputs.imageRepo }}:${{ env.imageTag }}"
-
       - name: Harden Runner
         uses: step-security/harden-runner@v2.19.4
         with:
