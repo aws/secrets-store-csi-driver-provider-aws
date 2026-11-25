@@ -4,8 +4,8 @@
 #   docker login --username AWS --password-stdin <registry>   reads the password from stdin into
 #                                                             $FAKE_DIR/docker.password; $FAKE_DIR/docker.login is
 #                                                             "ok" or "exit:<n>"
-#   docker logout <registry>                                  "Removing login credentials for <registry>" after a
-#                                                             login, else "Not logged in to <registry>" (both exit 0)
+#   docker logout <registry>                                  "Removing login credentials for <registry>", exit 0,
+#                                                             with or without a login
 # The messages are docker CLI's wording, not recorded. Every call is logged to $FAKE_DIR/docker.calls. Anything
 # unexpected is appended to $FAKE_VIOLATIONS and the fake exits 99.
 
@@ -26,7 +26,6 @@ login)
 	response=$(cat "$FAKE_DIR/docker.login" 2>/dev/null || echo ok)
 	case "$response" in
 	ok)
-		echo "$5" >"$FAKE_DIR/docker.logged-in"
 		echo "Login Succeeded"
 		;;
 	exit:*)
@@ -38,12 +37,7 @@ login)
 	;;
 logout)
 	[[ $# -eq 2 ]] || violation "unexpected logout arguments: $*"
-	if [[ -f "$FAKE_DIR/docker.logged-in" && "$(cat "$FAKE_DIR/docker.logged-in")" == "$2" ]]; then
-		rm -f "$FAKE_DIR/docker.logged-in"
-		echo "Removing login credentials for $2"
-	else
-		echo "Not logged in to $2"
-	fi
+	echo "Removing login credentials for $2"
 	;;
 *) violation "unexpected call: $*" ;;
 esac

@@ -4,19 +4,16 @@ name: Release
 # release tag to that digest in the private staging repo. Nothing is published to ECR Public.
 #
 # "Practice run" (ticked by default) uses the version already on main and tags rehearsal-<run id>, which the
-# staging repo deletes after 14 days. Untick it for a real release: that writes a permanent <version> tag.
+# staging repo deletes after 88 days. Untick it for a real release: that writes a <version> tag that can't be moved.
 #
 # Re-run buttons:
 # - Re-run failed jobs after build succeeded (integ or stage failed): reuses build's digest; no rebuild.
 # - Re-run failed jobs after build failed: builds again from scratch; the new digest replaces the -testing tag.
 # - Re-run the stage job alone after it succeeded: "already staged", success.
 # - Re-run all jobs before stage ran (e.g. integ failed): rebuilds and tests the new digest. Expected.
-# - Re-run all jobs after stage ran: fails at "Check the tag is free" on purpose (the tag is permanent). Start a
-#   new run instead (practice: new run id, so new tags; real: a new version). A practice run older than 14 days
-#   has lost its rehearsal tag, so it passes that check and builds again; harmless.
+# - Re-run all jobs after stage ran: fails at "Check the tag is free" on purpose (the tag can't be moved). Start a
+#   new run instead (practice: new run id, so new tags; real: a new version).
 # - "Check the digest" failed: use Re-run all jobs (re-running failed jobs keeps build's empty output).
-# - Practice runs older than 14 days: their images are deleted, so re-running integ or stage alone fails. Start a
-#   new practice run.
 
 on:
   workflow_dispatch:
@@ -26,7 +23,7 @@ on:
         required: true
         type: string
       practice:
-        description: 'Practice run: uses the version already on main and tags rehearsal-<run id>, deleted after 14 days. Untick for a real release.'
+        description: 'Practice run: uses the version already on main and tags rehearsal-<run id>, deleted after 88 days. Untick for a real release.'
         type: boolean
         default: true
 
@@ -148,7 +145,7 @@ jobs:
           output-credentials: true
           output-env-credentials: false
 
-      - name: Check no AWS keys reached the job environment
+      - name: Check no AWS credentials reached the job environment
         run: bash .github/scripts/staging-image.sh no-env-credentials
 
       - name: Check the tag is free
@@ -206,7 +203,7 @@ jobs:
           output-credentials: true
           output-env-credentials: false
 
-      - name: Check no AWS keys reached the job environment (again)
+      - name: Check no AWS credentials reached the job environment (again)
         run: bash .github/scripts/staging-image.sh no-env-credentials
 
       - name: Check the pushed image
@@ -296,7 +293,7 @@ jobs:
           output-credentials: true
           output-env-credentials: false
 
-      - name: Check no AWS keys reached the job environment
+      - name: Check no AWS credentials reached the job environment
         run: bash .github/scripts/staging-image.sh no-env-credentials
 
       - name: Add the stage tag to the tested digest

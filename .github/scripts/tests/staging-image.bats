@@ -22,7 +22,10 @@ setup() {
 	: >"$FAKE_DIR/aws.keys"
 	: >"$FAKE_DIR/docker.calls"
 	: >"$FAKE_DIR/go.calls"
-	unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+	CREDENTIAL_VARS="AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE
+		AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_CREDENTIAL_FILE BOTO_CONFIG AWS_WEB_IDENTITY_TOKEN_FILE
+		AWS_CONTAINER_CREDENTIALS_RELATIVE_URI AWS_CONTAINER_CREDENTIALS_FULL_URI AWS_EC2_METADATA_SERVICE_ENDPOINT"
+	unset $CREDENTIAL_VARS
 
 	# The recorded public 3.1.4 index without its 2 attestation entries: the 2-platform index the build pushes
 	# (provenance and sbom are off). Made from recorded bytes; ECR's own reply for it is not recorded.
@@ -136,15 +139,15 @@ calls_for() { grep -c "^$1 " "$FAKE_DIR/aws.calls" || true; }
 
 # --- no-env-credentials ------------------------------------------------------------------------------------------
 
-@test "no-env-credentials: passes with no AWS keys in the environment" {
+@test "no-env-credentials: passes with no AWS credentials in the environment" {
 	staging no-env-credentials
 	expect_status 0
 	has_line "✔ no AWS credentials in the job environment"
 }
 
-@test "no-env-credentials: each AWS key, even empty, fails" {
+@test "no-env-credentials: each AWS credential setting, even empty, fails" {
 	local name
-	for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+	for name in $CREDENTIAL_VARS; do
 		export "$name=x"
 		staging no-env-credentials
 		expect_status 1
@@ -152,6 +155,7 @@ calls_for() { grep -c "^$1 " "$FAKE_DIR/aws.calls" || true; }
 		export "$name="
 		staging no-env-credentials
 		expect_status 1
+		has_line "✘ $name is set in the job environment"
 		unset "$name"
 	done
 }
@@ -174,7 +178,23 @@ calls_for() { grep -c "^$1 " "$FAKE_DIR/aws.calls" || true; }
 	aws_route "describe-images:imageTag=3.1.5" found
 	staging check-free
 	expect_status 1
-	has_line "✘ 3.1.5 is already staged (at $DIGEST); tags there are permanent, so re-run the failed jobs of the run that staged it, or release a new version"
+	has_line "✘ 3.1.5 is already staged (at $DIGEST); tags there can't be moved, so re-run the failed jobs of the run that staged it, or release a new version"
+}
+
+@test "check-free: a staged rehearsal tag fails" {
+	describe_reply found "$DIGEST" rehearsal-7 rehearsal-7-testing
+	aws_route "describe-images:imageTag=rehearsal-7" found
+	staging check-free
+	expect_status 1
+	has_line "✘ rehearsal-7 is already staged (at $DIGEST); tags there can't be moved, so start a new run"
+}
+
+@test "check-free: PRACTICE other than true/false fails" {
+	export PRACTICE=yes STAGE_TAG=latest
+	staging check-free
+	expect_status 1
+	has_line "✘ PRACTICE must be true or false, not yes"
+	expect_eq "$(count_lines "$FAKE_DIR/aws.calls")" 0
 }
 
 @test "check-free: any other error fails, never 'free'" {
@@ -184,6 +204,26 @@ calls_for() { grep -c "^$1 " "$FAKE_DIR/aws.calls" || true; }
 	expect_status 1
 	has_line "✘ could not check rehearsal-7 (exit 254)"
 	lacks_text "is free"
+}
+
+@test "check-free: an unexpected reply fails, never 'free'" {
+	local reply
+	for reply in '{"imageDetails":[]}' '{"imageDetails":[{"imageDigest":"sha256:bad"}]}' '{}' 'not json'; do
+		aws_reply odd "$reply"
+		aws_route "describe-images:imageTag=rehearsal-7" odd
+		staging check-free
+		expect_status 1
+		has_line "✘ could not check rehearsal-7 (unexpected reply)"
+	done
+}
+
+@test "check-free: a CLI failure that isn't a service error fails" {
+	printf '\nConnect timeout on endpoint URL: "https://api.ecr.us-west-2.amazonaws.com/"\n' >"$FAKE_DIR/aws/timeout.err"
+	echo 255 >"$FAKE_DIR/aws/timeout.exit"
+	aws_route "describe-images:imageTag=rehearsal-7" timeout
+	staging check-free
+	expect_status 1
+	has_line "✘ could not check rehearsal-7 (exit 255)"
 }
 
 # --- login / logout ----------------------------------------------------------------------------------------------
@@ -201,12 +241,33 @@ calls_for() { grep -c "^$1 " "$FAKE_DIR/aws.calls" || true; }
 		"get-login-password --region us-west-2 --cli-read-timeout 30 --cli-connect-timeout 10 | retry=standard,5"
 }
 
+@test "login: a failed login fails and still doesn't print the password" {
+	echo fake-ecr-password >"$FAKE_DIR/aws/password.out"
+	aws_route get-login-password password
+	echo exit:1 >"$FAKE_DIR/docker.login"
+	staging login
+	expect_status 1
+	has_line "✘ could not log in to $REGISTRY (exit 1)"
+	lacks_text fake-ecr-password
+}
+
 @test "logout: logs out of the registry" {
-	echo "$REGISTRY" >"$FAKE_DIR/docker.logged-in"
 	staging logout
 	expect_status 0
 	has_line "Removing login credentials for $REGISTRY"
 	expect_eq "$(cat "$FAKE_DIR/docker.calls")" "logout $REGISTRY"
+}
+
+@test "logout: with an empty or unset image repo there is nothing to log out of" {
+	export IMAGE_REPO=""
+	staging logout
+	expect_status 0
+	has_line "nothing to log out of (no image repo)"
+	unset IMAGE_REPO
+	staging logout
+	expect_status 0
+	has_line "nothing to log out of (no image repo)"
+	expect_eq "$(count_lines "$FAKE_DIR/docker.calls")" 0
 }
 
 # --- check-build -------------------------------------------------------------------------------------------------
@@ -369,6 +430,23 @@ describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=stan
 	expect_eq "$(count_lines "$FAKE_DIR/docker.calls")" 0
 }
 
+@test "every AWS command needs the repo's region and the retry settings" {
+	local command
+	for command in check-free login check-build stage; do
+		AWS_REGION=us-east-1 staging "$command"
+		expect_status 1
+		has_line "✘ AWS_REGION us-east-1 is not the repo's region (us-west-2)"
+		AWS_RETRY_MODE='' staging "$command"
+		expect_status 1
+		has_line "✘ AWS_RETRY_MODE is not set"
+		AWS_MAX_ATTEMPTS='' staging "$command"
+		expect_status 1
+		has_line "✘ AWS_MAX_ATTEMPTS is not set"
+	done
+	expect_eq "$(count_lines "$FAKE_DIR/aws.calls")" 0
+	expect_eq "$(count_lines "$FAKE_DIR/docker.calls")" 0
+}
+
 @test "check-free and stage refuse bad tag shapes and a tag of the other mode" {
 	local command bad
 	for command in check-free stage; do
@@ -400,4 +478,17 @@ describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=stan
 	staging check-build
 	expect_status 0
 	expect_eq "$(find "$TMPDIR" -mindepth 1 | wc -l | tr -d ' ')" 0
+}
+
+@test "an unknown or missing command prints the usage and exits 2" {
+	local command
+	for command in "" nope; do
+		staging "$command"
+		expect_status 2
+		has_line "usage: $SCRIPT no-env-credentials | check-free | login | logout | check-build | stage"
+	done
+	staging
+	expect_status 2
+	has_line "usage: $SCRIPT no-env-credentials | check-free | login | logout | check-build | stage"
+	expect_eq "$(count_lines "$FAKE_DIR/aws.calls")" 0
 }

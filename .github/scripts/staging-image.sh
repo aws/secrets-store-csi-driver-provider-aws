@@ -3,7 +3,8 @@
 # The Release workflow's steps against the private staging repo (<account>.dkr.ecr.<region>.amazonaws.com/ascp).
 # One command per call:
 #
-#   no-env-credentials  fails if AWS keys are in the job environment (they must only come from step outputs)
+#   no-env-credentials  fails if AWS credentials, or a pointer to them, are in the job environment (they must only
+#                       come from step outputs)
 #   check-free          fails if STAGE_TAG is already in the repo
 #   login               docker login to the registry
 #   logout              docker logout from the registry (a quiet success if there is nothing to log out of)
@@ -264,7 +265,9 @@ read_stage_tag() {
 
 cmd_no_env_credentials() {
 	local name found=0
-	for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+	for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE \
+		AWS_CONFIG_FILE AWS_SHARED_CREDENTIALS_FILE AWS_CREDENTIAL_FILE BOTO_CONFIG AWS_WEB_IDENTITY_TOKEN_FILE \
+		AWS_CONTAINER_CREDENTIALS_RELATIVE_URI AWS_CONTAINER_CREDENTIALS_FULL_URI AWS_EC2_METADATA_SERVICE_ENDPOINT; do
 		if [[ -n "${!name+set}" ]]; then
 			echo "✘ $name is set in the job environment"
 			found=1
@@ -284,10 +287,10 @@ cmd_check_free() {
 	make_work_dir
 	read_stage_tag
 	if [[ -n "$tag_digest" && "$PRACTICE" == true ]]; then
-		fail "$STAGE_TAG is already staged (at $tag_digest); tags there are permanent, so start a new run"
+		fail "$STAGE_TAG is already staged (at $tag_digest); tags there can't be moved, so start a new run"
 	fi
 	if [[ -n "$tag_digest" ]]; then
-		fail "$STAGE_TAG is already staged (at $tag_digest); tags there are permanent, so re-run the failed jobs" \
+		fail "$STAGE_TAG is already staged (at $tag_digest); tags there can't be moved, so re-run the failed jobs" \
 			"of the run that staged it, or release a new version"
 	fi
 	ok "$STAGE_TAG is free"
@@ -317,7 +320,7 @@ cmd_logout() {
 		return 0
 	fi
 	parse_repo
-	# Prints "Not logged in to ..." and succeeds when there was no login.
+	# Prints "Removing login credentials for ..." and succeeds, even when there was no login.
 	out=$(docker logout "$registry" 2>&1) || rc=$?
 	echo "$out"
 	if ((rc != 0)); then
