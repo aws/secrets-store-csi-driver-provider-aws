@@ -335,6 +335,85 @@ describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=stan
 	has_line "✘ $DIGEST doesn't carry the tag rehearsal-7-testing (tags: )"
 }
 
+@test "check-build: a binary built for the wrong platform or with cgo fails" {
+	local edit
+	for edit in "GOARCH=arm64/GOARCH=amd64" "GOOS=linux/GOOS=darwin" "CGO_ENABLED=0/CGO_ENABLED=1"; do
+		setup
+		good_build_routes
+		go_output arm64 "s/$edit/"
+		staging check-build
+		expect_status 1
+		has_line "✘ the arm64 binary wasn't built with ${edit%%/*}"
+		expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+	done
+}
+
+@test "check-build: a binary missing the ProviderVersion stamp fails" {
+	good_build_routes
+	go_output arm64 's/ProviderVersion=3\.1\.4/ProviderVersion=3.1.3/'
+	staging check-build
+	expect_status 1
+	has_line "✘ the arm64 binary's server.ProviderVersion isn't 3.1.4 (ldflags: -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=3.1.4' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.ProviderVersion=3.1.3' -extldflags '-static')"
+}
+
+@test "check-build: a second -X for the version fails (the linker uses the last one)" {
+	good_build_routes
+	go_output arm64 "s| -extldflags| -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=0.0.1-dev' -extldflags|"
+	staging check-build
+	expect_status 1
+	has_line "✘ the arm64 binary's server.Version isn't 3.1.4 (ldflags: -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=3.1.4' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.ProviderVersion=3.1.4' -X 'github.com/aws/secrets-store-csi-driver-provider-aws/server.Version=0.0.1-dev' -extldflags '-static')"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "check-build: another package's server.Version stamp passes" {
+	good_build_routes
+	go_output arm64 "s| -extldflags| -X 'example.com/dep/server.Version=2.0.0' -extldflags|"
+	staging check-build
+	expect_status 0
+	has_line "✔ arm64 binary: linux/arm64, no cgo, version 3.1.4"
+}
+
+@test "check-build: in a real run, a testing tag other than VERSION-testing fails before any AWS call" {
+	local bad
+	export PRACTICE=false
+	for bad in 3.1.5-testing rehearsal-7-testing 3.1.4; do
+		export TESTING_TAG=$bad
+		staging check-build
+		expect_status 1
+		has_line "✘ real run, but TESTING_TAG $bad is not 3.1.4-testing"
+	done
+	expect_eq "$(count_lines "$FAKE_DIR/aws.calls")" 0
+}
+
+@test "check-build: a missing build copy, or one without exactly the 2 platform folders, fails" {
+	good_build_routes
+	rm -rf "$ROOTFS"
+	staging check-build
+	expect_status 1
+	has_line "✘ the build's local copy $ROOTFS is missing"
+
+	make_rootfs
+	mkdir "$ROOTFS/linux_386"
+	staging check-build
+	expect_status 1
+	has_line "✘ expected exactly linux_amd64/ and linux_arm64/ in $ROOTFS, found: linux_386 linux_amd64 linux_arm64 "
+
+	rm -rf "$ROOTFS/linux_386" "$ROOTFS/linux_arm64"
+	staging check-build
+	expect_status 1
+	has_line "✘ expected exactly linux_amd64/ and linux_arm64/ in $ROOTFS, found: linux_amd64 "
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "check-build: a failing go version -m fails" {
+	good_build_routes
+	echo 1 >"$FAKE_DIR/go-amd64.exit"
+	staging check-build
+	expect_status 1
+	has_line "✘ go version -m failed for the amd64 binary"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
 # --- practice / real separation ----------------------------------------------------------------------------------
 
 @test "separation: a practice build whose digest has a release tag fails" {
@@ -343,8 +422,34 @@ describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=stan
 	staging check-build
 	expect_status 1
 	has_line "✘ practice run, but $DIGEST already has the release tag 3.1.4"
-	has_line "  aws ecr batch-delete-image --registry-id $ACCOUNT --repository-name ascp --region us-west-2 --image-ids imageTag=3.1.4"
+	# The fix removes this run's practice tag, never the release tag.
+	has_line "  aws ecr batch-delete-image --registry-id $ACCOUNT --repository-name ascp --region us-west-2 --image-ids imageTag=rehearsal-7-testing"
+	lacks_text "imageTag=3.1.4"
 	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "separation: a real build whose digest has a practice tag fails" {
+	export PRACTICE=false TESTING_TAG=3.1.4-testing
+	good_build_routes
+	describe_reply digest-tags "$DIGEST" 3.1.4-testing rehearsal-9-testing
+	staging check-build
+	expect_status 1
+	has_line "✘ real run, but $DIGEST already has the practice tag rehearsal-9-testing"
+	has_line "  aws ecr batch-delete-image --registry-id $ACCOUNT --repository-name ascp --region us-west-2 --image-ids imageTag=rehearsal-9-testing"
+	expect_eq "$(cat "$GITHUB_OUTPUT")" ""
+}
+
+@test "separation: a digest that lost this run's testing tag fails on that, with no delete command" {
+	local command
+	for command in check-build stage; do
+		setup
+		good_build_routes
+		describe_reply digest-tags "$DIGEST" 3.1.4
+		staging "$command"
+		expect_status 1
+		has_line "✘ $DIGEST doesn't carry the tag rehearsal-7-testing (tags: 3.1.4 )"
+		lacks_text "batch-delete-image"
+	done
 }
 
 @test "separation: stage with an other-mode tag fails before put-image" {
@@ -362,8 +467,7 @@ describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=stan
 	fresh_stage_routes
 	staging stage
 	expect_status 0
-	has_line "✔ staged rehearsal-7"
-	has_line "$REPO:rehearsal-7@$DIGEST"
+	has_line "✔ staged $REPO:rehearsal-7@$DIGEST"
 	expect_eq "$(grep '^put-image ' "$FAKE_DIR/aws.calls")" \
 		"put-image $ECR_ARGS --image-tag rehearsal-7 --image-digest $DIGEST --image-manifest file://MANIFEST --image-manifest-media-type $OCI_INDEX $TIMEOUTS | retry=standard,5"
 	expect_eq "$(digest_of "$FAKE_DIR/put-image.manifest")" "${DIGEST#sha256:}"
@@ -375,7 +479,7 @@ describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=stan
 	aws_route "describe-images:imageTag=rehearsal-7" digest-tags
 	staging stage
 	expect_status 0
-	has_line "✔ rehearsal-7 is already staged at $DIGEST"
+	has_line "✔ $REPO:rehearsal-7 is already staged at $DIGEST"
 	expect_eq "$(calls_for put-image)" 0
 }
 
@@ -399,7 +503,7 @@ describe-images $ECR_ARGS --image-ids imageDigest=$DIGEST $TIMEOUTS | retry=stan
 		aws_route "put-image:rehearsal-7" exists
 		staging stage
 		expect_status 0
-		has_line "✔ staged rehearsal-7"
+		has_line "✔ staged $REPO:rehearsal-7@$DIGEST"
 
 		setup
 		fresh_stage_routes

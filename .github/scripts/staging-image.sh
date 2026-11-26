@@ -185,7 +185,7 @@ check_testing_tag() {
 # A practice image never carries a release tag (X.Y.Z or X.Y.Z-testing), and a real one never carries a
 # rehearsal-* tag.
 check_mode_separation() {
-	local tag bad=""
+	local tag bad="" remove
 	while IFS= read -r tag; do
 		if [[ "$PRACTICE" == true && "$tag" =~ $RELEASE_TAG_RE ]]; then
 			bad=$tag
@@ -193,8 +193,14 @@ check_mode_separation() {
 			bad=$tag
 		fi
 		if [[ -n "$bad" ]]; then
-			echo "  An admin can remove that one tag with:" >&2
-			echo "  aws ecr batch-delete-image --registry-id $registry_id --repository-name $REPO_NAME --region $region --image-ids imageTag=$bad" >&2
+			# Always remove the practice tag: a release image must keep its release tags, or the practice
+			# cleanup rule would delete it.
+			remove=$bad
+			if [[ "$PRACTICE" == true ]]; then
+				remove=$TESTING_TAG
+			fi
+			echo "  First check that $remove is still on $DIGEST (a re-run can move it). Then an admin can remove it with:" >&2
+			echo "  aws ecr batch-delete-image --registry-id $registry_id --repository-name $REPO_NAME --region $region --image-ids imageTag=$remove" >&2
 			if [[ "$PRACTICE" == true ]]; then
 				fail "practice run, but $DIGEST already has the release tag $bad"
 			fi
@@ -350,6 +356,8 @@ cmd_check_build() {
 
 	read_manifest
 	read_digest_tags
+	# First, so check_mode_separation only ever names a tag that is on this digest.
+	check_testing_tag
 	check_mode_separation
 
 	if ! entries=$(jq -r '
@@ -364,6 +372,8 @@ cmd_check_build() {
 	*) fail "expected exactly linux/amd64 and linux/arm64, found: ${entries:-nothing}" ;;
 	esac
 
+	# Nothing here ties ROOTFS to DIGEST: this relies on ROOTFS being the type=local export of the same build
+	# step that pushed DIGEST (release.yml).
 	if [[ ! -d "$ROOTFS" ]]; then
 		fail "the build's local copy $ROOTFS is missing"
 	fi
@@ -374,8 +384,6 @@ cmd_check_build() {
 	for arch in amd64 arm64; do
 		check_binary "$arch" "$ROOTFS/linux_$arch/$BINARY"
 	done
-
-	check_testing_tag
 
 	echo "digest=$DIGEST" >>"$GITHUB_OUTPUT"
 	ok "checked $IMAGE_REPO@$DIGEST"
@@ -409,7 +417,9 @@ check_binary() {
 		ldflags=${ldflags%\"}
 	fi
 	for name in Version ProviderVersion; do
-		if [[ " $ldflags " != *" -X '$MODULE/server.$name=$VERSION' "* ]]; then
+		# Exactly one -X per name: the Go linker uses the last one.
+		if [[ " $ldflags " != *" -X '$MODULE/server.$name=$VERSION' "* ||
+			"${ldflags#*"$MODULE/server.$name="}" == *"$MODULE/server.$name="* ]]; then
 			fail "the $arch binary's server.$name isn't $VERSION (ldflags: $ldflags)"
 		fi
 	done
@@ -430,14 +440,14 @@ cmd_stage() {
 	make_work_dir
 
 	read_digest_tags
-	check_mode_separation
 	# The digest must still be this run's build: a later build of the same version moves the -testing tag.
+	# Checked first, so check_mode_separation only ever names a tag that is on this digest.
 	check_testing_tag
+	check_mode_separation
 
 	read_stage_tag
 	if [[ "$tag_digest" == "$DIGEST" ]]; then
-		ok "$STAGE_TAG is already staged at $DIGEST"
-		echo "$IMAGE_REPO:$STAGE_TAG@$DIGEST"
+		ok "$IMAGE_REPO:$STAGE_TAG is already staged at $DIGEST"
 		return 0
 	fi
 	if [[ -n "$tag_digest" ]]; then
@@ -460,8 +470,7 @@ cmd_stage() {
 	if [[ "$tag_digest" != "$DIGEST" ]]; then
 		fail "after staging, $STAGE_TAG points at ${tag_digest:-nothing}, not $DIGEST"
 	fi
-	ok "staged $STAGE_TAG"
-	echo "$IMAGE_REPO:$STAGE_TAG@$DIGEST"
+	ok "staged $IMAGE_REPO:$STAGE_TAG@$DIGEST"
 }
 
 # --- main --------------------------------------------------------------------------------------------------------
