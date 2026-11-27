@@ -1,0 +1,4 @@
+# Recorded crane ls output: one tag per line. A \r at a line end would make every tag look different.
+ecr-public-tags.txt -text
+# A recorded image index: its sha256 is its digest, so not one byte may change.
+*.json -text

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#
+# Test fake for curl. Accepts only the crane download install-crane.sh makes:
+#   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 60
+#        --retry-max-time 180
+#        --output <f> https://github.com/google/go-containerregistry/releases/download/v<X.Y.Z>/go-containerregistry_Linux_<x86_64|arm64>.tar.gz
+#
+# $FAKE_DIR/routes has one line per URL: "<url> <fixture>[,<fixture>...]". The Nth call to a URL gets the Nth
+# fixture (the last one repeats). A fixture is $FAKE_DIR/fixtures/<name>.download (the file's bytes), "http404"
+# for a missing asset, or "neterror" for a DNS failure, both reported the way real curl reports them.
+#
+# Every call is logged to $FAKE_DIR/curl.calls as "<max-time> <url>". Anything unexpected is appended to
+# $FAKE_VIOLATIONS and the fake exits 99, so the test's teardown fails.
+
+set -euo pipefail
+
+violation() {
+	echo "curl: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+# The routed fixture for this call to a URL (the Nth call gets the Nth fixture).
+routed_fixture() {
+	local url=$1 route calls index
+	local -a responses
+	route=$(awk -v url="$url" '$1 == url { print $2 }' "$FAKE_DIR/routes")
+	[[ -n "$route" ]] || violation "no route for $url"
+	calls=$(awk -v url="$url" '$2 == url' "$FAKE_DIR/curl.calls" | wc -l | tr -d ' ')
+	IFS=, read -r -a responses <<<"$route"
+	index=$((calls - 1))
+	if ((index >= ${#responses[@]})); then
+		index=$((${#responses[@]} - 1))
+	fi
+	echo "${responses[$index]}"
+}
+
+download_re='^https://github\.com/google/go-containerregistry/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/go-containerregistry_Linux_(x86_64|arm64)\.tar\.gz$'
+if [[ $# -ne 17 || "$1" != --silent || "$2" != --show-error || "$3" != --fail || "$4" != --location ||
+	"$5" != --proto || "$6" != =https || "$7" != --proto-redir || "$8" != =https || "$9" != --retry ||
+	"${10}" != 3 || "${11}" != --max-time || "${12}" != 60 || "${13}" != --retry-max-time || "${14}" != 180 ||
+	"${15}" != --output ]]; then
+	violation "unexpected download flags: $*"
+fi
+out=${16} url=${17}
+[[ "$url" =~ $download_re ]] || violation "unexpected download URL: $url"
+echo "60 $url" >>"$FAKE_DIR/curl.calls"
+fixture=$(routed_fixture "$url")
+case "$fixture" in
+neterror)
+	echo "curl: (6) Could not resolve host: github.com" >&2
+	exit 6
+	;;
+http404)
+	echo "curl: (22) The requested URL returned error: 404" >&2
+	exit 22
+	;;
+esac
+[[ -f "$FAKE_DIR/fixtures/$fixture.download" ]] || violation "missing download fixture $fixture"
+cp "$FAKE_DIR/fixtures/$fixture.download" "$out"

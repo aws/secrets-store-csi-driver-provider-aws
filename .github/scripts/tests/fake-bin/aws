@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# Test fake for the AWS CLI. Accepts only the exact ECR calls staging-image.sh makes:
+#   aws ecr get-login-password --region <r> --cli-read-timeout 30 --cli-connect-timeout 10
+#   aws ecr <describe-images | batch-get-image | put-image> --registry-id <id> --repository-name ascp --region <r>
+#       <operation args> --output json --cli-read-timeout 30 --cli-connect-timeout 10
+#
+# $FAKE_DIR/aws.routes has one line per request: "<key> <reply>[,<reply>...]". The Nth call with a key gets the Nth
+# reply (the last one repeats). Keys:
+#   describe-images:imageTag=<tag>   describe-images:imageDigest=<digest>   batch-get-image:imageDigest=<digest>
+#   put-image:<tag>                  get-login-password
+# A reply is $FAKE_DIR/aws/<reply>.out (stdout), plus <reply>.err and <reply>.exit for a failure. Error text uses
+# the format of a real AWS CLI v2 service error (recorded: a leading blank line, "aws: [ERROR]: An error occurred
+# (<Name>) when calling the <Operation> operation: <message>", exit 254); the ECR names and messages are from the
+# ECR API docs, not recorded.
+#
+# Every call is logged to $FAKE_DIR/aws.calls as "<args> | retry=<AWS_RETRY_MODE>,<AWS_MAX_ATTEMPTS>", with a
+# put-image manifest path shown as file://MANIFEST (its bytes are copied to $FAKE_DIR/put-image.manifest).
+# Anything unexpected is appended to $FAKE_VIOLATIONS and the fake exits 99.
+
+set -euo pipefail
+
+violation() {
+	echo "aws: $*" >>"${FAKE_VIOLATIONS:?}"
+	exit 99
+}
+
+[[ $# -ge 2 && "$1" == ecr ]] || violation "unexpected call: $*"
+operation=$2
+shift 2
+args=("$@")
+retry="retry=${AWS_RETRY_MODE:-},${AWS_MAX_ATTEMPTS:-}"
+
+timeouts_at_end() {
+	local n=${#args[@]}
+	((n >= 4)) && [[ "${args[n - 4]}" == --cli-read-timeout && "${args[n - 3]}" == 30 &&
+		"${args[n - 2]}" == --cli-connect-timeout && "${args[n - 1]}" == 10 ]]
+}
+
+case "$operation" in
+get-login-password)
+	if [[ ${#args[@]} -ne 6 || "${args[0]}" != --region ]] || ! timeouts_at_end; then
+		violation "unexpected get-login-password arguments: ${args[*]}"
+	fi
+	key=get-login-password
+	logged="$operation ${args[*]}"
+	;;
+describe-images | batch-get-image | put-image)
+	n=${#args[@]}
+	if ((n < 12)) || [[ "${args[0]}" != --registry-id || ! "${args[1]}" =~ ^[0-9]{12}$ ||
+		"${args[2]}" != --repository-name || "${args[3]}" != ascp || "${args[4]}" != --region ||
+		"${args[n - 6]}" != --output || "${args[n - 5]}" != json ]] || ! timeouts_at_end; then
+		violation "unexpected $operation arguments: ${args[*]}"
+	fi
+	middle=("${args[@]:6:n-12}")
+	logged="$operation ${args[*]}"
+	case "$operation" in
+	describe-images | batch-get-image)
+		[[ ${#middle[@]} -eq 2 && "${middle[0]}" == --image-ids &&
+			"${middle[1]}" =~ ^(imageTag|imageDigest)=[^,[:space:]]+$ ]] ||
+			violation "unexpected $operation image ids: ${middle[*]}"
+		if [[ "$operation" == batch-get-image && "${middle[1]}" != imageDigest=* ]]; then
+			violation "batch-get-image by tag: ${middle[*]}"
+		fi
+		key="$operation:${middle[1]}"
+		;;
+	put-image)
+		[[ ${#middle[@]} -eq 8 && "${middle[0]}" == --image-tag && "${middle[2]}" == --image-digest &&
+			"${middle[4]}" == --image-manifest && "${middle[5]}" == file://* &&
+			"${middle[6]}" == --image-manifest-media-type ]] ||
+			violation "unexpected put-image arguments: ${middle[*]}"
+		manifest=${middle[5]#file://}
+		[[ -f "$manifest" ]] || violation "put-image manifest file $manifest is missing"
+		cp "$manifest" "$FAKE_DIR/put-image.manifest"
+		logged=$operation
+		for arg in "${args[@]}"; do
+			if [[ "$arg" == "file://$manifest" ]]; then
+				arg=file://MANIFEST
+			fi
+			logged="$logged $arg"
+		done
+		key="put-image:${middle[1]}"
+		;;
+	esac
+	;;
+*) violation "unexpected ecr operation: $operation" ;;
+esac
+
+echo "$logged | $retry" >>"$FAKE_DIR/aws.calls"
+echo "$key" >>"$FAKE_DIR/aws.keys"
+
+route=$(awk -v key="$key" '$1 == key { print $2 }' "$FAKE_DIR/aws.routes")
+[[ -n "$route" ]] || violation "no route for $key"
+calls=$(grep -cxF -- "$key" "$FAKE_DIR/aws.keys")
+IFS=, read -r -a replies <<<"$route"
+index=$((calls - 1))
+if ((index >= ${#replies[@]})); then
+	index=$((${#replies[@]} - 1))
+fi
+reply="$FAKE_DIR/aws/${replies[$index]}"
+
+[[ -f "$reply.out" || -f "$reply.exit" ]] || violation "missing reply ${replies[$index]}"
+if [[ -f "$reply.out" ]]; then
+	cat "$reply.out"
+fi
+if [[ -f "$reply.err" ]]; then
+	cat "$reply.err" >&2
+fi
+if [[ -f "$reply.exit" ]]; then
+	exit "$(cat "$reply.exit")"
+fi
