@@ -13,7 +13,6 @@ name: Release
 # - Re-run all jobs before stage ran (e.g. integ failed): rebuilds and tests the new digest. Expected.
 # - Re-run all jobs after stage ran: fails at "Check the tag is free" on purpose (the tag can't be moved). Start a
 #   new run instead (practice: new run id, so new tags; real: a new version).
-# - "Check the digest" failed: use Re-run all jobs (re-running failed jobs keeps build's empty output).
 
 on:
   workflow_dispatch:
@@ -110,13 +109,9 @@ jobs:
           PRACTICE: ${{ inputs.practice }}
           STAGING_REGISTRY: ${{ vars.STAGING_REGISTRY }}
 
-      # Tool setup runs before any AWS credentials exist, so these actions never see them.
-      - name: Setup Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: go.mod
-          cache: false
-
+      # id-token: write covers the whole job, so every step here, setup actions and post steps included, can request
+      # the job's OIDC token and with it the push role. The pins stop the pinned code from changing under us: every
+      # action by commit SHA, the binfmt and BuildKit images by digest. buildx and Go come from the runner image.
       - name: Setup QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
@@ -124,21 +119,22 @@ jobs:
           platforms: arm64
           cache-image: false
 
-      # Two exporters in one build (the pushed image and a local copy) need buildx and BuildKit 0.13 or newer.
+      # Two exporters in one build (the pushed image and a local copy) need buildx and BuildKit 0.13 or newer. No
+      # version: input, so this uses the runner's preinstalled buildx when present instead of downloading one.
       - name: Setup Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
-          version: v0.38.0
           driver-opts: image=moby/buildkit:v0.34.0@sha256:b059f8d7226d0b326bc871af489a5dddf65e36af4d20d14251b072974d9ee87c
           cache-binary: false
 
-      # Credentials go to step outputs only, never to the job environment, so the build action and every post step
-      # run without them. Each AWS step gets them through its own env:.
+      # Credentials go to step outputs only, never to the job environment, so steps without their own env: don't get
+      # the keys. Each AWS step gets them through its own env:. The action masks them in the logs.
       - name: Get AWS credentials
         id: aws1
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.STAGING_PUSH_ROLE_ARN }}
+          role-session-name: ascp-release-push-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ steps.tags.outputs.region }}
           allowed-account-ids: ${{ steps.tags.outputs.accountId }}
           mask-aws-account-id: false
@@ -197,6 +193,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.STAGING_PUSH_ROLE_ARN }}
+          role-session-name: ascp-release-check-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ steps.tags.outputs.region }}
           allowed-account-ids: ${{ steps.tags.outputs.accountId }}
           mask-aws-account-id: false
@@ -206,10 +203,14 @@ jobs:
       - name: Check no AWS credentials reached the job environment (again)
         run: bash .github/scripts/staging-image.sh no-env-credentials
 
+      # Keep this step unconditional (no if: or continue-on-error): build's digest output is only valid because this
+      # step checks it first and writes it last. Its `go version -m` uses the runner's preinstalled Go, and
+      # GOTOOLCHAIN=local stops Go from downloading a newer toolchain if go.mod ever asks for one.
       - name: Check the pushed image
         id: check
         run: bash .github/scripts/staging-image.sh check-build
         env:
+          GOTOOLCHAIN: local
           AWS_ACCESS_KEY_ID: ${{ steps.aws2.outputs.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.aws2.outputs.aws-secret-access-key }}
           AWS_SESSION_TOKEN: ${{ steps.aws2.outputs.aws-session-token }}
@@ -221,28 +222,9 @@ jobs:
           PRACTICE: ${{ inputs.practice }}
           TESTING_TAG: ${{ steps.tags.outputs.testingTag }}
 
-  # Fails the run (a skipped job would leave it green) if build's digest output is ever empty, so integ never
-  # tests the mutable -testing tag instead of the digest.
-  check-digest:
-    name: Check the digest
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: audit
-
-      - name: Check build produced a digest
-        run: '[[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::build produced no digest"; exit 1; }'
-        env:
-          DIGEST: ${{ needs.build.outputs.digest }}
-
   integ:
     name: Integration tests
-    needs: [build, check-digest]
+    needs: build
     uses: $/.github/workflows/integ.yml
     permissions:
       id-token: write
@@ -287,6 +269,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.STAGING_PUSH_ROLE_ARN }}
+          role-session-name: ascp-release-stage-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ needs.build.outputs.region }}
           allowed-account-ids: ${{ needs.build.outputs.accountId }}
           mask-aws-account-id: false
