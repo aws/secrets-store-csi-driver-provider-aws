@@ -5,12 +5,17 @@
 #   version-tags   reads every version tag with no credentials and checks it serves DIGEST: the index (by its
 #                  digest header and by hashing its body), every image in the index (by hashing it) and every
 #                  image's config blob
+#   alias-tags     reads every alias tag with no credentials until it shows DIGEST (the images behind DIGEST are
+#                  the ones version-tags checked, so only the digest header is read)
 #
 # Inputs (environment):
-#   PUBLIC_REPO    public.ecr.aws/<namespace>/<name>; the production repo exactly when PRACTICE is false
-#   PRACTICE       true or false
-#   DIGEST         sha256:<64 hex>, the tested image index from the build job; never a digest read from a registry
-#   VERSION_TAGS   the three version tags from public-tags.sh
+#   PUBLIC_REPO       public.ecr.aws/<namespace>/<name>; the production repo exactly when PRACTICE is false
+#   PRACTICE          true or false
+#   DIGEST            sha256:<64 hex>, the tested image index from the build job; never a digest read from a registry
+#   VERSION_TAGS      version-tags only: the three version tags from public-tags.sh
+#   ALIAS_TAGS        alias-tags only: the six alias tags from public-tags.sh, latest last
+#   PREVIOUS_DIGESTS  alias-tags only: publish-alias-tags' previousDigests output, a JSON list of the digests the
+#                     aliases pointed to before this run, with null for an alias that was absent
 # Test-only settings: REGISTRY_URL, REGISTRY_RETRY_SCALE, REGISTRY_PACE_SECONDS (see registry-lib.sh), and
 # REGISTRY_DEADLINE (default 600: the script stops after 10 minutes).
 #
@@ -21,6 +26,8 @@
 # Each read is retried until it shows the tested digest or registry-lib.sh's retry budget runs out: a network
 # error, 429, 5xx, 404 and a missing digest header all retry, and every request is paced. A tag that shows any
 # other digest is on another image, and the check stops at once. Every failure ends in a ✘ line and exit 1.
+# For an alias, not found or one of PREVIOUS_DIGESTS is read again with the same budget; any other digest stops at
+# once. If this check stops on an alias, check that alias, then re-run this job alone (it needs no approval).
 #
 # Bash 3.2 compatible: `set -e` is off inside functions called from `if`, `||` or `&&`, so every command's exit
 # status is tested by hand.
@@ -33,6 +40,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/registry-lib.sh"
 readonly VERSION_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly REHEARSAL_RE='^rehearsal-[0-9]+$'
 readonly DIGEST_RE='^sha256:[0-9a-f]{64}$'
+readonly DIGITS_RE='^[0-9]+$'
 # The AWS credential, profile and role variables this check refuses to run with.
 readonly CREDENTIAL_VARS="AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE
 AWS_WEB_IDENTITY_TOKEN_FILE AWS_ROLE_ARN AWS_SHARED_CREDENTIALS_FILE AWS_CONFIG_FILE
@@ -102,6 +110,51 @@ require_version_tags() {
 	fi
 	if [[ "$PRACTICE" == false && ! "$base" =~ $VERSION_RE ]]; then
 		fail "real run, but the version tags $VERSION_TAGS are not X.Y.Z tags"
+	fi
+}
+
+# Sets tag_list (an array) from ALIAS_TAGS, with the same rules as publish-image.sh.
+require_alias_tags() {
+	local prefix="" major expected
+	require ALIAS_TAGS
+	read -r -a tag_list <<<"$ALIAS_TAGS"
+	if [[ "$PRACTICE" == true ]]; then
+		prefix=${ALIAS_TAGS%%latest-amd64 *}
+		if [[ ! "${prefix%-}" =~ $REHEARSAL_RE || "$prefix" != *- ]]; then
+			fail "practice run, but the alias tags $(printf '%q' "$ALIAS_TAGS") are not rehearsal-<run id>- tags"
+		fi
+	fi
+	major=""
+	if ((${#tag_list[@]} == 6)); then
+		major=${tag_list[4]#"$prefix"}
+	fi
+	expected="${prefix}latest-amd64 ${prefix}latest-arm64 ${prefix}latest-linux-amd64 ${prefix}latest-linux-arm64"
+	expected="$expected $prefix$major ${prefix}latest"
+	if [[ ! "$major" =~ $DIGITS_RE || "$ALIAS_TAGS" != "$expected" ]]; then
+		fail "ALIAS_TAGS $(printf '%q' "$ALIAS_TAGS") is not the six alias tags, latest last"
+	fi
+}
+
+# Sets earlier_digests (one per line) from PREVIOUS_DIGESTS, checked again here with publish-image.sh's rules: a
+# JSON list whose entries are null or sha256:<64 hex>, none of them DIGEST.
+require_previous_digests() {
+	require PREVIOUS_DIGESTS
+	if ! earlier_digests=$(python3 -I -c '
+import json, re, sys
+try:
+    entries = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(1)
+if not isinstance(entries, list):
+    sys.exit(1)
+for entry in entries:
+    if entry is None:
+        continue
+    if not isinstance(entry, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", entry) or entry == sys.argv[2]:
+        sys.exit(1)
+    print(entry)
+' "$PREVIOUS_DIGESTS" "$DIGEST"); then
+		fail "PREVIOUS_DIGESTS $(printf '%q' "$PREVIOUS_DIGESTS") is not a JSON list of null and sha256:<64 hex> digests other than $DIGEST"
 	fi
 }
 
@@ -188,14 +241,61 @@ print(digest)
 	ok "image $image and its config $config are public"
 }
 
+# check_alias <tag> : reads the alias's digest header until it is DIGEST. Not found, or a digest in
+# earlier_digests, is read again, with the same attempts and pauses as a retried request (http_request); any
+# other digest stops at once.
+check_alias() {
+	local tag=$1 url="$registry_base/manifests/$1" attempt=1 pause=2 rc got shown
+	local scale=${REGISTRY_RETRY_SCALE:-1}
+	while :; do
+		rc=0
+		http_request --want-header docker-content-digest --head --header "Authorization: Bearer $REGISTRY_TOKEN" \
+			--header "Accept: $REGISTRY_ACCEPT_MANIFEST" "$url" || rc=$?
+		if ((rc == REGISTRY_OUT_OF_TIME)); then
+			fail "ran out of time reading $tag"
+		fi
+		if ((rc != 0)); then
+			fail "could not read $tag (see the error above)"
+		fi
+		case "$REGISTRY_HTTP_STATUS" in
+		200)
+			got=$(header_value docker-content-digest) || fail "could not read the digest header of $tag"
+			if [[ ! "$got" =~ $DIGEST_RE ]]; then
+				fail "$tag has the digest header $(printf '%q' "$got"), not sha256:<64 hex>"
+			fi
+			if [[ "$got" == "$DIGEST" ]]; then
+				ok "$tag points at $DIGEST"
+				return 0
+			fi
+			if ! printf '%s\n' "$earlier_digests" | grep -qxF -- "$got"; then
+				fail "$tag points at $got, not the tested $DIGEST: it is on another image; stopping"
+			fi
+			shown="$got, a digest from before this run"
+			;;
+		404) shown="not found" ;;
+		*) fail "could not read $tag (HTTP $REGISTRY_HTTP_STATUS)" ;;
+		esac
+		if ((attempt >= REGISTRY_MAX_ATTEMPTS)); then
+			fail "after $attempt reads, $tag shows $shown, not the tested $DIGEST"
+		fi
+		if (($(seconds_left) < pause * scale + REGISTRY_TIME_FLOOR)); then
+			fail "ran out of time: $tag shows $shown, not the tested $DIGEST"
+		fi
+		echo "  $tag shows $shown; reading it again in $((pause * scale)) s" >&2
+		sleep $((pause * scale))
+		attempt=$((attempt + 1))
+		pause=$((pause * 2))
+		if ((pause > REGISTRY_MAX_PAUSE)); then
+			pause=$REGISTRY_MAX_PAUSE
+		fi
+	done
+}
+
 # --- commands ----------------------------------------------------------------------------------------------------
 
-cmd_version_tags() {
-	local rc=0 tag images image
-	refuse_credentials
-	check_target || exit 1
-	require_digest
-	require_version_tags
+# Sets up the registry reads for PUBLIC_REPO and gets the anonymous token. Run after the input checks.
+start_reads() {
+	local rc=0
 	REGISTRY_REPO_PATH=${PUBLIC_REPO#public.ecr.aws/}
 	REGISTRY_DEADLINE=${REGISTRY_DEADLINE:-600}
 	registry_base="${REGISTRY_URL:-https://public.ecr.aws}/v2/$REGISTRY_REPO_PATH"
@@ -209,6 +309,15 @@ cmd_version_tags() {
 	if ((rc != 0)); then
 		fail "could not get an anonymous token for $PUBLIC_REPO (see the error above)"
 	fi
+}
+
+cmd_version_tags() {
+	local tag images image
+	refuse_credentials
+	check_target || exit 1
+	require_digest
+	require_version_tags
+	start_reads
 
 	for tag in "${tag_list[@]}"; do
 		check_tag "$tag"
@@ -236,12 +345,28 @@ print("\n".join(digests))
 	ok "$PUBLIC_REPO@$DIGEST is public as ${tag_list[*]}, with every image and config it lists"
 }
 
+cmd_alias_tags() {
+	local tag
+	refuse_credentials
+	check_target || exit 1
+	require_digest
+	require_alias_tags
+	require_previous_digests
+	start_reads
+
+	for tag in "${tag_list[@]}"; do
+		check_alias "$tag"
+	done
+	ok "every alias of $PUBLIC_REPO points at $DIGEST: ${tag_list[*]}"
+}
+
 # --- main --------------------------------------------------------------------------------------------------------
 
 case "${1:-}" in
 version-tags) cmd_version_tags ;;
+alias-tags) cmd_alias_tags ;;
 *)
-	echo "usage: $0 version-tags" >&2
+	echo "usage: $0 version-tags | alias-tags" >&2
 	exit 2
 	;;
 esac
