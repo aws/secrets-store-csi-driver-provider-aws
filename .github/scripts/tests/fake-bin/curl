@@ -1,20 +1,38 @@
 #!/usr/bin/env bash
 #
-# Test fake for curl. Accepts only the crane downloads install-crane.sh and publish-image.sh install-crane make:
+# Test fake for curl. Accepts only the exact flag sets the release scripts use, checks the URL and the headers each
+# request type needs, and replays recorded responses from fixtures/.
+#
+# Registry requests (registry-lib.sh), with <ecr> = $RELEASE_CHECK_ECR_URL:
+#   curl --silent --show-error --max-time <5..15> --dump-header <f> --output <f> --write-out '%{http_code}'
+#        [--head] [--header <h>]... <url>
+# on these URLs, with <path> = $FAKE_ECR_REPO_PATH (default the production repo path):
+#   <ecr>/token/?scope=repository:<path>:pull   no --head, no headers (no Authorization at all)
+#   <ecr>/v2/<path>/manifests/<ref>             exactly the anonymous bearer token and the 4-type Accept header;
+#                                               HEAD only, unless FAKE_CURL_MANIFEST_GET=1 also allows a GET, which
+#                                               returns the fixture's body and no docker-content-digest header
+#   <ecr>/v2/<path>/blobs/sha256:<hex>          GET, exactly the anonymous bearer token, no Accept header
+#   <ecr>/v2/<path>/tags/list?...               GET, exactly the anonymous bearer token, no Accept header
+# The crane downloads (install-crane.sh, then publish-image.sh install-crane):
 #   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 60
 #        --retry-max-time 180
-#        --output <f> https://github.com/google/go-containerregistry/releases/download/v<X.Y.Z>/go-containerregistry_Linux_<x86_64|arm64>.tar.gz
+#        --output <f> https://github.com/google/go-containerregistry/releases/download/v<X.Y.Z>/go-containerregistry_Linux_<arch>.tar.gz
 #   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 120
 #        --output <f> <same URL>
 #
-# $FAKE_DIR/routes has one line per URL: "<url> <fixture>[,<fixture>...]". The Nth call to a URL gets the Nth
-# fixture (the last one repeats). A fixture is $FAKE_DIR/fixtures/<name>.download (the file's bytes), "http404"
-# for a missing asset, or "neterror" for a DNS failure, both reported the way real curl reports them.
+# $FAKE_DIR/routes has one line per URL: "<url> <fixture>[,<fixture>...]". The Nth call to a URL replays the Nth
+# fixture (the last one repeats). A registry fixture is <name>.headers (status line first) plus an optional
+# <name>.body; a download fixture is <name>.download (the file's bytes), or "http404" for a missing asset. The
+# fixture name "neterror" simulates a DNS failure the way real curl reports it.
 #
 # Every call is logged to $FAKE_DIR/curl.calls as "<max-time> <url>". Anything unexpected is appended to
 # $FAKE_VIOLATIONS and the fake exits 99, so the test's teardown fails.
 
 set -euo pipefail
+
+fixtures="${FAKE_FIXTURES:-$(cd "$(dirname "$0")/../fixtures" && pwd)}"
+repo_path="${FAKE_ECR_REPO_PATH:-aws-secrets-manager/secrets-store-csi-driver-provider-aws}"
+accept="application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
 
 violation() {
 	echo "curl: $*" >>"${FAKE_VIOLATIONS:?}"
@@ -36,31 +54,129 @@ routed_fixture() {
 	echo "${responses[$index]}"
 }
 
-download_re='^https://github\.com/google/go-containerregistry/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/go-containerregistry_Linux_(x86_64|arm64)\.tar\.gz$'
-if [[ $# -lt 15 || "$1" != --silent || "$2" != --show-error || "$3" != --fail || "$4" != --location ||
-	"$5" != --proto || "$6" != =https || "$7" != --proto-redir || "$8" != =https || "$9" != --retry ||
-	"${10}" != 3 || "${11}" != --max-time ]]; then
-	violation "unexpected download flags: $*"
+# --- the crane download --------------------------------------------------------------------------------------------
+
+if [[ "${3:-}" == --fail ]]; then
+	download_re='^https://github\.com/google/go-containerregistry/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/go-containerregistry_Linux_(x86_64|arm64)\.tar\.gz$'
+	if [[ $# -lt 15 || "$1" != --silent || "$2" != --show-error || "$4" != --location || "$5" != --proto ||
+		"$6" != =https || "$7" != --proto-redir || "$8" != =https || "$9" != --retry || "${10}" != 3 ||
+		"${11}" != --max-time ]]; then
+		violation "unexpected download flags: $*"
+	fi
+	if [[ $# -eq 17 && "${12}" == 60 && "${13}" == --retry-max-time && "${14}" == 180 && "${15}" == --output ]]; then
+		max_time=60 out=${16} url=${17}
+	elif [[ $# -eq 15 && "${12}" == 120 && "${13}" == --output ]]; then
+		max_time=120 out=${14} url=${15}
+	else
+		violation "unexpected download flags: $*"
+	fi
+	[[ "$url" =~ $download_re ]] || violation "unexpected download URL: $url"
+	echo "$max_time $url" >>"$FAKE_DIR/curl.calls"
+	fixture=$(routed_fixture "$url")
+	case "$fixture" in
+	neterror)
+		echo "curl: (6) Could not resolve host: github.com" >&2
+		exit 6
+		;;
+	http404)
+		echo "curl: (22) The requested URL returned error: 404" >&2
+		exit 22
+		;;
+	esac
+	[[ -f "$FAKE_DIR/fixtures/$fixture.download" ]] || violation "missing download fixture $fixture"
+	cp "$FAKE_DIR/fixtures/$fixture.download" "$out"
+	exit 0
 fi
-if [[ $# -eq 17 && "${12}" == 60 && "${13}" == --retry-max-time && "${14}" == 180 && "${15}" == --output ]]; then
-	max_time=60 out=${16} url=${17}
-elif [[ $# -eq 15 && "${12}" == 120 && "${13}" == --output ]]; then
-	max_time=120 out=${14} url=${15}
-else
-	violation "unexpected download flags: $*"
+
+# --- registry requests -------------------------------------------------------------------------------------------
+
+ecr="${RELEASE_CHECK_ECR_URL:?}"
+
+if [[ $# -lt 11 || "$1" != --silent || "$2" != --show-error || "$3" != --max-time || "$5" != --dump-header ||
+	"$7" != --output || "$9" != --write-out || "${10}" != '%{http_code}' ]]; then
+	violation "unexpected leading flags: $*"
 fi
-[[ "$url" =~ $download_re ]] || violation "unexpected download URL: $url"
-echo "$max_time $url" >>"$FAKE_DIR/curl.calls"
-fixture=$(routed_fixture "$url")
-case "$fixture" in
-neterror)
-	echo "curl: (6) Could not resolve host: github.com" >&2
-	exit 6
+max_time=$4 headers_out=$6 body_out=$8
+shift 10
+if [[ ! "$max_time" =~ ^[0-9]+$ ]] || ((max_time < 5 || max_time > 15)); then
+	violation "--max-time $max_time is outside 5..15"
+fi
+
+head=0 auth="" accept_seen=""
+while [[ $# -gt 1 ]]; do
+	case "$1" in
+	--head) head=1 ;;
+	--header)
+		case "$2" in
+		"Authorization: "*)
+			[[ -z "$auth" ]] || violation "two Authorization headers"
+			auth=$2
+			;;
+		"Accept: "*)
+			[[ -z "$accept_seen" ]] || violation "two Accept headers"
+			accept_seen=$2
+			;;
+		*) violation "unexpected header: $2" ;;
+		esac
+		shift
+		;;
+	*) violation "unexpected argument: $1" ;;
+	esac
+	shift
+done
+[[ $# -eq 1 ]] || violation "no URL"
+url=$1
+
+case "$url" in
+"$ecr/token/?scope=repository:$repo_path:pull")
+	[[ $head == 0 && -z "$auth" && -z "$accept_seen" ]] || violation "token request with wrong flags"
 	;;
-http404)
-	echo "curl: (22) The requested URL returned error: 404" >&2
-	exit 22
+"$ecr/v2/$repo_path/manifests/"*)
+	[[ $head == 1 || "${FAKE_CURL_MANIFEST_GET:-}" == 1 ]] || violation "manifest request without --head"
+	[[ "$auth" == "Authorization: Bearer fake-token" ]] || violation "manifest request with auth '$auth'"
+	[[ "$accept_seen" == "Accept: $accept" ]] || violation "manifest request with '$accept_seen'"
 	;;
+"$ecr/v2/$repo_path/blobs/sha256:"*)
+	[[ "$url" =~ /blobs/sha256:[0-9a-f]{64}$ ]] || violation "unexpected blob URL: $url"
+	[[ $head == 0 && -z "$accept_seen" ]] || violation "blob request with wrong flags"
+	[[ "$auth" == "Authorization: Bearer fake-token" ]] || violation "blob request with auth '$auth'"
+	;;
+"$ecr/v2/$repo_path/tags/list?"*)
+	[[ $head == 0 && -z "$accept_seen" ]] || violation "tag list request with wrong flags"
+	[[ "$auth" == "Authorization: Bearer fake-token" ]] || violation "tag list request with auth '$auth'"
+	;;
+*) violation "unexpected URL: $url" ;;
 esac
-[[ -f "$FAKE_DIR/fixtures/$fixture.download" ]] || violation "missing download fixture $fixture"
-cp "$FAKE_DIR/fixtures/$fixture.download" "$out"
+
+echo "$max_time $url" >>"$FAKE_DIR/curl.calls"
+
+fixture=$(routed_fixture "$url")
+
+if [[ "$fixture" == neterror ]]; then
+	# Real curl empties the --dump-header file but leaves an existing --output file alone.
+	: >"$headers_out"
+	printf '000'
+	echo "curl: (6) Could not resolve host: fake.invalid" >&2
+	exit 6
+fi
+
+# A test's own fixtures (in $FAKE_DIR/fixtures) win over the shared ones.
+if [[ -f "$FAKE_DIR/fixtures/$fixture.headers" ]]; then
+	fixtures="$FAKE_DIR/fixtures"
+fi
+[[ -f "$fixtures/$fixture.headers" ]] || violation "missing fixture $fixture.headers"
+if [[ $head == 0 && "$url" == "$ecr/v2/$repo_path/manifests/"* ]]; then
+	# ECR Public sends docker-content-digest on a manifest HEAD only, not on a GET.
+	grep -iv '^docker-content-digest:' "$fixtures/$fixture.headers" >"$headers_out" || true
+else
+	cp "$fixtures/$fixture.headers" "$headers_out"
+fi
+if ((head == 1)); then
+	cp "$fixtures/$fixture.headers" "$body_out" # with --head, curl writes the headers to --output too
+elif [[ -f "$fixtures/$fixture.body" ]]; then
+	cp "$fixtures/$fixture.body" "$body_out"
+else
+	: >"$body_out"
+fi
+status=$(head -n 1 "$fixtures/$fixture.headers" | awk '{ print $2 }')
+printf '%s' "$status"

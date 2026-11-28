@@ -83,6 +83,49 @@ crane_fails() { echo "$1" >"$FAKE_DIR/crane-ls.exit"; }
 
 count_lines() { wc -l <"$1" | tr -d ' '; }
 
+# --- routes for the fake curl (registry requests) ----------------------------------------------------------------
+
+ECR=https://ecr.test
+REPO_PATH=aws-secrets-manager/secrets-store-csi-driver-provider-aws
+
+# Call after common_setup in tests whose script talks to a registry with curl (registry-lib.sh).
+registry_setup() {
+	mkdir -p "$FAKE_DIR/fixtures"
+	: >"$FAKE_DIR/routes"
+	: >"$FAKE_DIR/curl.calls"
+	export RELEASE_CHECK_ECR_URL=$ECR
+	local code
+	for code in 400 403 429 500 503; do
+		make_reply "status-$code" "$code"
+	done
+}
+
+token_url() { echo "$ECR/token/?scope=repository:$REPO_PATH:pull"; }
+manifest_url() { echo "$ECR/v2/$REPO_PATH/manifests/$1"; }
+tags_url() { echo "$ECR/v2/$REPO_PATH/tags/list?n=1000"; }
+
+# route <url> <fixture>[,<fixture>...]
+route() { echo "$1 $2" >>"$FAKE_DIR/routes"; }
+
+# The URL of the recorded page 2 (from the recorded page 1's link header).
+page2_url() {
+	local link
+	link=$(grep -i '^link:' "$FIXTURES/tags-page1.headers" | sed -E 's/^[^<]*<([^>]*)>.*$/\1/')
+	echo "$ECR$link"
+}
+
+# make_reply <name> <status> [body] : a reply with a plain header block, for cases a real server can't be made
+# to send on demand.
+make_reply() {
+	local name=$1 status=$2 body=${3:-}
+	printf 'HTTP/2 %s \r\ncontent-type: application/json; charset=utf-8\r\ndocker-distribution-api-version: registry/2.0\r\n\r\n' \
+		"$status" >"$FAKE_DIR/fixtures/$name.headers"
+	printf '%s' "$body" >"$FAKE_DIR/fixtures/$name.body"
+}
+
+# Number of fake curl calls to one URL.
+calls_to() { awk -v url="$1" '$2 == url' "$FAKE_DIR/curl.calls" | wc -l | tr -d ' '; }
+
 # --- assertions --------------------------------------------------------------------------------------------------
 
 expect_status() {
