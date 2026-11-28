@@ -13,12 +13,14 @@
 #                                               returns the fixture's body and no docker-content-digest header
 #   <ecr>/v2/<path>/blobs/sha256:<hex>          GET, exactly the anonymous bearer token, no Accept header
 #   <ecr>/v2/<path>/tags/list?...               GET, exactly the anonymous bearer token, no Accept header
-# The crane downloads (install-crane.sh, then publish-image.sh install-crane):
+# The crane and cosign downloads (install-crane.sh, then publish-image.sh install-crane and sign-image.sh
+# install-cosign):
 #   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 60
 #        --retry-max-time 180
 #        --output <f> https://github.com/google/go-containerregistry/releases/download/v<X.Y.Z>/go-containerregistry_Linux_<arch>.tar.gz
 #   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 120
 #        --output <f> <same URL>
+#        or https://github.com/sigstore/cosign/releases/download/v<X.Y.Z>/cosign-linux-<amd64|arm64>
 #
 # $FAKE_DIR/routes has one line per URL: "<url> <fixture>[,<fixture>...]". The Nth call to a URL replays the Nth
 # fixture (the last one repeats). A registry fixture is <name>.headers (status line first) plus an optional
@@ -57,7 +59,7 @@ routed_fixture() {
 # --- the crane download --------------------------------------------------------------------------------------------
 
 if [[ "${3:-}" == --fail ]]; then
-	download_re='^https://github\.com/google/go-containerregistry/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/go-containerregistry_Linux_(x86_64|arm64)\.tar\.gz$'
+	download_re='^https://github\.com/(google/go-containerregistry/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/go-containerregistry_Linux_(x86_64|arm64)\.tar\.gz|sigstore/cosign/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/cosign-linux-(amd64|arm64))$'
 	if [[ $# -lt 15 || "$1" != --silent || "$2" != --show-error || "$4" != --location || "$5" != --proto ||
 		"$6" != =https || "$7" != --proto-redir || "$8" != =https || "$9" != --retry || "${10}" != 3 ||
 		"${11}" != --max-time ]]; then

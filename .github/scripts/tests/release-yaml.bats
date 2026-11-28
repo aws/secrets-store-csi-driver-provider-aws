@@ -175,32 +175,50 @@ YAML
 }
 
 @test "publish-version-tags: the pre-check runs before the copy, and both after the credential checks" {
-	local block tags accounts crane creds pull noenv precheck copy cleanup
+	local block tags accounts crane cosign creds pull noenv precheck copy sign cleanup
 	block=$(job_block "$RELEASE" publish-version-tags)
 	tags=$(step_line "$block" "Work out the public tags")
 	accounts=$(step_line "$block" "Check the role ARNs")
 	crane=$(step_line "$block" "Install crane")
+	cosign=$(step_line "$block" "Install cosign")
 	creds=$(step_line "$block" "Get AWS credentials")
 	pull=$(step_line "$block" "Get the staging pull credentials")
 	noenv=$(step_line "$block" "Check no AWS keys reached the job environment")
 	precheck=$(step_line "$block" "Check the version tags are free")
 	copy=$(step_line "$block" "Copy the tested image to the version tags")
+	sign=$(step_line "$block" "Sign the tested image")
 	cleanup=$(step_line "$block" "Remove any registry logins left behind")
-	if ! ((tags < accounts && accounts < crane && crane < creds && creds < pull && pull < noenv &&
-		noenv < precheck && precheck < copy && copy < cleanup)); then
-		echo "order: tags $tags, accounts $accounts, crane $crane, creds $creds, pull $pull, no-env $noenv, precheck $precheck, copy $copy, cleanup $cleanup"
+	if ! ((tags < accounts && accounts < crane && crane < cosign && cosign < creds && creds < pull && pull < noenv &&
+		noenv < precheck && precheck < copy && copy < sign && sign < cleanup)); then
+		echo "order: tags $tags, accounts $accounts, crane $crane, cosign $cosign, creds $creds, pull $pull, no-env $noenv, precheck $precheck, copy $copy, sign $sign, cleanup $cleanup"
 		return 1
 	fi
-	# crane is installed before any AWS credentials exist, so that step gets none.
+	# crane and cosign are installed before any AWS credentials exist, so those steps get none.
 	step_block "$block" "Install crane" | grep -qxF '        run: bash .github/scripts/publish-image.sh install-crane'
 	expect_eq "$(count_matching "$(step_block "$block" "Install crane")" 'steps\.aws\.outputs|^        env:')" 0
+	step_block "$block" "Install cosign" | grep -qxF '        run: bash .github/scripts/sign-image.sh install-cosign'
+	expect_eq "$(count_matching "$(step_block "$block" "Install cosign")" 'steps\.aws\.outputs|^        env:')" 0
 	step_block "$block" "Check the version tags are free" |
 		grep -qxF '        run: bash .github/scripts/publish-image.sh precheck-version-tags'
 	step_block "$block" "Copy the tested image to the version tags" |
 		grep -qxF '        run: bash .github/scripts/publish-image.sh copy-version-tags'
-	# No other step writes to the public repo (comment lines aside).
+	step_block "$block" "Sign the tested image" | grep -qxF '        run: bash .github/scripts/sign-image.sh sign'
+	# No other step writes to the public repo (comment lines aside): the copy, and the signature next to it.
 	expect_eq "$(printf '%s\n' "$block" | grep -v '^ *#' |
-		grep -cE 'copy-version-tags|crane (copy|tag|push|mutate|append|delete)|docker (image )?push|ecr-public (put-image|batch-delete-image)' || true)" 1
+		grep -cE 'copy-version-tags|sign-image\.sh sign|cosign (sign|attest|attach|copy)|crane (copy|tag|push|mutate|append|delete)|docker (image )?push|ecr-public (put-image|batch-delete-image)' || true)" 2
+}
+
+@test "publish-version-tags: the sign step signs build's digest in vars.PUBLIC_REPO with the publish role's keys" {
+	local step
+	step=$(step_block "$(job_block "$RELEASE" publish-version-tags)" "Sign the tested image")
+	expect_eq "$(count_matching "$step" '^          DIGEST: \$\{\{ needs\.build\.outputs\.digest \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          PUBLIC_REPO: \$\{\{ vars\.PUBLIC_REPO \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          PRACTICE: \$\{\{ inputs\.practice \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          AWS_ACCESS_KEY_ID: \$\{\{ steps\.aws\.outputs\.aws-access-key-id \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          AWS_SECRET_ACCESS_KEY: \$\{\{ steps\.aws\.outputs\.aws-secret-access-key \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          AWS_SESSION_TOKEN: \$\{\{ steps\.aws\.outputs\.aws-session-token \}\}$')" 1
+	# Nothing else: GitHub sets GITHUB_WORKFLOW_REF and the id-token request variables itself.
+	expect_eq "$(count_matching "$step" '^          [A-Z_]+:')" 6
 }
 
 @test "publish-version-tags: the credentials step uses the publish role and keeps keys out of the job env" {
@@ -427,6 +445,27 @@ check_no_credential_path() {
 	expect_eq "$(count_matching "$step" '^          DIGEST: \$\{\{ needs\.build\.outputs\.digest \}\}$')" 1
 	expect_eq "$(count_matching "$step" '^          ALIAS_TAGS: \$\{\{ steps\.tags\.outputs\.aliasTags \}\}$')" 1
 	expect_eq "$(count_matching "$step" '^          PREVIOUS_DIGESTS: \$\{\{ needs\.publish-alias-tags\.outputs\.previousDigests \}\}$')" 1
+}
+
+@test "verify-alias-tags: then checks build's digest's signature anonymously, after installing cosign" {
+	local block aliases install check step
+	block=$(job_block "$RELEASE" verify-alias-tags)
+	aliases=$(step_line "$block" "Check the alias tags anonymously")
+	install=$(step_line "$block" "Install cosign")
+	check=$(step_line "$block" "Check the signature anonymously")
+	if ! ((aliases < install && install < check)); then
+		echo "order: aliases $aliases, install $install, check $check"
+		return 1
+	fi
+	step_block "$block" "Install cosign" | grep -qxF '        run: bash .github/scripts/sign-image.sh install-cosign'
+	step=$(step_block "$block" "Check the signature anonymously")
+	expect_eq "$(count_matching "$step" '^        run: bash \.github/scripts/sign-image\.sh verify$')" 1
+	expect_eq "$(count_matching "$step" '^          DIGEST: \$\{\{ needs\.build\.outputs\.digest \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          PUBLIC_REPO: \$\{\{ needs\.publish-version-tags\.outputs\.publicRepo \}\}$')" 1
+	expect_eq "$(count_matching "$step" '^          PRACTICE: \$\{\{ inputs\.practice \}\}$')" 1
+	expect_eq "$(count_matching "$step" "^          AWS_EC2_METADATA_DISABLED: 'true'$")" 1
+	# Nothing else: no credentials and no registry override.
+	expect_eq "$(count_matching "$step" '^          [A-Z0-9_]+:')" 4
 }
 
 # --- bump-manifest-pr ------------------------------------------------------------------------------------------------
