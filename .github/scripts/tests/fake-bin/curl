@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# Test fake for curl. Accepts only the crane download install-crane.sh makes:
+# Test fake for curl. Accepts only the crane downloads install-crane.sh and publish-image.sh install-crane make:
 #   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 60
 #        --retry-max-time 180
 #        --output <f> https://github.com/google/go-containerregistry/releases/download/v<X.Y.Z>/go-containerregistry_Linux_<x86_64|arm64>.tar.gz
+#   curl --silent --show-error --fail --location --proto =https --proto-redir =https --retry 3 --max-time 120
+#        --output <f> <same URL>
 #
 # $FAKE_DIR/routes has one line per URL: "<url> <fixture>[,<fixture>...]". The Nth call to a URL gets the Nth
 # fixture (the last one repeats). A fixture is $FAKE_DIR/fixtures/<name>.download (the file's bytes), "http404"
@@ -35,15 +37,20 @@ routed_fixture() {
 }
 
 download_re='^https://github\.com/google/go-containerregistry/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/go-containerregistry_Linux_(x86_64|arm64)\.tar\.gz$'
-if [[ $# -ne 17 || "$1" != --silent || "$2" != --show-error || "$3" != --fail || "$4" != --location ||
+if [[ $# -lt 15 || "$1" != --silent || "$2" != --show-error || "$3" != --fail || "$4" != --location ||
 	"$5" != --proto || "$6" != =https || "$7" != --proto-redir || "$8" != =https || "$9" != --retry ||
-	"${10}" != 3 || "${11}" != --max-time || "${12}" != 60 || "${13}" != --retry-max-time || "${14}" != 180 ||
-	"${15}" != --output ]]; then
+	"${10}" != 3 || "${11}" != --max-time ]]; then
 	violation "unexpected download flags: $*"
 fi
-out=${16} url=${17}
+if [[ $# -eq 17 && "${12}" == 60 && "${13}" == --retry-max-time && "${14}" == 180 && "${15}" == --output ]]; then
+	max_time=60 out=${16} url=${17}
+elif [[ $# -eq 15 && "${12}" == 120 && "${13}" == --output ]]; then
+	max_time=120 out=${14} url=${15}
+else
+	violation "unexpected download flags: $*"
+fi
 [[ "$url" =~ $download_re ]] || violation "unexpected download URL: $url"
-echo "60 $url" >>"$FAKE_DIR/curl.calls"
+echo "$max_time $url" >>"$FAKE_DIR/curl.calls"
 fixture=$(routed_fixture "$url")
 case "$fixture" in
 neterror)
